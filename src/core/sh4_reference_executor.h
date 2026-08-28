@@ -18,7 +18,7 @@ struct Sh4ReferenceState {
 
 struct Sh4ReferenceMemoryView {
     std::uint32_t base_address{};
-    std::span<const std::uint8_t> bytes{};
+    std::span<std::uint8_t> bytes{};
 };
 
 enum class Sh4ReferenceStopReason {
