@@ -1,15 +1,19 @@
 #pragma once
 #include "core/result.h"
+#include "core/revision.h"
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace jojo {
 
 enum class ConversionStage {
     validating_source,
     fingerprinting_source,
+    discovering_filesystem,
+    identifying_revision,
     preparing_installation,
     writing_manifest,
     completed
@@ -24,6 +28,10 @@ struct ConversionProgress {
 
 using ConversionProgressCallback = std::function<void(const ConversionProgress&)>;
 
+struct ConversionOptions {
+    std::vector<GameRevisionProfile> revision_profiles;
+};
+
 struct ConversionManifest {
     std::string manifest_version{"1"};
     std::string converter_version;
@@ -31,9 +39,15 @@ struct ConversionManifest {
     std::string source_format;
     std::uint64_t source_size{};
     std::string hash_hex;
+    std::string revision_id;
     std::string backend{"pending-game-specific-recompiler"};
 };
 
+[[nodiscard]] Result<ConversionManifest> convert_image(
+    const std::filesystem::path& source,
+    const std::filesystem::path& install_dir,
+    const ConversionOptions& options,
+    const ConversionProgressCallback& on_progress = {});
 [[nodiscard]] Result<ConversionManifest> convert_image(
     const std::filesystem::path& source,
     const std::filesystem::path& install_dir,

@@ -72,6 +72,7 @@ Result<void> save_conversion_manifest_atomic(const std::filesystem::path& path,
         out << "source_format=" << m.source_format << '\n';
         out << "source_size=" << m.source_size << '\n';
         out << "hash_fnv1a64=" << m.hash_hex << '\n';
+        out << "revision_id=" << m.revision_id << '\n';
         out << "backend=" << m.backend << '\n';
         out.flush();
         if (!out) {
@@ -106,6 +107,7 @@ Result<ConversionManifest> load_conversion_manifest(const std::filesystem::path&
             if (!parsed) return Result<ConversionManifest>::failure(parsed.error, parsed.detail);
             m.source_size = parsed.value;
         } else if (key == "hash_fnv1a64") m.hash_hex = value;
+        else if (key == "revision_id") m.revision_id = value;
         else if (key == "backend") m.backend = value;
     }
     if (m.manifest_version != "1" || m.converter_version.empty() || m.source_name.empty() ||
@@ -118,6 +120,7 @@ Result<ConversionManifest> load_conversion_manifest(const std::filesystem::path&
 
 Result<ConversionManifest> convert_image(const std::filesystem::path& source,
                                          const std::filesystem::path& install_dir,
+                                         const ConversionOptions& options,
                                          const ConversionProgressCallback& on_progress) {
     const auto report = [&](ConversionStage stage, int percent,
                             std::string message_key, std::string detail) {
@@ -142,7 +145,26 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
     auto fp = fingerprint_disc_image(source);
     if (!fp) return Result<ConversionManifest>::failure(fp.error, fp.detail);
 
-    report(ConversionStage::preparing_installation, 55, "prepare_installation",
+    report(ConversionStage::discovering_filesystem, 30, "discover_filesystem",
+           "Lendo o sistema de arquivos da mídia em modo somente leitura.");
+    if (fp.value.format != "iso") {
+        return Result<ConversionManifest>::failure(
+            ErrorCode::unsupported_format,
+            "disc filesystem adapter is not implemented yet for format: " + fp.value.format);
+    }
+    auto filesystem = open_iso9660(source);
+    if (!filesystem) {
+        return Result<ConversionManifest>::failure(filesystem.error, filesystem.detail);
+    }
+
+    report(ConversionStage::identifying_revision, 45, "identify_revision",
+           "Identificando a revisão exata do jogo.");
+    auto revision = identify_game_revision(filesystem.value, options.revision_profiles);
+    if (!revision) {
+        return Result<ConversionManifest>::failure(revision.error, revision.detail);
+    }
+
+    report(ConversionStage::preparing_installation, 65, "prepare_installation",
            "Preparando os diretórios da instalação convertida.");
     std::error_code ec;
     std::filesystem::create_directories(install_dir / "data", ec);
@@ -158,8 +180,9 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
     manifest.source_format = fp.value.format;
     manifest.source_size = fp.value.size_bytes;
     manifest.hash_hex = fp.value.hash_hex;
+    manifest.revision_id = revision.value.revision_id;
 
-    report(ConversionStage::writing_manifest, 85, "write_manifest",
+    report(ConversionStage::writing_manifest, 90, "write_manifest",
            "Gravando os metadados da instalação.");
     auto saved = save_conversion_manifest_atomic(install_dir / "game_manifest.ini", manifest);
     if (!saved) return Result<ConversionManifest>::failure(saved.error, saved.detail);
@@ -167,6 +190,12 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
     report(ConversionStage::completed, 100, "conversion_complete",
            "Preparação base concluída; o backend específico do jogo ainda será adicionado.");
     return Result<ConversionManifest>::success(std::move(manifest));
+}
+
+Result<ConversionManifest> convert_image(const std::filesystem::path& source,
+                                         const std::filesystem::path& install_dir,
+                                         const ConversionProgressCallback& on_progress) {
+    return convert_image(source, install_dir, ConversionOptions{}, on_progress);
 }
 
 }
