@@ -15,12 +15,59 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
 
     switch (input.op) {
         case Sh4Op::nop: out.op = Sh4IrOp::nop; break;
+        case Sh4Op::clrt: out.op = Sh4IrOp::clear_t; break;
+        case Sh4Op::sett: out.op = Sh4IrOp::set_t; break;
+        case Sh4Op::movt: out.op = Sh4IrOp::move_t; break;
         case Sh4Op::mov_imm: out.op = Sh4IrOp::set_imm; break;
         case Sh4Op::add_imm: out.op = Sh4IrOp::add_imm; break;
         case Sh4Op::mov_reg: out.op = Sh4IrOp::copy_reg; break;
         case Sh4Op::add_reg: out.op = Sh4IrOp::add_reg; break;
         case Sh4Op::sub_reg: out.op = Sh4IrOp::sub_reg; break;
         case Sh4Op::cmp_eq_reg: out.op = Sh4IrOp::compare_eq; break;
+        case Sh4Op::cmp_eq_imm: out.op = Sh4IrOp::compare_eq_imm; break;
+        case Sh4Op::cmp_hs_reg: out.op = Sh4IrOp::compare_unsigned_ge; break;
+        case Sh4Op::cmp_ge_reg: out.op = Sh4IrOp::compare_signed_ge; break;
+        case Sh4Op::cmp_hi_reg: out.op = Sh4IrOp::compare_unsigned_gt; break;
+        case Sh4Op::cmp_gt_reg: out.op = Sh4IrOp::compare_signed_gt; break;
+        case Sh4Op::cmp_pz: out.op = Sh4IrOp::compare_pz; break;
+        case Sh4Op::cmp_pl: out.op = Sh4IrOp::compare_pl; break;
+        case Sh4Op::tst_reg: out.op = Sh4IrOp::test_bits_reg; break;
+        case Sh4Op::and_reg: out.op = Sh4IrOp::bit_and_reg; break;
+        case Sh4Op::xor_reg: out.op = Sh4IrOp::bit_xor_reg; break;
+        case Sh4Op::or_reg: out.op = Sh4IrOp::bit_or_reg; break;
+        case Sh4Op::tst_imm: out.op = Sh4IrOp::test_bits_imm; break;
+        case Sh4Op::and_imm: out.op = Sh4IrOp::bit_and_imm; break;
+        case Sh4Op::xor_imm: out.op = Sh4IrOp::bit_xor_imm; break;
+        case Sh4Op::or_imm: out.op = Sh4IrOp::bit_or_imm; break;
+        case Sh4Op::not_reg: out.op = Sh4IrOp::bit_not; break;
+        case Sh4Op::neg_reg: out.op = Sh4IrOp::negate; break;
+        case Sh4Op::shll: out.op = Sh4IrOp::shift_left_one; break;
+        case Sh4Op::shlr: out.op = Sh4IrOp::shift_right_logical_one; break;
+        case Sh4Op::shar: out.op = Sh4IrOp::shift_right_arithmetic_one; break;
+        case Sh4Op::shll2:
+            out.op = Sh4IrOp::shift_left_const;
+            out.imm = 2;
+            break;
+        case Sh4Op::shlr2:
+            out.op = Sh4IrOp::shift_right_logical_const;
+            out.imm = 2;
+            break;
+        case Sh4Op::shll8:
+            out.op = Sh4IrOp::shift_left_const;
+            out.imm = 8;
+            break;
+        case Sh4Op::shlr8:
+            out.op = Sh4IrOp::shift_right_logical_const;
+            out.imm = 8;
+            break;
+        case Sh4Op::shll16:
+            out.op = Sh4IrOp::shift_left_const;
+            out.imm = 16;
+            break;
+        case Sh4Op::shlr16:
+            out.op = Sh4IrOp::shift_right_logical_const;
+            out.imm = 16;
+            break;
         case Sh4Op::bra:
             out.op = Sh4IrOp::branch_direct;
             if (const auto target = sh4_direct_target(input)) out.target = *target;
