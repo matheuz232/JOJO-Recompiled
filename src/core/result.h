@@ -11,7 +11,8 @@ enum class ErrorCode {
     io_error,
     invalid_settings,
     invalid_installation,
-    backend_unavailable
+    backend_unavailable,
+    unknown_revision
 };
 
 template <typename T>
