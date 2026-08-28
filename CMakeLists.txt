@@ -21,6 +21,7 @@ add_library(jojo_core STATIC
   src/core/disc_media.cpp
   src/core/iso9660.cpp
   src/core/dreamcast_boot.cpp
+  src/core/dreamcast_analysis.cpp
   src/core/sh4_decoder.cpp
   src/core/sh4_cfg.cpp
   src/core/revision.cpp
@@ -69,3 +70,7 @@ add_test(NAME jojo_sh4_tests COMMAND jojo_sh4_tests)
 add_executable(jojo_sh4_cfg_tests tests/test_sh4_cfg.cpp)
 target_link_libraries(jojo_sh4_cfg_tests PRIVATE jojo_core)
 add_test(NAME jojo_sh4_cfg_tests COMMAND jojo_sh4_cfg_tests)
+
+add_executable(jojo_analysis_tests tests/test_dreamcast_analysis.cpp)
+target_link_libraries(jojo_analysis_tests PRIVATE jojo_core)
+add_test(NAME jojo_analysis_tests COMMAND jojo_analysis_tests)
