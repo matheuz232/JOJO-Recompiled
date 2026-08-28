@@ -89,6 +89,40 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         return i;
     }
 
+    if ((raw & 0xF00Fu) == 0x2000u || (raw & 0xF00Fu) == 0x2001u ||
+        (raw & 0xF00Fu) == 0x2002u || (raw & 0xF00Fu) == 0x2004u ||
+        (raw & 0xF00Fu) == 0x2005u || (raw & 0xF00Fu) == 0x2006u) {
+        i.rn = n_field(raw);
+        i.rm = m_field(raw);
+        switch (raw & 0x000Fu) {
+            case 0x0u: i.op = Sh4Op::movb_store; break;
+            case 0x1u: i.op = Sh4Op::movw_store; break;
+            case 0x2u: i.op = Sh4Op::movl_store; break;
+            case 0x4u: i.op = Sh4Op::movb_store_predec; break;
+            case 0x5u: i.op = Sh4Op::movw_store_predec; break;
+            case 0x6u: i.op = Sh4Op::movl_store_predec; break;
+            default: break;
+        }
+        return i;
+    }
+
+    if ((raw & 0xF00Fu) == 0x6000u || (raw & 0xF00Fu) == 0x6001u ||
+        (raw & 0xF00Fu) == 0x6002u || (raw & 0xF00Fu) == 0x6004u ||
+        (raw & 0xF00Fu) == 0x6005u || (raw & 0xF00Fu) == 0x6006u) {
+        i.rn = n_field(raw);
+        i.rm = m_field(raw);
+        switch (raw & 0x000Fu) {
+            case 0x0u: i.op = Sh4Op::movb_load; break;
+            case 0x1u: i.op = Sh4Op::movw_load; break;
+            case 0x2u: i.op = Sh4Op::movl_load; break;
+            case 0x4u: i.op = Sh4Op::movb_load_postinc; break;
+            case 0x5u: i.op = Sh4Op::movw_load_postinc; break;
+            case 0x6u: i.op = Sh4Op::movl_load_postinc; break;
+            default: break;
+        }
+        return i;
+    }
+
     if ((raw & 0xF000u) == 0xA000u) {
         i.op = Sh4Op::bra;
         i.displacement = sign_extend12(raw) * 2;
