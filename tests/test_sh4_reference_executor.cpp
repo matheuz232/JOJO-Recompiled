@@ -24,6 +24,18 @@ static jojo::Sh4IrInstruction op(jojo::Sh4IrOp kind,
     return out;
 }
 
+static jojo::Sh4IrInstruction memop(jojo::Sh4IrOp kind,
+                                    std::uint32_t address,
+                                    std::uint8_t dst,
+                                    std::uint8_t src,
+                                    jojo::Sh4IrMemoryWidth width,
+                                    jojo::Sh4IrAddressing addressing) {
+    auto out = op(kind, address, dst, src);
+    out.memory_width = width;
+    out.addressing = addressing;
+    return out;
+}
+
 static jojo::Sh4IrProgram one_block(std::uint32_t address,
                                     std::vector<jojo::Sh4IrInstruction> ops,
                                     jojo::Sh4IrExit exit = jojo::Sh4IrExit::end_of_stream) {
@@ -56,6 +68,53 @@ static void test_integer_state_and_compare() {
     CHECK(run.value.stop_reason == jojo::Sh4ReferenceStopReason::end_of_stream);
     CHECK(run.value.blocks_executed == 1u);
     CHECK(run.value.operations_executed == 4u);
+}
+
+static void test_data_memory_load_store_and_address_updates() {
+    std::vector<std::uint8_t> bytes(16, 0);
+    auto program = one_block(0x1400, {
+        memop(jojo::Sh4IrOp::store_memory, 0x1400, 1, 2,
+              jojo::Sh4IrMemoryWidth::byte, jojo::Sh4IrAddressing::indirect),
+        memop(jojo::Sh4IrOp::load_memory, 0x1402, 3, 1,
+              jojo::Sh4IrMemoryWidth::byte, jojo::Sh4IrAddressing::indirect),
+        memop(jojo::Sh4IrOp::store_memory, 0x1404, 4, 5,
+              jojo::Sh4IrMemoryWidth::word, jojo::Sh4IrAddressing::pre_decrement),
+        memop(jojo::Sh4IrOp::load_memory, 0x1406, 6, 4,
+              jojo::Sh4IrMemoryWidth::word, jojo::Sh4IrAddressing::post_increment),
+        memop(jojo::Sh4IrOp::store_memory, 0x1408, 7, 8,
+              jojo::Sh4IrMemoryWidth::long_word, jojo::Sh4IrAddressing::indirect),
+        memop(jojo::Sh4IrOp::load_memory, 0x140A, 9, 7,
+              jojo::Sh4IrMemoryWidth::long_word, jojo::Sh4IrAddressing::indirect),
+    });
+
+    jojo::Sh4ReferenceState state{};
+    state.r[1] = 0x7001;
+    state.r[2] = 0x12345680;
+    state.r[4] = 0x7008;
+    state.r[5] = 0xA1B2;
+    state.r[7] = 0x7008;
+    state.r[8] = 0x89ABCDEF;
+    jojo::Sh4ReferenceMemoryView memory{0x7000, bytes};
+
+    const auto run = jojo::execute_sh4_ir_reference(program, state, memory, 8);
+    CHECK(run);
+    if (!run) return;
+
+    CHECK(bytes[1] == 0x80u);
+    CHECK(state.r[3] == 0xFFFFFF80u);
+
+    CHECK(state.r[4] == 0x7008u);
+    CHECK(bytes[6] == 0xB2u && bytes[7] == 0xA1u);
+    CHECK(state.r[6] == 0xFFFFA1B2u);
+
+    CHECK(bytes[8] == 0xEFu && bytes[9] == 0xCDu && bytes[10] == 0xABu && bytes[11] == 0x89u);
+    CHECK(state.r[9] == 0x89ABCDEFu);
+
+    program.blocks[0].ops[1].src_reg = 10;
+    state.r[10] = 0x8000;
+    const auto bad = jojo::execute_sh4_ir_reference(program, state, memory, 8);
+    CHECK(!bad);
+    if (!bad) CHECK(bad.error == jojo::ErrorCode::invalid_argument);
 }
 
 static void test_delayed_conditional_branch_latches_decision() {
@@ -182,6 +241,7 @@ static void test_loop_guard_is_deterministic() {
 
 int main() {
     test_integer_state_and_compare();
+    test_data_memory_load_store_and_address_updates();
     test_delayed_conditional_branch_latches_decision();
     test_direct_call_sets_pr_and_executes_delay_slot();
     test_indirect_call_latches_register_before_delay_slot();
