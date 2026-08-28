@@ -1,5 +1,6 @@
 #include "core/sh4_reference_executor.h"
 
+#include <bit>
 #include <optional>
 
 namespace jojo {
@@ -11,6 +12,10 @@ Result<void> require_register(std::uint8_t reg) {
                                      "SH-4 IR register index is out of range");
     }
     return Result<void>::success();
+}
+
+std::int32_t as_signed(std::uint32_t value) noexcept {
+    return std::bit_cast<std::int32_t>(value);
 }
 
 Result<std::uint16_t> read_u16(Sh4ReferenceMemoryView memory,
@@ -60,6 +65,21 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
         case Sh4IrOp::nop:
             return Result<void>::success();
 
+        case Sh4IrOp::clear_t:
+            state.t = false;
+            return Result<void>::success();
+
+        case Sh4IrOp::set_t:
+            state.t = true;
+            return Result<void>::success();
+
+        case Sh4IrOp::move_t: {
+            auto reg = require_register(instruction.dst_reg);
+            if (!reg) return reg;
+            state.r[instruction.dst_reg] = state.t ? 1u : 0u;
+            return Result<void>::success();
+        }
+
         case Sh4IrOp::set_imm: {
             auto reg = require_register(instruction.dst_reg);
             if (!reg) return reg;
@@ -107,6 +127,128 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             auto rhs = require_register(instruction.src_reg);
             if (!rhs) return rhs;
             state.t = state.r[instruction.dst_reg] == state.r[instruction.src_reg];
+            return Result<void>::success();
+        }
+
+        case Sh4IrOp::compare_eq_imm: {
+            auto reg = require_register(instruction.dst_reg);
+            if (!reg) return reg;
+            state.t = state.r[instruction.dst_reg] == static_cast<std::uint32_t>(instruction.imm);
+            return Result<void>::success();
+        }
+
+        case Sh4IrOp::compare_unsigned_ge:
+        case Sh4IrOp::compare_signed_ge:
+        case Sh4IrOp::compare_unsigned_gt:
+        case Sh4IrOp::compare_signed_gt: {
+            auto lhs = require_register(instruction.dst_reg);
+            if (!lhs) return lhs;
+            auto rhs = require_register(instruction.src_reg);
+            if (!rhs) return rhs;
+            const auto left = state.r[instruction.dst_reg];
+            const auto right = state.r[instruction.src_reg];
+            if (instruction.op == Sh4IrOp::compare_unsigned_ge) state.t = left >= right;
+            if (instruction.op == Sh4IrOp::compare_signed_ge) state.t = as_signed(left) >= as_signed(right);
+            if (instruction.op == Sh4IrOp::compare_unsigned_gt) state.t = left > right;
+            if (instruction.op == Sh4IrOp::compare_signed_gt) state.t = as_signed(left) > as_signed(right);
+            return Result<void>::success();
+        }
+
+        case Sh4IrOp::compare_pz:
+        case Sh4IrOp::compare_pl: {
+            auto reg = require_register(instruction.dst_reg);
+            if (!reg) return reg;
+            const auto value = as_signed(state.r[instruction.dst_reg]);
+            state.t = instruction.op == Sh4IrOp::compare_pz ? value >= 0 : value > 0;
+            return Result<void>::success();
+        }
+
+        case Sh4IrOp::test_bits_reg:
+        case Sh4IrOp::bit_and_reg:
+        case Sh4IrOp::bit_xor_reg:
+        case Sh4IrOp::bit_or_reg: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            if (instruction.op == Sh4IrOp::test_bits_reg) {
+                state.t = (state.r[instruction.dst_reg] & state.r[instruction.src_reg]) == 0u;
+            } else if (instruction.op == Sh4IrOp::bit_and_reg) {
+                state.r[instruction.dst_reg] &= state.r[instruction.src_reg];
+            } else if (instruction.op == Sh4IrOp::bit_xor_reg) {
+                state.r[instruction.dst_reg] ^= state.r[instruction.src_reg];
+            } else {
+                state.r[instruction.dst_reg] |= state.r[instruction.src_reg];
+            }
+            return Result<void>::success();
+        }
+
+        case Sh4IrOp::test_bits_imm:
+        case Sh4IrOp::bit_and_imm:
+        case Sh4IrOp::bit_xor_imm:
+        case Sh4IrOp::bit_or_imm: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            const auto value = static_cast<std::uint32_t>(instruction.imm);
+            if (instruction.op == Sh4IrOp::test_bits_imm) {
+                state.t = (state.r[instruction.dst_reg] & value) == 0u;
+            } else if (instruction.op == Sh4IrOp::bit_and_imm) {
+                state.r[instruction.dst_reg] &= value;
+            } else if (instruction.op == Sh4IrOp::bit_xor_imm) {
+                state.r[instruction.dst_reg] ^= value;
+            } else {
+                state.r[instruction.dst_reg] |= value;
+            }
+            return Result<void>::success();
+        }
+
+        case Sh4IrOp::bit_not:
+        case Sh4IrOp::negate: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            if (instruction.op == Sh4IrOp::bit_not) {
+                state.r[instruction.dst_reg] = ~state.r[instruction.src_reg];
+            } else {
+                state.r[instruction.dst_reg] = 0u - state.r[instruction.src_reg];
+            }
+            return Result<void>::success();
+        }
+
+        case Sh4IrOp::shift_left_one:
+        case Sh4IrOp::shift_right_logical_one:
+        case Sh4IrOp::shift_right_arithmetic_one: {
+            auto reg = require_register(instruction.dst_reg);
+            if (!reg) return reg;
+            const auto value = state.r[instruction.dst_reg];
+            if (instruction.op == Sh4IrOp::shift_left_one) {
+                state.t = (value & 0x80000000u) != 0u;
+                state.r[instruction.dst_reg] = value << 1u;
+            } else if (instruction.op == Sh4IrOp::shift_right_logical_one) {
+                state.t = (value & 1u) != 0u;
+                state.r[instruction.dst_reg] = value >> 1u;
+            } else {
+                state.t = (value & 1u) != 0u;
+                state.r[instruction.dst_reg] = (value >> 1u) | (value & 0x80000000u);
+            }
+            return Result<void>::success();
+        }
+
+        case Sh4IrOp::shift_left_const:
+        case Sh4IrOp::shift_right_logical_const: {
+            auto reg = require_register(instruction.dst_reg);
+            if (!reg) return reg;
+            if (instruction.imm != 2 && instruction.imm != 8 && instruction.imm != 16) {
+                return Result<void>::failure(ErrorCode::invalid_argument,
+                                             "SH-4 constant shift count is unsupported");
+            }
+            const auto count = static_cast<unsigned>(instruction.imm);
+            if (instruction.op == Sh4IrOp::shift_left_const) {
+                state.r[instruction.dst_reg] <<= count;
+            } else {
+                state.r[instruction.dst_reg] >>= count;
+            }
             return Result<void>::success();
         }
 
