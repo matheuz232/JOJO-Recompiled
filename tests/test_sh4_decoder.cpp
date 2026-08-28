@@ -41,6 +41,41 @@ static void test_fixed_and_integer_instructions() {
     CHECK(i.op == Sh4Op::cmp_eq_reg);
 }
 
+static void test_data_memory_instructions() {
+    auto i = jojo::decode_sh4(0x2120, 0x1100); // MOV.B R2,@R1
+    CHECK(i.op == Sh4Op::movb_store);
+    CHECK(i.rn == 1);
+    CHECK(i.rm == 2);
+
+    i = jojo::decode_sh4(0x2121, 0x1102); // MOV.W R2,@R1
+    CHECK(i.op == Sh4Op::movw_store);
+    i = jojo::decode_sh4(0x2122, 0x1104); // MOV.L R2,@R1
+    CHECK(i.op == Sh4Op::movl_store);
+
+    i = jojo::decode_sh4(0x6120, 0x1106); // MOV.B @R2,R1
+    CHECK(i.op == Sh4Op::movb_load);
+    CHECK(i.rn == 1);
+    CHECK(i.rm == 2);
+    i = jojo::decode_sh4(0x6121, 0x1108); // MOV.W @R2,R1
+    CHECK(i.op == Sh4Op::movw_load);
+    i = jojo::decode_sh4(0x6122, 0x110A); // MOV.L @R2,R1
+    CHECK(i.op == Sh4Op::movl_load);
+
+    i = jojo::decode_sh4(0x2124, 0x110C); // MOV.B R2,@-R1
+    CHECK(i.op == Sh4Op::movb_store_predec);
+    i = jojo::decode_sh4(0x2125, 0x110E); // MOV.W R2,@-R1
+    CHECK(i.op == Sh4Op::movw_store_predec);
+    i = jojo::decode_sh4(0x2126, 0x1110); // MOV.L R2,@-R1
+    CHECK(i.op == Sh4Op::movl_store_predec);
+
+    i = jojo::decode_sh4(0x6124, 0x1112); // MOV.B @R2+,R1
+    CHECK(i.op == Sh4Op::movb_load_postinc);
+    i = jojo::decode_sh4(0x6125, 0x1114); // MOV.W @R2+,R1
+    CHECK(i.op == Sh4Op::movw_load_postinc);
+    i = jojo::decode_sh4(0x6126, 0x1116); // MOV.L @R2+,R1
+    CHECK(i.op == Sh4Op::movl_load_postinc);
+}
+
 static void test_control_flow() {
     auto i = jojo::decode_sh4(0xA001, 0x1000); // BRA +2 bytes from PC+4
     CHECK(i.op == Sh4Op::bra);
@@ -125,6 +160,7 @@ static void test_stream_and_unsupported() {
 
 int main() {
     test_fixed_and_integer_instructions();
+    test_data_memory_instructions();
     test_control_flow();
     test_pc_relative_literals();
     test_stream_and_unsupported();
