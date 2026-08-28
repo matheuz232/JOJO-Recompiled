@@ -7,6 +7,18 @@
 
 namespace jojo {
 
+enum class Sh4IrMemoryWidth {
+    byte,
+    word,
+    long_word,
+};
+
+enum class Sh4IrAddressing {
+    indirect,
+    pre_decrement,
+    post_increment,
+};
+
 enum class Sh4IrOp {
     nop,
     set_imm,
@@ -15,6 +27,8 @@ enum class Sh4IrOp {
     add_reg,
     sub_reg,
     compare_eq,
+    load_memory,
+    store_memory,
     branch_direct,
     branch_if_t,
     branch_if_not_t,
@@ -47,6 +61,8 @@ struct Sh4IrInstruction {
     std::uint8_t src_reg{0xFF};
     std::int32_t imm{};
     std::uint32_t target{};
+    Sh4IrMemoryWidth memory_width{Sh4IrMemoryWidth::byte};
+    Sh4IrAddressing addressing{Sh4IrAddressing::indirect};
     bool in_delay_slot{};
 };
 
