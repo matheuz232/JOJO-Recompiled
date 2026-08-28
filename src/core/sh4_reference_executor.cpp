@@ -13,38 +13,90 @@ Result<void> require_register(std::uint8_t reg) {
     return Result<void>::success();
 }
 
-Result<std::uint16_t> read_u16(Sh4ReferenceMemoryView memory,
-                               std::uint32_t address) {
+Result<std::size_t> memory_offset(Sh4ReferenceMemoryView memory,
+                                  std::uint32_t address,
+                                  std::size_t width) {
     if (address < memory.base_address) {
-        return Result<std::uint16_t>::failure(ErrorCode::invalid_argument,
-                                              "reference memory read is below the mapped range");
+        return Result<std::size_t>::failure(ErrorCode::invalid_argument,
+                                            "reference memory access is below the mapped range");
     }
     const auto offset = static_cast<std::size_t>(address - memory.base_address);
-    if (offset > memory.bytes.size() || memory.bytes.size() - offset < 2) {
-        return Result<std::uint16_t>::failure(ErrorCode::invalid_argument,
-                                              "reference memory word read is outside the mapped range");
+    if (offset > memory.bytes.size() || memory.bytes.size() - offset < width) {
+        return Result<std::size_t>::failure(ErrorCode::invalid_argument,
+                                            "reference memory access is outside the mapped range");
     }
-    const auto value = static_cast<std::uint16_t>(memory.bytes[offset]) |
-                       static_cast<std::uint16_t>(memory.bytes[offset + 1]) << 8u;
+    return Result<std::size_t>::success(offset);
+}
+
+Result<std::uint16_t> read_u16(Sh4ReferenceMemoryView memory,
+                               std::uint32_t address) {
+    auto offset = memory_offset(memory, address, 2);
+    if (!offset) return Result<std::uint16_t>::failure(offset.error, offset.detail);
+    const auto value = static_cast<std::uint16_t>(memory.bytes[offset.value]) |
+                       static_cast<std::uint16_t>(memory.bytes[offset.value + 1]) << 8u;
     return Result<std::uint16_t>::success(value);
 }
 
 Result<std::uint32_t> read_u32(Sh4ReferenceMemoryView memory,
                                std::uint32_t address) {
-    if (address < memory.base_address) {
-        return Result<std::uint32_t>::failure(ErrorCode::invalid_argument,
-                                              "reference memory read is below the mapped range");
-    }
-    const auto offset = static_cast<std::size_t>(address - memory.base_address);
-    if (offset > memory.bytes.size() || memory.bytes.size() - offset < 4) {
-        return Result<std::uint32_t>::failure(ErrorCode::invalid_argument,
-                                              "reference memory long read is outside the mapped range");
-    }
-    const auto value = static_cast<std::uint32_t>(memory.bytes[offset]) |
-                       static_cast<std::uint32_t>(memory.bytes[offset + 1]) << 8u |
-                       static_cast<std::uint32_t>(memory.bytes[offset + 2]) << 16u |
-                       static_cast<std::uint32_t>(memory.bytes[offset + 3]) << 24u;
+    auto offset = memory_offset(memory, address, 4);
+    if (!offset) return Result<std::uint32_t>::failure(offset.error, offset.detail);
+    const auto value = static_cast<std::uint32_t>(memory.bytes[offset.value]) |
+                       static_cast<std::uint32_t>(memory.bytes[offset.value + 1]) << 8u |
+                       static_cast<std::uint32_t>(memory.bytes[offset.value + 2]) << 16u |
+                       static_cast<std::uint32_t>(memory.bytes[offset.value + 3]) << 24u;
     return Result<std::uint32_t>::success(value);
+}
+
+std::size_t memory_width_bytes(Sh4IrMemoryWidth width) {
+    switch (width) {
+        case Sh4IrMemoryWidth::byte: return 1;
+        case Sh4IrMemoryWidth::word: return 2;
+        case Sh4IrMemoryWidth::long_word: return 4;
+    }
+    return 0;
+}
+
+Result<std::uint32_t> read_data(Sh4ReferenceMemoryView memory,
+                                std::uint32_t address,
+                                Sh4IrMemoryWidth width) {
+    switch (width) {
+        case Sh4IrMemoryWidth::byte: {
+            auto offset = memory_offset(memory, address, 1);
+            if (!offset) return Result<std::uint32_t>::failure(offset.error, offset.detail);
+            const auto signed_value = static_cast<std::int8_t>(memory.bytes[offset.value]);
+            return Result<std::uint32_t>::success(static_cast<std::uint32_t>(
+                static_cast<std::int32_t>(signed_value)));
+        }
+        case Sh4IrMemoryWidth::word: {
+            auto value = read_u16(memory, address);
+            if (!value) return Result<std::uint32_t>::failure(value.error, value.detail);
+            const auto signed_value = static_cast<std::int16_t>(value.value);
+            return Result<std::uint32_t>::success(static_cast<std::uint32_t>(
+                static_cast<std::int32_t>(signed_value)));
+        }
+        case Sh4IrMemoryWidth::long_word:
+            return read_u32(memory, address);
+    }
+    return Result<std::uint32_t>::failure(ErrorCode::invalid_argument,
+                                          "invalid SH-4 IR memory width");
+}
+
+Result<void> write_data(Sh4ReferenceMemoryView memory,
+                        std::uint32_t address,
+                        Sh4IrMemoryWidth width,
+                        std::uint32_t value) {
+    const auto count = memory_width_bytes(width);
+    if (count == 0) {
+        return Result<void>::failure(ErrorCode::invalid_argument,
+                                     "invalid SH-4 IR memory width");
+    }
+    auto offset = memory_offset(memory, address, count);
+    if (!offset) return Result<void>::failure(offset.error, offset.detail);
+    for (std::size_t index = 0; index < count; ++index) {
+        memory.bytes[offset.value + index] = static_cast<std::uint8_t>(value >> (index * 8u));
+    }
+    return Result<void>::success();
 }
 
 struct PendingTransfer {
@@ -108,6 +160,43 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             if (!rhs) return rhs;
             state.t = state.r[instruction.dst_reg] == state.r[instruction.src_reg];
             return Result<void>::success();
+        }
+
+        case Sh4IrOp::load_memory: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            if (instruction.addressing == Sh4IrAddressing::pre_decrement) {
+                return Result<void>::failure(ErrorCode::invalid_argument,
+                                             "pre-decrement load is not a supported SH-4 addressing mode");
+            }
+            const auto address = state.r[instruction.src_reg];
+            auto value = read_data(memory, address, instruction.memory_width);
+            if (!value) return Result<void>::failure(value.error, value.detail);
+            state.r[instruction.dst_reg] = value.value;
+            if (instruction.addressing == Sh4IrAddressing::post_increment &&
+                instruction.src_reg != instruction.dst_reg) {
+                state.r[instruction.src_reg] += static_cast<std::uint32_t>(memory_width_bytes(instruction.memory_width));
+            }
+            return Result<void>::success();
+        }
+
+        case Sh4IrOp::store_memory: {
+            auto address_reg = require_register(instruction.dst_reg);
+            if (!address_reg) return address_reg;
+            auto value_reg = require_register(instruction.src_reg);
+            if (!value_reg) return value_reg;
+            if (instruction.addressing == Sh4IrAddressing::post_increment) {
+                return Result<void>::failure(ErrorCode::invalid_argument,
+                                             "post-increment store is not a supported SH-4 addressing mode");
+            }
+            if (instruction.addressing == Sh4IrAddressing::pre_decrement) {
+                state.r[instruction.dst_reg] -= static_cast<std::uint32_t>(memory_width_bytes(instruction.memory_width));
+            }
+            const auto address = state.r[instruction.dst_reg];
+            const auto value = state.r[instruction.src_reg];
+            return write_data(memory, address, instruction.memory_width, value);
         }
 
         case Sh4IrOp::branch_direct:
