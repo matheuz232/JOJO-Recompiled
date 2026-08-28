@@ -93,17 +93,27 @@ Result<void> write_u32(Sh4ReferenceMemoryView memory,
     return Result<void>::success();
 }
 
+bool is_load8(Sh4IrOp op) noexcept {
+    return op == Sh4IrOp::load_mem8_signed || op == Sh4IrOp::load_postinc8_signed ||
+           op == Sh4IrOp::load_disp8_signed || op == Sh4IrOp::load_indexed8_signed;
+}
+
+bool is_load16(Sh4IrOp op) noexcept {
+    return op == Sh4IrOp::load_mem16_signed || op == Sh4IrOp::load_postinc16_signed ||
+           op == Sh4IrOp::load_disp16_signed || op == Sh4IrOp::load_indexed16_signed;
+}
+
 Result<std::uint32_t> load_memory_value(Sh4IrOp op,
                                         Sh4ReferenceMemoryView memory,
                                         std::uint32_t address) {
-    if (op == Sh4IrOp::load_mem8_signed || op == Sh4IrOp::load_postinc8_signed) {
+    if (is_load8(op)) {
         auto value = read_u8(memory, address);
         if (!value) return Result<std::uint32_t>::failure(value.error, value.detail);
         const auto signed_value = std::bit_cast<std::int8_t>(value.value);
         return Result<std::uint32_t>::success(
             static_cast<std::uint32_t>(static_cast<std::int32_t>(signed_value)));
     }
-    if (op == Sh4IrOp::load_mem16_signed || op == Sh4IrOp::load_postinc16_signed) {
+    if (is_load16(op)) {
         auto value = read_u16(memory, address);
         if (!value) return Result<std::uint32_t>::failure(value.error, value.detail);
         const auto signed_value = std::bit_cast<std::int16_t>(value.value);
@@ -115,34 +125,29 @@ Result<std::uint32_t> load_memory_value(Sh4IrOp op,
     return value;
 }
 
+bool is_store8(Sh4IrOp op) noexcept {
+    return op == Sh4IrOp::store_mem8 || op == Sh4IrOp::store_predec8 ||
+           op == Sh4IrOp::store_disp8 || op == Sh4IrOp::store_indexed8;
+}
+
+bool is_store16(Sh4IrOp op) noexcept {
+    return op == Sh4IrOp::store_mem16 || op == Sh4IrOp::store_predec16 ||
+           op == Sh4IrOp::store_disp16 || op == Sh4IrOp::store_indexed16;
+}
+
 Result<void> store_memory_value(Sh4IrOp op,
                                 Sh4ReferenceMemoryView memory,
                                 std::uint32_t address,
                                 std::uint32_t value) {
-    if (op == Sh4IrOp::store_mem8 || op == Sh4IrOp::store_predec8) {
-        return write_u8(memory, address, value);
-    }
-    if (op == Sh4IrOp::store_mem16 || op == Sh4IrOp::store_predec16) {
-        return write_u16(memory, address, value);
-    }
+    if (is_store8(op)) return write_u8(memory, address, value);
+    if (is_store16(op)) return write_u16(memory, address, value);
     return write_u32(memory, address, value);
 }
 
 std::uint32_t memory_width(Sh4IrOp op) noexcept {
-    switch (op) {
-        case Sh4IrOp::store_mem8:
-        case Sh4IrOp::load_mem8_signed:
-        case Sh4IrOp::store_predec8:
-        case Sh4IrOp::load_postinc8_signed:
-            return 1u;
-        case Sh4IrOp::store_mem16:
-        case Sh4IrOp::load_mem16_signed:
-        case Sh4IrOp::store_predec16:
-        case Sh4IrOp::load_postinc16_signed:
-            return 2u;
-        default:
-            return 4u;
-    }
+    if (is_store8(op) || is_load8(op)) return 1u;
+    if (is_store16(op) || is_load16(op)) return 2u;
+    return 4u;
 }
 
 struct PendingTransfer {
@@ -241,6 +246,52 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             if (instruction.dst_reg != instruction.src_reg) {
                 state.r[instruction.src_reg] += memory_width(instruction.op);
             }
+            state.r[instruction.dst_reg] = value.value;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::store_disp8:
+        case Sh4IrOp::store_disp16:
+        case Sh4IrOp::store_disp32: {
+            auto address_reg = require_register(instruction.dst_reg);
+            if (!address_reg) return address_reg;
+            auto value_reg = require_register(instruction.src_reg);
+            if (!value_reg) return value_reg;
+            const auto address = state.r[instruction.dst_reg] + static_cast<std::uint32_t>(instruction.imm);
+            return store_memory_value(instruction.op, memory, address, state.r[instruction.src_reg]);
+        }
+        case Sh4IrOp::load_disp8_signed:
+        case Sh4IrOp::load_disp16_signed:
+        case Sh4IrOp::load_disp32: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto address_reg = require_register(instruction.src_reg);
+            if (!address_reg) return address_reg;
+            const auto address = state.r[instruction.src_reg] + static_cast<std::uint32_t>(instruction.imm);
+            auto value = load_memory_value(instruction.op, memory, address);
+            if (!value) return Result<void>::failure(value.error, value.detail);
+            state.r[instruction.dst_reg] = value.value;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::store_indexed8:
+        case Sh4IrOp::store_indexed16:
+        case Sh4IrOp::store_indexed32: {
+            auto address_reg = require_register(instruction.dst_reg);
+            if (!address_reg) return address_reg;
+            auto value_reg = require_register(instruction.src_reg);
+            if (!value_reg) return value_reg;
+            const auto address = state.r[0] + state.r[instruction.dst_reg];
+            return store_memory_value(instruction.op, memory, address, state.r[instruction.src_reg]);
+        }
+        case Sh4IrOp::load_indexed8_signed:
+        case Sh4IrOp::load_indexed16_signed:
+        case Sh4IrOp::load_indexed32: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto address_reg = require_register(instruction.src_reg);
+            if (!address_reg) return address_reg;
+            const auto address = state.r[0] + state.r[instruction.src_reg];
+            auto value = load_memory_value(instruction.op, memory, address);
+            if (!value) return Result<void>::failure(value.error, value.detail);
             state.r[instruction.dst_reg] = value.value;
             return Result<void>::success();
         }
