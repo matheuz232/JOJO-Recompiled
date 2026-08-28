@@ -83,6 +83,35 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         i.rm = m_field(raw);
         return i;
     }
+
+    const auto low_nibble = static_cast<std::uint16_t>(raw & 0x000Fu);
+    if ((raw & 0xF000u) == 0x2000u && low_nibble <= 0x6u) {
+        if (low_nibble == 0x0u) i.op = Sh4Op::movb_store;
+        else if (low_nibble == 0x1u) i.op = Sh4Op::movw_store;
+        else if (low_nibble == 0x2u) i.op = Sh4Op::movl_store;
+        else if (low_nibble == 0x4u) i.op = Sh4Op::movb_store_predec;
+        else if (low_nibble == 0x5u) i.op = Sh4Op::movw_store_predec;
+        else if (low_nibble == 0x6u) i.op = Sh4Op::movl_store_predec;
+        if (i.op != Sh4Op::unsupported) {
+            i.rn = n_field(raw);
+            i.rm = m_field(raw);
+            return i;
+        }
+    }
+    if ((raw & 0xF000u) == 0x6000u && low_nibble <= 0x6u) {
+        if (low_nibble == 0x0u) i.op = Sh4Op::movb_load;
+        else if (low_nibble == 0x1u) i.op = Sh4Op::movw_load;
+        else if (low_nibble == 0x2u) i.op = Sh4Op::movl_load;
+        else if (low_nibble == 0x4u) i.op = Sh4Op::movb_load_postinc;
+        else if (low_nibble == 0x5u) i.op = Sh4Op::movw_load_postinc;
+        else if (low_nibble == 0x6u) i.op = Sh4Op::movl_load_postinc;
+        if (i.op != Sh4Op::unsupported) {
+            i.rn = n_field(raw);
+            i.rm = m_field(raw);
+            return i;
+        }
+    }
+
     if ((raw & 0xF00Fu) == 0x300Cu) {
         i.op = Sh4Op::add_reg;
         i.rn = n_field(raw);
