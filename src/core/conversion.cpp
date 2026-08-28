@@ -147,11 +147,6 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
 
     report(ConversionStage::discovering_filesystem, 30, "discover_filesystem",
            "Lendo o sistema de arquivos da mídia em modo somente leitura.");
-    if (fp.value.format != "iso") {
-        return Result<ConversionManifest>::failure(
-            ErrorCode::unsupported_format,
-            "disc filesystem adapter is not implemented yet for format: " + fp.value.format);
-    }
     auto filesystem = open_iso9660(source);
     if (!filesystem) {
         return Result<ConversionManifest>::failure(filesystem.error, filesystem.detail);

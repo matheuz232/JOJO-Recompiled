@@ -18,6 +18,7 @@ add_library(jojo_core STATIC
   src/core/settings.cpp
   src/core/input.cpp
   src/core/disc_image.cpp
+  src/core/disc_media.cpp
   src/core/iso9660.cpp
   src/core/revision.cpp
   src/core/conversion.cpp
@@ -49,3 +50,7 @@ add_test(NAME jojo_tests COMMAND jojo_tests)
 add_executable(jojo_iso_tests tests/test_iso9660.cpp)
 target_link_libraries(jojo_iso_tests PRIVATE jojo_core)
 add_test(NAME jojo_iso_tests COMMAND jojo_iso_tests)
+
+add_executable(jojo_media_tests tests/test_disc_media.cpp)
+target_link_libraries(jojo_media_tests PRIVATE jojo_core)
+add_test(NAME jojo_media_tests COMMAND jojo_media_tests)

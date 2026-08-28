@@ -253,6 +253,55 @@ static void test_conversion_reports_real_monotonic_progress() {
     fs::remove_all(install, ec);
 }
 
+static void test_conversion_accepts_bin_cue_and_gdi_media() {
+    const auto iso = temp_file("multi_media_source.iso");
+    const auto raw = temp_file("multi_media_track.bin");
+    const auto cue = temp_file("multi_media.cue");
+    const auto gdi = temp_file("multi_media.gdi");
+    test_iso::write_image(iso);
+    test_iso::write_raw2352_from_iso(iso, raw, 1);
+
+    {
+        std::ofstream out(cue);
+        out << "FILE \"" << raw.filename().string() << "\" BINARY\n";
+        out << "  TRACK 01 MODE1/2352\n";
+        out << "    INDEX 01 00:00:00\n";
+    }
+    {
+        std::ofstream out(gdi);
+        out << "1\n";
+        out << "3 45000 4 2352 " << raw.filename().string() << " 0\n";
+    }
+
+    const std::vector<std::pair<fs::path, std::string>> media = {
+        {raw, "bin"}, {cue, "cue"}, {gdi, "gdi"}
+    };
+    std::error_code ec;
+    for (const auto& [source, expected_format] : media) {
+        const auto install = fs::temp_directory_path() /
+            ("jojo_recompiled_track_conversion_" + expected_format);
+        fs::remove_all(install, ec);
+        const auto converted = jojo::convert_image(source, install, synthetic_conversion_options());
+        CHECK(converted);
+        if (converted) {
+            CHECK(converted.value.source_format == expected_format);
+            CHECK(converted.value.revision_id == "synthetic-test-revision");
+        }
+        const auto manifest = jojo::load_conversion_manifest(install / "game_manifest.ini");
+        CHECK(manifest);
+        if (manifest) {
+            CHECK(manifest.value.source_format == expected_format);
+            CHECK(manifest.value.revision_id == "synthetic-test-revision");
+        }
+        fs::remove_all(install, ec);
+    }
+
+    fs::remove(iso, ec);
+    fs::remove(raw, ec);
+    fs::remove(cue, ec);
+    fs::remove(gdi, ec);
+}
+
 static void test_runtime_installation_validation() {
     const auto install = fs::temp_directory_path() / "jojo_recompiled_runtime_test";
     std::error_code ec;
@@ -300,6 +349,7 @@ int main() {
     test_conversion_creates_source_independent_installation();
     test_conversion_rejects_unknown_revision_before_installation();
     test_conversion_reports_real_monotonic_progress();
+    test_conversion_accepts_bin_cue_and_gdi_media();
     test_runtime_installation_validation();
     test_device_id_helpers_are_stable();
     if (failures) {
