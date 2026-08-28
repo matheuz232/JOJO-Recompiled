@@ -4,6 +4,15 @@
 namespace jojo {
 namespace {
 
+void configure_memory_op(Sh4IrInstruction& out,
+                         Sh4IrOp op,
+                         Sh4IrMemoryWidth width,
+                         Sh4IrAddressing addressing) {
+    out.op = op;
+    out.memory_width = width;
+    out.addressing = addressing;
+}
+
 Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
                                           bool in_delay_slot) {
     Sh4IrInstruction out{};
@@ -21,6 +30,44 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::add_reg: out.op = Sh4IrOp::add_reg; break;
         case Sh4Op::sub_reg: out.op = Sh4IrOp::sub_reg; break;
         case Sh4Op::cmp_eq_reg: out.op = Sh4IrOp::compare_eq; break;
+
+        case Sh4Op::movb_store:
+            configure_memory_op(out, Sh4IrOp::store_memory, Sh4IrMemoryWidth::byte, Sh4IrAddressing::indirect);
+            break;
+        case Sh4Op::movw_store:
+            configure_memory_op(out, Sh4IrOp::store_memory, Sh4IrMemoryWidth::word, Sh4IrAddressing::indirect);
+            break;
+        case Sh4Op::movl_store:
+            configure_memory_op(out, Sh4IrOp::store_memory, Sh4IrMemoryWidth::long_word, Sh4IrAddressing::indirect);
+            break;
+        case Sh4Op::movb_load:
+            configure_memory_op(out, Sh4IrOp::load_memory, Sh4IrMemoryWidth::byte, Sh4IrAddressing::indirect);
+            break;
+        case Sh4Op::movw_load:
+            configure_memory_op(out, Sh4IrOp::load_memory, Sh4IrMemoryWidth::word, Sh4IrAddressing::indirect);
+            break;
+        case Sh4Op::movl_load:
+            configure_memory_op(out, Sh4IrOp::load_memory, Sh4IrMemoryWidth::long_word, Sh4IrAddressing::indirect);
+            break;
+        case Sh4Op::movb_store_predec:
+            configure_memory_op(out, Sh4IrOp::store_memory, Sh4IrMemoryWidth::byte, Sh4IrAddressing::pre_decrement);
+            break;
+        case Sh4Op::movw_store_predec:
+            configure_memory_op(out, Sh4IrOp::store_memory, Sh4IrMemoryWidth::word, Sh4IrAddressing::pre_decrement);
+            break;
+        case Sh4Op::movl_store_predec:
+            configure_memory_op(out, Sh4IrOp::store_memory, Sh4IrMemoryWidth::long_word, Sh4IrAddressing::pre_decrement);
+            break;
+        case Sh4Op::movb_load_postinc:
+            configure_memory_op(out, Sh4IrOp::load_memory, Sh4IrMemoryWidth::byte, Sh4IrAddressing::post_increment);
+            break;
+        case Sh4Op::movw_load_postinc:
+            configure_memory_op(out, Sh4IrOp::load_memory, Sh4IrMemoryWidth::word, Sh4IrAddressing::post_increment);
+            break;
+        case Sh4Op::movl_load_postinc:
+            configure_memory_op(out, Sh4IrOp::load_memory, Sh4IrMemoryWidth::long_word, Sh4IrAddressing::post_increment);
+            break;
+
         case Sh4Op::bra:
             out.op = Sh4IrOp::branch_direct;
             if (const auto target = sh4_direct_target(input)) out.target = *target;
