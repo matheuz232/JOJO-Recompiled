@@ -112,6 +112,51 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         }
     }
 
+    const auto high_byte = static_cast<std::uint16_t>(raw & 0xFF00u);
+    if (high_byte == 0x8000u || high_byte == 0x8100u ||
+        high_byte == 0x8400u || high_byte == 0x8500u) {
+        const auto reg = static_cast<std::uint8_t>((raw >> 4) & 0x0Fu);
+        const auto disp = static_cast<std::int32_t>(raw & 0x000Fu);
+        if (high_byte == 0x8000u) {
+            i.op = Sh4Op::movb_store_disp; i.rn = reg; i.rm = 0; i.displacement = disp;
+        } else if (high_byte == 0x8100u) {
+            i.op = Sh4Op::movw_store_disp; i.rn = reg; i.rm = 0; i.displacement = disp * 2;
+        } else if (high_byte == 0x8400u) {
+            i.op = Sh4Op::movb_load_disp; i.rn = 0; i.rm = reg; i.displacement = disp;
+        } else {
+            i.op = Sh4Op::movw_load_disp; i.rn = 0; i.rm = reg; i.displacement = disp * 2;
+        }
+        return i;
+    }
+    if ((raw & 0xF000u) == 0x1000u) {
+        i.op = Sh4Op::movl_store_disp;
+        i.rn = n_field(raw);
+        i.rm = m_field(raw);
+        i.displacement = static_cast<std::int32_t>(raw & 0x000Fu) * 4;
+        return i;
+    }
+    if ((raw & 0xF000u) == 0x5000u) {
+        i.op = Sh4Op::movl_load_disp;
+        i.rn = n_field(raw);
+        i.rm = m_field(raw);
+        i.displacement = static_cast<std::int32_t>(raw & 0x000Fu) * 4;
+        return i;
+    }
+
+    const auto indexed_code = static_cast<std::uint16_t>(raw & 0xF00Fu);
+    if (indexed_code == 0x0004u || indexed_code == 0x0005u || indexed_code == 0x0006u ||
+        indexed_code == 0x000Cu || indexed_code == 0x000Du || indexed_code == 0x000Eu) {
+        if (indexed_code == 0x0004u) i.op = Sh4Op::movb_store_indexed;
+        if (indexed_code == 0x0005u) i.op = Sh4Op::movw_store_indexed;
+        if (indexed_code == 0x0006u) i.op = Sh4Op::movl_store_indexed;
+        if (indexed_code == 0x000Cu) i.op = Sh4Op::movb_load_indexed;
+        if (indexed_code == 0x000Du) i.op = Sh4Op::movw_load_indexed;
+        if (indexed_code == 0x000Eu) i.op = Sh4Op::movl_load_indexed;
+        i.rn = n_field(raw);
+        i.rm = m_field(raw);
+        return i;
+    }
+
     if ((raw & 0xF00Fu) == 0x300Cu) {
         i.op = Sh4Op::add_reg;
         i.rn = n_field(raw);

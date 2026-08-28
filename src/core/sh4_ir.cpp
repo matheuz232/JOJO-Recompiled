@@ -33,6 +33,18 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::movb_load_postinc: out.op = Sh4IrOp::load_postinc8_signed; break;
         case Sh4Op::movw_load_postinc: out.op = Sh4IrOp::load_postinc16_signed; break;
         case Sh4Op::movl_load_postinc: out.op = Sh4IrOp::load_postinc32; break;
+        case Sh4Op::movb_store_disp: out.op = Sh4IrOp::store_disp8; out.imm = input.displacement; break;
+        case Sh4Op::movw_store_disp: out.op = Sh4IrOp::store_disp16; out.imm = input.displacement; break;
+        case Sh4Op::movl_store_disp: out.op = Sh4IrOp::store_disp32; out.imm = input.displacement; break;
+        case Sh4Op::movb_load_disp: out.op = Sh4IrOp::load_disp8_signed; out.imm = input.displacement; break;
+        case Sh4Op::movw_load_disp: out.op = Sh4IrOp::load_disp16_signed; out.imm = input.displacement; break;
+        case Sh4Op::movl_load_disp: out.op = Sh4IrOp::load_disp32; out.imm = input.displacement; break;
+        case Sh4Op::movb_store_indexed: out.op = Sh4IrOp::store_indexed8; break;
+        case Sh4Op::movw_store_indexed: out.op = Sh4IrOp::store_indexed16; break;
+        case Sh4Op::movl_store_indexed: out.op = Sh4IrOp::store_indexed32; break;
+        case Sh4Op::movb_load_indexed: out.op = Sh4IrOp::load_indexed8_signed; break;
+        case Sh4Op::movw_load_indexed: out.op = Sh4IrOp::load_indexed16_signed; break;
+        case Sh4Op::movl_load_indexed: out.op = Sh4IrOp::load_indexed32; break;
         case Sh4Op::add_reg: out.op = Sh4IrOp::add_reg; break;
         case Sh4Op::sub_reg: out.op = Sh4IrOp::sub_reg; break;
         case Sh4Op::cmp_eq_reg: out.op = Sh4IrOp::compare_eq; break;
@@ -56,30 +68,12 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::shll: out.op = Sh4IrOp::shift_left_one; break;
         case Sh4Op::shlr: out.op = Sh4IrOp::shift_right_logical_one; break;
         case Sh4Op::shar: out.op = Sh4IrOp::shift_right_arithmetic_one; break;
-        case Sh4Op::shll2:
-            out.op = Sh4IrOp::shift_left_const;
-            out.imm = 2;
-            break;
-        case Sh4Op::shlr2:
-            out.op = Sh4IrOp::shift_right_logical_const;
-            out.imm = 2;
-            break;
-        case Sh4Op::shll8:
-            out.op = Sh4IrOp::shift_left_const;
-            out.imm = 8;
-            break;
-        case Sh4Op::shlr8:
-            out.op = Sh4IrOp::shift_right_logical_const;
-            out.imm = 8;
-            break;
-        case Sh4Op::shll16:
-            out.op = Sh4IrOp::shift_left_const;
-            out.imm = 16;
-            break;
-        case Sh4Op::shlr16:
-            out.op = Sh4IrOp::shift_right_logical_const;
-            out.imm = 16;
-            break;
+        case Sh4Op::shll2: out.op = Sh4IrOp::shift_left_const; out.imm = 2; break;
+        case Sh4Op::shlr2: out.op = Sh4IrOp::shift_right_logical_const; out.imm = 2; break;
+        case Sh4Op::shll8: out.op = Sh4IrOp::shift_left_const; out.imm = 8; break;
+        case Sh4Op::shlr8: out.op = Sh4IrOp::shift_right_logical_const; out.imm = 8; break;
+        case Sh4Op::shll16: out.op = Sh4IrOp::shift_left_const; out.imm = 16; break;
+        case Sh4Op::shlr16: out.op = Sh4IrOp::shift_right_logical_const; out.imm = 16; break;
         case Sh4Op::bra:
             out.op = Sh4IrOp::branch_direct;
             if (const auto target = sh4_direct_target(input)) out.target = *target;
