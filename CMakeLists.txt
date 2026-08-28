@@ -25,6 +25,7 @@ add_library(jojo_core STATIC
   src/core/sh4_decoder.cpp
   src/core/sh4_cfg.cpp
   src/core/sh4_ir.cpp
+  src/core/sh4_reference_executor.cpp
   src/core/revision.cpp
   src/core/conversion.cpp
   src/core/runtime.cpp
@@ -63,3 +64,6 @@ add_test(NAME jojo_analysis_tests COMMAND jojo_analysis_tests)
 add_executable(jojo_sh4_ir_tests tests/test_sh4_ir.cpp)
 target_link_libraries(jojo_sh4_ir_tests PRIVATE jojo_core)
 add_test(NAME jojo_sh4_ir_tests COMMAND jojo_sh4_ir_tests)
+add_executable(jojo_sh4_reference_tests tests/test_sh4_reference_executor.cpp)
+target_link_libraries(jojo_sh4_reference_tests PRIVATE jojo_core)
+add_test(NAME jojo_sh4_reference_tests COMMAND jojo_sh4_reference_tests)
