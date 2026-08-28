@@ -20,6 +20,7 @@ add_library(jojo_core STATIC
   src/core/disc_image.cpp
   src/core/disc_media.cpp
   src/core/iso9660.cpp
+  src/core/dreamcast_boot.cpp
   src/core/revision.cpp
   src/core/conversion.cpp
   src/core/runtime.cpp
@@ -54,3 +55,7 @@ add_test(NAME jojo_iso_tests COMMAND jojo_iso_tests)
 add_executable(jojo_media_tests tests/test_disc_media.cpp)
 target_link_libraries(jojo_media_tests PRIVATE jojo_core)
 add_test(NAME jojo_media_tests COMMAND jojo_media_tests)
+
+add_executable(jojo_boot_tests tests/test_dreamcast_boot.cpp)
+target_link_libraries(jojo_boot_tests PRIVATE jojo_core)
+add_test(NAME jojo_boot_tests COMMAND jojo_boot_tests)
