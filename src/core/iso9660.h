@@ -1,4 +1,5 @@
 #pragma once
+#include "core/disc_media.h"
 #include "core/result.h"
 #include <cstdint>
 #include <filesystem>
@@ -17,13 +18,13 @@ struct DiscFileEntry {
 };
 
 struct Iso9660Image {
-    std::filesystem::path source_path;
-    std::uint64_t source_size{};
+    LogicalSectorSource sectors;
     std::uint32_t root_extent_lba{};
     std::uint32_t root_size_bytes{};
 };
 
 [[nodiscard]] Result<Iso9660Image> open_iso9660(const std::filesystem::path& path);
+[[nodiscard]] Result<Iso9660Image> open_iso9660(const LogicalSectorSource& sectors);
 [[nodiscard]] Result<std::vector<DiscFileEntry>> list_iso9660_directory(
     const Iso9660Image& image,
     std::string_view virtual_path);

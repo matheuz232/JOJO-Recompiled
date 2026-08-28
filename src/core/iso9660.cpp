@@ -1,9 +1,7 @@
 #include "core/iso9660.h"
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cstring>
-#include <fstream>
 #include <limits>
 
 namespace jojo {
@@ -18,35 +16,29 @@ std::uint32_t le32(const std::uint8_t* p) noexcept {
            (static_cast<std::uint32_t>(p[3]) << 24);
 }
 
-bool bounded_extent(std::uint64_t source_size, std::uint32_t lba, std::uint32_t bytes) noexcept {
-    if (lba > std::numeric_limits<std::uint64_t>::max() / kSectorSize) return false;
-    const std::uint64_t offset = static_cast<std::uint64_t>(lba) * kSectorSize;
-    return offset <= source_size && static_cast<std::uint64_t>(bytes) <= source_size - offset;
+bool bounded_extent(const LogicalSectorSource& source,
+                    std::uint32_t lba,
+                    std::uint32_t bytes) noexcept {
+    if (bytes == 0) return static_cast<std::uint64_t>(lba) <= source.logical_sector_count;
+    const std::uint64_t sectors = (static_cast<std::uint64_t>(bytes) + kSectorSize - 1) / kSectorSize;
+    return static_cast<std::uint64_t>(lba) < source.logical_sector_count &&
+           sectors <= source.logical_sector_count - lba;
 }
 
 Result<std::vector<std::uint8_t>> read_extent(const Iso9660Image& image,
                                                std::uint32_t lba,
                                                std::uint32_t bytes) {
-    if (!bounded_extent(image.source_size, lba, bytes)) {
+    if (!bounded_extent(image.sectors, lba, bytes)) {
         return Result<std::vector<std::uint8_t>>::failure(
-            ErrorCode::invalid_installation, "ISO9660 extent is outside the source image");
+            ErrorCode::invalid_installation, "ISO9660 extent is outside the logical data track");
     }
-    std::ifstream in(image.source_path, std::ios::binary);
-    if (!in) {
-        return Result<std::vector<std::uint8_t>>::failure(
-            ErrorCode::io_error, "cannot reopen ISO9660 source image");
-    }
-    const auto offset = static_cast<std::uint64_t>(lba) * kSectorSize;
-    in.seekg(static_cast<std::streamoff>(offset));
-    if (!in) {
-        return Result<std::vector<std::uint8_t>>::failure(ErrorCode::io_error, "cannot seek ISO9660 extent");
-    }
-    std::vector<std::uint8_t> data(bytes);
-    if (bytes) in.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(bytes));
-    if (static_cast<std::uint64_t>(in.gcount()) != bytes) {
-        return Result<std::vector<std::uint8_t>>::failure(ErrorCode::io_error, "short read in ISO9660 extent");
-    }
-    return Result<std::vector<std::uint8_t>>::success(std::move(data));
+    if (bytes == 0) return Result<std::vector<std::uint8_t>>::success({});
+    const auto sectors = static_cast<std::uint32_t>(
+        (static_cast<std::uint64_t>(bytes) + kSectorSize - 1) / kSectorSize);
+    auto data = read_logical_sectors(image.sectors, lba, sectors);
+    if (!data) return Result<std::vector<std::uint8_t>>::failure(data.error, data.detail);
+    data.value.resize(bytes);
+    return data;
 }
 
 std::string normalize_name(std::string name) {
@@ -94,9 +86,9 @@ Result<std::vector<DiscFileEntry>> parse_directory(const Iso9660Image& image,
             }
             const auto extent_lba = le32(record + 2);
             const auto file_size = le32(record + 10);
-            if (!bounded_extent(image.source_size, extent_lba, file_size)) {
+            if (!bounded_extent(image.sectors, extent_lba, file_size)) {
                 return Result<std::vector<DiscFileEntry>>::failure(
-                    ErrorCode::invalid_installation, "ISO9660 directory entry points outside the image");
+                    ErrorCode::invalid_installation, "ISO9660 directory entry points outside the data track");
             }
             std::string full = parent_path.empty() || parent_path == "/" ? "/" + name
                                                                            : std::string(parent_path) + "/" + name;
@@ -107,45 +99,7 @@ Result<std::vector<DiscFileEntry>> parse_directory(const Iso9660Image& image,
     }
     return Result<std::vector<DiscFileEntry>>::success(std::move(entries));
 }
-}
 
-Result<Iso9660Image> open_iso9660(const std::filesystem::path& path) {
-    std::error_code ec;
-    const auto size = std::filesystem::file_size(path, ec);
-    if (ec) {
-        return Result<Iso9660Image>::failure(ErrorCode::file_not_found,
-                                             "ISO9660 image not found: " + path.string());
-    }
-    const std::uint64_t pvd_offset = kPvdSector * kSectorSize;
-    if (size < pvd_offset + kSectorSize) {
-        return Result<Iso9660Image>::failure(ErrorCode::unsupported_format,
-                                             "image is too small to contain an ISO9660 PVD");
-    }
-
-    std::ifstream in(path, std::ios::binary);
-    if (!in) return Result<Iso9660Image>::failure(ErrorCode::io_error, "cannot open ISO9660 image");
-    in.seekg(static_cast<std::streamoff>(pvd_offset));
-    std::array<std::uint8_t, kSectorSize> pvd{};
-    in.read(reinterpret_cast<char*>(pvd.data()), static_cast<std::streamsize>(pvd.size()));
-    if (in.gcount() != static_cast<std::streamsize>(pvd.size())) {
-        return Result<Iso9660Image>::failure(ErrorCode::io_error, "short read while reading ISO9660 PVD");
-    }
-    if (pvd[0] != 1 || std::memcmp(pvd.data() + 1, "CD001", 5) != 0 || pvd[6] != 1) {
-        return Result<Iso9660Image>::failure(ErrorCode::unsupported_format, "invalid ISO9660 Primary Volume Descriptor");
-    }
-    const auto* root = pvd.data() + 156;
-    if (root[0] < 34 || root[32] != 1 || root[33] != 0 || (root[25] & 0x02u) == 0) {
-        return Result<Iso9660Image>::failure(ErrorCode::invalid_installation, "invalid ISO9660 root directory record");
-    }
-    const auto root_lba = le32(root + 2);
-    const auto root_size = le32(root + 10);
-    if (!bounded_extent(size, root_lba, root_size)) {
-        return Result<Iso9660Image>::failure(ErrorCode::invalid_installation, "ISO9660 root directory is outside the image");
-    }
-    return Result<Iso9660Image>::success(Iso9660Image{path, size, root_lba, root_size});
-}
-
-namespace {
 std::string ascii_upper(std::string value) {
     for (auto& ch : value) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
     return value;
@@ -206,6 +160,39 @@ Result<DiscFileEntry> find_entry(const Iso9660Image& image, std::string_view vir
     }
     return Result<DiscFileEntry>::success(std::move(found));
 }
+}
+
+Result<Iso9660Image> open_iso9660(const LogicalSectorSource& sectors) {
+    if (sectors.logical_sector_count <= kPvdSector) {
+        return Result<Iso9660Image>::failure(ErrorCode::unsupported_format,
+                                             "data track is too small to contain an ISO9660 PVD");
+    }
+    auto pvd_read = read_logical_sectors(sectors, kPvdSector, 1);
+    if (!pvd_read) return Result<Iso9660Image>::failure(pvd_read.error, pvd_read.detail);
+    const auto& pvd = pvd_read.value;
+    if (pvd.size() != kSectorSize || pvd[0] != 1 ||
+        std::memcmp(pvd.data() + 1, "CD001", 5) != 0 || pvd[6] != 1) {
+        return Result<Iso9660Image>::failure(ErrorCode::unsupported_format,
+                                             "invalid ISO9660 Primary Volume Descriptor");
+    }
+    const auto* root = pvd.data() + 156;
+    if (root[0] < 34 || root[32] != 1 || root[33] != 0 || (root[25] & 0x02u) == 0) {
+        return Result<Iso9660Image>::failure(ErrorCode::invalid_installation,
+                                             "invalid ISO9660 root directory record");
+    }
+    const auto root_lba = le32(root + 2);
+    const auto root_size = le32(root + 10);
+    if (!bounded_extent(sectors, root_lba, root_size)) {
+        return Result<Iso9660Image>::failure(ErrorCode::invalid_installation,
+                                             "ISO9660 root directory is outside the data track");
+    }
+    return Result<Iso9660Image>::success(Iso9660Image{sectors, root_lba, root_size});
+}
+
+Result<Iso9660Image> open_iso9660(const std::filesystem::path& path) {
+    auto source = open_logical_sector_source(path);
+    if (!source) return Result<Iso9660Image>::failure(source.error, source.detail);
+    return open_iso9660(source.value);
 }
 
 Result<std::vector<DiscFileEntry>> list_iso9660_directory(const Iso9660Image& image,

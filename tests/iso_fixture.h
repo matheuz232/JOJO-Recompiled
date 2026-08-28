@@ -75,4 +75,28 @@ inline std::filesystem::path write_image(const std::filesystem::path& path) {
     out.write(reinterpret_cast<const char*>(image.data()), static_cast<std::streamsize>(image.size()));
     return path;
 }
+
+inline std::filesystem::path write_raw2352_from_iso(
+    const std::filesystem::path& iso_path,
+    const std::filesystem::path& raw_path,
+    std::uint8_t mode = 1) {
+    std::ifstream in(iso_path, std::ios::binary);
+    std::vector<std::uint8_t> cooked((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+    const std::size_t sectors = cooked.size() / sector;
+    std::vector<std::uint8_t> raw(sectors * 2352, 0);
+    for (std::size_t i = 0; i < sectors; ++i) {
+        const std::size_t base = i * 2352;
+        raw[base] = 0x00;
+        for (std::size_t j = 1; j < 11; ++j) raw[base + j] = 0xFF;
+        raw[base + 11] = 0x00;
+        raw[base + 15] = mode;
+        const std::size_t user = mode == 2 ? 24 : 16;
+        std::copy_n(cooked.begin() + static_cast<std::ptrdiff_t>(i * sector), sector,
+                    raw.begin() + static_cast<std::ptrdiff_t>(base + user));
+    }
+    std::ofstream out(raw_path, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char*>(raw.data()), static_cast<std::streamsize>(raw.size()));
+    return raw_path;
+}
 }
