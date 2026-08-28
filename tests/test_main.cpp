@@ -5,6 +5,7 @@
 #include "core/conversion.h"
 #include "core/runtime.h"
 #include "core/device_id.h"
+#include "iso_fixture.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -23,6 +24,22 @@ static fs::path temp_file(std::string_view name) {
     fs::remove(p, ec);
     fs::remove(p.string() + ".tmp", ec);
     return p;
+}
+
+static jojo::GameRevisionProfile synthetic_revision_profile() {
+    return {
+        "synthetic-test-revision",
+        {
+            {"/1ST_READ.BIN", 12, 0x87ee7cce3a6a6a10ull},
+            {"/DATA/ASSET.DAT", 5, 0x65f9a54a4f1d65c8ull},
+        }
+    };
+}
+
+static jojo::ConversionOptions synthetic_conversion_options() {
+    jojo::ConversionOptions options{};
+    options.revision_profiles.push_back(synthetic_revision_profile());
+    return options;
 }
 
 static void test_version() {
@@ -162,11 +179,9 @@ static void test_conversion_creates_source_independent_installation() {
     const auto install = fs::temp_directory_path() / "jojo_recompiled_install_test";
     std::error_code ec;
     fs::remove_all(install, ec);
-    {
-        std::ofstream out(source, std::ios::binary);
-        out << "SYNTHETIC-USER-OWNED-DISC-CONTENT";
-    }
-    const auto converted = jojo::convert_image(source, install);
+    test_iso::write_image(source);
+
+    const auto converted = jojo::convert_image(source, install, synthetic_conversion_options());
     CHECK(converted);
     CHECK(fs::exists(install / "game_manifest.ini"));
     CHECK(fs::is_directory(install / "data"));
@@ -178,8 +193,27 @@ static void test_conversion_creates_source_independent_installation() {
     if (manifest) {
         CHECK(manifest.value.source_name == source.filename().string());
         CHECK(!manifest.value.hash_hex.empty());
+        CHECK(manifest.value.revision_id == "synthetic-test-revision");
         CHECK(manifest.value.backend == "pending-game-specific-recompiler");
     }
+    fs::remove_all(install, ec);
+}
+
+static void test_conversion_rejects_unknown_revision_before_installation() {
+    const auto source = temp_file("unknown_revision.iso");
+    const auto install = fs::temp_directory_path() / "jojo_recompiled_unknown_revision_test";
+    std::error_code ec;
+    fs::remove_all(install, ec);
+    test_iso::write_image(source);
+
+    jojo::ConversionOptions options{};
+    const auto converted = jojo::convert_image(source, install, options);
+    CHECK(!converted);
+    CHECK(converted.error == jojo::ErrorCode::unknown_revision);
+    CHECK(converted.detail.find("verified revision profiles") != std::string::npos);
+    CHECK(!fs::exists(install / "game_manifest.ini"));
+
+    fs::remove(source, ec);
     fs::remove_all(install, ec);
 }
 
@@ -188,29 +222,32 @@ static void test_conversion_reports_real_monotonic_progress() {
     const auto install = fs::temp_directory_path() / "jojo_recompiled_progress_test";
     std::error_code ec;
     fs::remove_all(install, ec);
-    {
-        std::ofstream out(source, std::ios::binary);
-        out << "SYNTHETIC-PROGRESS-DISC";
-    }
+    test_iso::write_image(source);
 
     std::vector<jojo::ConversionProgress> events;
-    const auto converted = jojo::convert_image(source, install, [&](const jojo::ConversionProgress& event) {
-        events.push_back(event);
-    });
+    const auto converted = jojo::convert_image(
+        source, install, synthetic_conversion_options(),
+        [&](const jojo::ConversionProgress& event) { events.push_back(event); });
     CHECK(converted);
-    CHECK(events.size() >= 5);
+    CHECK(events.size() >= 7);
     if (!events.empty()) {
         CHECK(events.front().percent == 0);
         CHECK(events.back().percent == 100);
         CHECK(events.back().stage == jojo::ConversionStage::completed);
+        bool saw_filesystem = false;
+        bool saw_revision = false;
         int previous = -1;
         for (const auto& event : events) {
             CHECK(event.percent >= 0);
             CHECK(event.percent <= 100);
             CHECK(event.percent >= previous);
             CHECK(!event.message_key.empty());
+            saw_filesystem = saw_filesystem || event.stage == jojo::ConversionStage::discovering_filesystem;
+            saw_revision = saw_revision || event.stage == jojo::ConversionStage::identifying_revision;
             previous = event.percent;
         }
+        CHECK(saw_filesystem);
+        CHECK(saw_revision);
     }
     fs::remove(source, ec);
     fs::remove_all(install, ec);
@@ -261,6 +298,7 @@ int main() {
     test_disc_extension_detection();
     test_disc_fingerprint_is_deterministic();
     test_conversion_creates_source_independent_installation();
+    test_conversion_rejects_unknown_revision_before_installation();
     test_conversion_reports_real_monotonic_progress();
     test_runtime_installation_validation();
     test_device_id_helpers_are_stable();

@@ -15,6 +15,11 @@ std::uint64_t fnv1a64(const std::vector<std::uint8_t>& data) noexcept {
 Result<GameRevisionMatch> identify_game_revision(
     const Iso9660Image& image,
     const std::vector<GameRevisionProfile>& profiles) {
+    if (profiles.empty()) {
+        return Result<GameRevisionMatch>::failure(
+            ErrorCode::unknown_revision,
+            "no verified revision profiles are registered yet for this game");
+    }
     for (const auto& profile : profiles) {
         if (profile.revision_id.empty() || profile.files.empty()) continue;
         bool matches = true;

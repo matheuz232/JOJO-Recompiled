@@ -37,6 +37,6 @@
 - [x] Run full tests and clean build.
 
 ### Task 4: Integrate conversion discovery stage
-- [ ] Add progress stages for filesystem discovery and revision identification.
-- [ ] Keep unsupported real revisions explicit until verified signatures exist.
+- [x] Add progress stages for filesystem discovery and revision identification.
+- [x] Keep unsupported real revisions explicit until verified signatures exist.
 - [ ] Verify Linux and Windows CI.
