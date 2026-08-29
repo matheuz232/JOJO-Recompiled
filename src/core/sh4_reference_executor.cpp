@@ -3,6 +3,7 @@
 #include <bit>
 #include <cstdint>
 #include <optional>
+#include <utility>
 
 namespace jojo {
 namespace {
@@ -17,6 +18,17 @@ Result<void> require_register(std::uint8_t reg) {
 
 std::int32_t as_signed(std::uint32_t value) noexcept {
     return std::bit_cast<std::int32_t>(value);
+}
+
+constexpr std::uint32_t kFpscrWritableMask = 0x003FFFFFu;
+constexpr std::uint32_t kFpscrFrBit = 0x00200000u;
+
+void write_fpscr(Sh4ReferenceState& state, std::uint32_t value) noexcept {
+    const auto masked = value & kFpscrWritableMask;
+    if (((state.fpscr ^ masked) & kFpscrFrBit) != 0u) {
+        std::swap(state.fr, state.xf);
+    }
+    state.fpscr = masked;
 }
 
 Result<std::size_t> memory_offset(Sh4ReferenceMemoryView memory,
@@ -432,6 +444,37 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             if (!dst) return dst;
             const auto address = state.r[instruction.dst_reg] - 4u;
             auto stored = write_u32(memory, address, state.fpul);
+            if (!stored) return stored;
+            state.r[instruction.dst_reg] = address;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::set_fpscr_from_reg: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            write_fpscr(state, state.r[instruction.src_reg]);
+            return Result<void>::success();
+        }
+        case Sh4IrOp::copy_fpscr_to_reg: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            state.r[instruction.dst_reg] = state.fpscr;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::load_fpscr_postinc32: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto address = state.r[instruction.src_reg];
+            auto value = read_u32(memory, address);
+            if (!value) return Result<void>::failure(value.error, value.detail);
+            write_fpscr(state, value.value);
+            state.r[instruction.src_reg] += 4u;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::store_fpscr_predec32: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            const auto address = state.r[instruction.dst_reg] - 4u;
+            auto stored = write_u32(memory, address, state.fpscr);
             if (!stored) return stored;
             state.r[instruction.dst_reg] = address;
             return Result<void>::success();
