@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <string>
 
@@ -26,6 +27,8 @@ struct Sh4ReferenceState {
     std::uint32_t intevt{};
     bool t{};
 };
+
+using Sh4ReferenceBlockBoundaryHook = std::function<Result<void>(Sh4ReferenceState&)>;
 
 class Sh4ReferenceBus {
 public:
@@ -124,7 +127,21 @@ struct Sh4ReferenceRunResult {
 [[nodiscard]] Result<Sh4ReferenceRunResult> execute_sh4_ir_reference(
     const Sh4IrProgram& program,
     Sh4ReferenceState& state,
+    Sh4ReferenceMemoryView memory,
+    std::size_t max_blocks,
+    const Sh4ReferenceBlockBoundaryHook& boundary_hook);
+
+[[nodiscard]] Result<Sh4ReferenceRunResult> execute_sh4_ir_reference(
+    const Sh4IrProgram& program,
+    Sh4ReferenceState& state,
     Sh4ReferenceBus& bus,
     std::size_t max_blocks);
+
+[[nodiscard]] Result<Sh4ReferenceRunResult> execute_sh4_ir_reference(
+    const Sh4IrProgram& program,
+    Sh4ReferenceState& state,
+    Sh4ReferenceBus& bus,
+    std::size_t max_blocks,
+    const Sh4ReferenceBlockBoundaryHook& boundary_hook);
 
 }

@@ -32,6 +32,7 @@ add_library(jojo_core STATIC
   src/core/sh4_cfg.cpp
   src/core/sh4_ir.cpp
   src/core/sh4_reference_executor.cpp
+  src/core/sh4_reference_boundary.cpp
   src/core/sh4_reference_bus.cpp
   src/core/sh4_interrupt_entry.cpp
   src/core/revision.cpp
@@ -126,3 +127,6 @@ add_test(NAME jojo_sh4_interrupt_entry_tests COMMAND jojo_sh4_interrupt_entry_te
 add_executable(jojo_dreamcast_irq_delivery_tests tests/test_dreamcast_irq_delivery.cpp)
 target_link_libraries(jojo_dreamcast_irq_delivery_tests PRIVATE jojo_core)
 add_test(NAME jojo_dreamcast_irq_delivery_tests COMMAND jojo_dreamcast_irq_delivery_tests)
+add_executable(jojo_sh4_block_boundary_tests tests/test_sh4_block_boundary.cpp)
+target_link_libraries(jojo_sh4_block_boundary_tests PRIVATE jojo_core)
+add_test(NAME jojo_sh4_block_boundary_tests COMMAND jojo_sh4_block_boundary_tests)
