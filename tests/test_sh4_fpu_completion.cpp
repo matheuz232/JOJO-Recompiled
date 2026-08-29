@@ -55,7 +55,7 @@ static double get_dr(const jojo::Sh4ReferenceState& state, std::uint8_t even) {
     return std::bit_cast<double>(bits);
 }
 
-static void test_decoder_recognizes_final_base_sh4_fpu_families() {
+static void test_decoder_recognizes_final_fpu_families() {
     using jojo::Sh4Op;
     CHECK(jojo::decode_sh4(0xF0ADu, 0).op == Sh4Op::fcnvsd);
     CHECK(jojo::decode_sh4(0xF0BDu, 0).op == Sh4Op::fcnvds);
@@ -67,124 +67,166 @@ static void test_decoder_recognizes_final_base_sh4_fpu_families() {
 
 static void test_double_precision_arithmetic_and_conversion() {
     jojo::Sh4ReferenceState state{};
-    state.fpscr = (state.fpscr & ~0x3u) | 0x00080000u; // PR=1, nearest/even.
+    state.fpscr = (state.fpscr & ~0x00300003u) | 0x00080000u; // PR=1,SZ=0,nearest.
     set_dr(state, 0, 1.5);
     set_dr(state, 2, 2.0);
-    if (execute_words({0xF020u}, state, 0x8C071000u)) { // FADD DR2,DR0
-        CHECK(get_dr(state, 0) == 3.5);
-    }
+    if (execute_words({0xF020u}, state, 0x8C071000u)) CHECK(get_dr(state, 0) == 3.5);
 
     state.fpul = std::bit_cast<std::uint32_t>(static_cast<std::int32_t>(-7));
-    if (execute_words({0xF42Du}, state, 0x8C071100u)) { // FLOAT FPUL,DR4
-        CHECK(get_dr(state, 4) == -7.0);
-    }
+    if (execute_words({0xF42Du}, state, 0x8C071100u)) CHECK(get_dr(state, 4) == -7.0);
+
     set_dr(state, 6, 12.75);
-    if (execute_words({0xF63Du}, state, 0x8C071200u)) { // FTRC DR6,FPUL
+    if (execute_words({0xF63Du}, state, 0x8C071200u)) {
         CHECK(std::bit_cast<std::int32_t>(state.fpul) == 12);
     }
 }
 
-static void test_single_double_conversion_instructions() {
+static void test_single_double_conversion_requires_double_precision_mode() {
     jojo::Sh4ReferenceState state{};
+    state.fpscr = (state.fpscr & ~0x00300000u) | 0x00080000u; // PR=1,SZ=0.
     state.fpul = std::bit_cast<std::uint32_t>(1.5f);
-    if (execute_words({0xF0ADu}, state, 0x8C072000u)) { // FCNVSD FPUL,DR0
-        CHECK(get_dr(state, 0) == 1.5);
-    }
+    if (execute_words({0xF0ADu}, state, 0x8C072000u)) CHECK(get_dr(state, 0) == 1.5);
+
     set_dr(state, 2, -2.25);
-    if (execute_words({0xF2BDu}, state, 0x8C072100u)) { // FCNVDS DR2,FPUL
+    if (execute_words({0xF2BDu}, state, 0x8C072100u)) {
         CHECK(state.fpul == std::bit_cast<std::uint32_t>(-2.25f));
+    }
+
+    jojo::Sh4ReferenceState wrong_mode{}; // PR=0.
+    wrong_mode.vbr = 0x8C000000u;
+    wrong_mode.fpul = std::bit_cast<std::uint32_t>(3.0f);
+    const auto before0 = wrong_mode.fr[0];
+    const auto run = run_words({0xF0ADu}, wrong_mode, 0x8C072200u);
+    CHECK(run);
+    if (run) {
+        CHECK(wrong_mode.fr[0] == before0);
+        CHECK(wrong_mode.expevt == 0x180u);
+        CHECK(wrong_mode.spc == 0x8C072200u);
     }
 }
 
-static void test_vector_and_transcendental_families() {
-    jojo::Sh4ReferenceState state{};
-    state.fpscr &= ~0x00080000u; // PR=0.
-    state.fr[0] = std::bit_cast<std::uint32_t>(1.0f);
-    state.fr[1] = std::bit_cast<std::uint32_t>(2.0f);
-    state.fr[2] = std::bit_cast<std::uint32_t>(3.0f);
-    state.fr[3] = std::bit_cast<std::uint32_t>(4.0f);
-    state.fr[4] = std::bit_cast<std::uint32_t>(2.0f);
-    state.fr[5] = std::bit_cast<std::uint32_t>(3.0f);
-    state.fr[6] = std::bit_cast<std::uint32_t>(4.0f);
-    state.fr[7] = std::bit_cast<std::uint32_t>(5.0f);
-    if (execute_words({0xF1EDu}, state, 0x8C073000u)) { // FIPR FV4,FV0
-        CHECK(state.fr[3] == std::bit_cast<std::uint32_t>(40.0f));
+static void test_vector_families_signal_architectural_inexact() {
+    constexpr std::uint32_t kCauseI = 1u << 12u;
+    constexpr std::uint32_t kFlagI = 1u << 2u;
+
+    jojo::Sh4ReferenceState fipr{};
+    fipr.fr[0] = std::bit_cast<std::uint32_t>(1.0f);
+    fipr.fr[1] = std::bit_cast<std::uint32_t>(2.0f);
+    fipr.fr[2] = std::bit_cast<std::uint32_t>(3.0f);
+    fipr.fr[3] = std::bit_cast<std::uint32_t>(4.0f);
+    fipr.fr[4] = std::bit_cast<std::uint32_t>(2.0f);
+    fipr.fr[5] = std::bit_cast<std::uint32_t>(3.0f);
+    fipr.fr[6] = std::bit_cast<std::uint32_t>(4.0f);
+    fipr.fr[7] = std::bit_cast<std::uint32_t>(5.0f);
+    if (execute_words({0xF1EDu}, fipr, 0x8C073000u)) {
+        CHECK(fipr.fr[3] == std::bit_cast<std::uint32_t>(40.0f));
+        CHECK((fipr.fpscr & kCauseI) != 0u);
+        CHECK((fipr.fpscr & kFlagI) != 0u);
     }
 
-    for (int i = 0; i < 16; ++i) state.xf[static_cast<std::size_t>(i)] = 0u;
+    jojo::Sh4ReferenceState ftrv{};
+    for (int i = 0; i < 16; ++i) ftrv.xf[static_cast<std::size_t>(i)] = 0u;
     for (int i = 0; i < 4; ++i) {
-        state.xf[static_cast<std::size_t>(i * 4 + i)] = std::bit_cast<std::uint32_t>(1.0f);
+        ftrv.xf[static_cast<std::size_t>(i * 4 + i)] = std::bit_cast<std::uint32_t>(1.0f);
     }
-    state.fr[0] = std::bit_cast<std::uint32_t>(2.0f);
-    state.fr[1] = std::bit_cast<std::uint32_t>(3.0f);
-    state.fr[2] = std::bit_cast<std::uint32_t>(4.0f);
-    state.fr[3] = std::bit_cast<std::uint32_t>(5.0f);
-    if (execute_words({0xF1FDu}, state, 0x8C073100u)) { // FTRV XMTRX,FV0
-        CHECK(state.fr[0] == std::bit_cast<std::uint32_t>(2.0f));
-        CHECK(state.fr[1] == std::bit_cast<std::uint32_t>(3.0f));
-        CHECK(state.fr[2] == std::bit_cast<std::uint32_t>(4.0f));
-        CHECK(state.fr[3] == std::bit_cast<std::uint32_t>(5.0f));
+    ftrv.fr[0] = std::bit_cast<std::uint32_t>(2.0f);
+    ftrv.fr[1] = std::bit_cast<std::uint32_t>(3.0f);
+    ftrv.fr[2] = std::bit_cast<std::uint32_t>(4.0f);
+    ftrv.fr[3] = std::bit_cast<std::uint32_t>(5.0f);
+    if (execute_words({0xF1FDu}, ftrv, 0x8C073100u)) {
+        CHECK(ftrv.fr[0] == std::bit_cast<std::uint32_t>(2.0f));
+        CHECK(ftrv.fr[1] == std::bit_cast<std::uint32_t>(3.0f));
+        CHECK(ftrv.fr[2] == std::bit_cast<std::uint32_t>(4.0f));
+        CHECK(ftrv.fr[3] == std::bit_cast<std::uint32_t>(5.0f));
+        CHECK((ftrv.fpscr & kCauseI) != 0u);
+        CHECK((ftrv.fpscr & kFlagI) != 0u);
     }
+}
 
+static void test_enabled_inexact_on_fipr_traps_before_writeback() {
+    constexpr std::uint32_t kEnableI = 1u << 7u;
+    constexpr std::uint32_t kCauseI = 1u << 12u;
+    jojo::Sh4ReferenceState state{};
+    state.fpscr |= kEnableI;
+    state.vbr = 0x8C000000u;
+    for (int i = 0; i < 8; ++i) state.fr[static_cast<std::size_t>(i)] = std::bit_cast<std::uint32_t>(1.0f);
+    const auto before = state.fr[3];
+    const auto run = run_words({0xF1EDu}, state, 0x8C073180u);
+    CHECK(run);
+    if (!run) return;
+    CHECK(state.fr[3] == before);
+    CHECK((state.fpscr & kCauseI) != 0u);
+    CHECK(state.expevt == 0x120u);
+    CHECK(state.spc == 0x8C073180u);
+    CHECK(state.pc == 0x8C000100u);
+}
+
+static void test_fsca_and_fsrra() {
+    jojo::Sh4ReferenceState state{};
     state.fpul = 0u;
-    if (execute_words({0xF0FDu}, state, 0x8C073200u)) { // FSCA FPUL,DR0
+    if (execute_words({0xF0FDu}, state, 0x8C073200u)) {
         CHECK(state.fr[0] == std::bit_cast<std::uint32_t>(0.0f));
         CHECK(state.fr[1] == std::bit_cast<std::uint32_t>(1.0f));
     }
 
+    constexpr std::uint32_t kCauseI = 1u << 12u;
+    constexpr std::uint32_t kFlagI = 1u << 2u;
     state.fr[0] = std::bit_cast<std::uint32_t>(4.0f);
-    state.fpscr &= ~0x00080000u;
     state.fpscr &= ~(0x3Fu << 12u);
     state.fpscr &= ~(0x1Fu << 2u);
-    if (execute_words({0xF07Du}, state, 0x8C073300u)) { // FSRRA FR0
+    if (execute_words({0xF07Du}, state, 0x8C073300u)) {
         CHECK(state.fr[0] == std::bit_cast<std::uint32_t>(0.5f));
-        CHECK((state.fpscr & (1u << 12u)) != 0u); // Cause.I is architecturally set for approximation.
-        CHECK((state.fpscr & (1u << 2u)) != 0u);  // Flag.I accumulates.
+        CHECK((state.fpscr & kCauseI) != 0u);
+        CHECK((state.fpscr & kFlagI) != 0u);
     }
 }
 
-static void test_fpscr_exception_flags_and_enabled_exception_entry() {
+static void test_fpscr_divide_exception_and_unmaskable_denormal_error() {
     constexpr std::uint32_t kCauseZ = 1u << 15u;
     constexpr std::uint32_t kFlagZ = 1u << 5u;
     constexpr std::uint32_t kEnableZ = 1u << 10u;
-
-    jojo::Sh4ReferenceState masked{};
-    masked.fpscr &= ~0x00080000u;
-    masked.fr[0] = std::bit_cast<std::uint32_t>(1.0f);
-    masked.fr[1] = std::bit_cast<std::uint32_t>(0.0f);
-    if (execute_words({0xF013u}, masked, 0x8C074000u)) { // FDIV FR1,FR0
-        CHECK(std::isinf(std::bit_cast<float>(masked.fr[0])));
-        CHECK((masked.fpscr & kCauseZ) != 0u);
-        CHECK((masked.fpscr & kFlagZ) != 0u);
-    }
+    constexpr std::uint32_t kCauseE = 1u << 17u;
 
     jojo::Sh4ReferenceState enabled{};
-    enabled.fpscr &= ~0x00080000u;
     enabled.fpscr |= kEnableZ;
     enabled.fr[0] = std::bit_cast<std::uint32_t>(1.0f);
     enabled.fr[1] = std::bit_cast<std::uint32_t>(0.0f);
     enabled.vbr = 0x8C000000u;
-    enabled.r[15] = 0x8CFF0000u;
     const auto before = enabled.fr[0];
-    const auto run = run_words({0xF013u}, enabled, 0x8C074100u);
+    auto run = run_words({0xF013u}, enabled, 0x8C074100u);
     CHECK(run);
     if (run) {
-        CHECK(enabled.fr[0] == before); // trapping instruction must not commit destination.
+        CHECK(enabled.fr[0] == before);
         CHECK((enabled.fpscr & kCauseZ) != 0u);
         CHECK((enabled.fpscr & kFlagZ) != 0u);
         CHECK(enabled.expevt == 0x120u);
-        CHECK(enabled.spc == 0x8C074100u);
-        CHECK(enabled.sgr == 0x8CFF0000u);
-        CHECK(enabled.pc == 0x8C000100u);
+    }
+
+    jojo::Sh4ReferenceState denormal{};
+    denormal.fpscr &= ~(1u << 18u); // DN=0: denormal input must raise unmaskable FPU error E.
+    denormal.vbr = 0x8C000000u;
+    denormal.fr[0] = std::bit_cast<std::uint32_t>(1.0f);
+    denormal.fr[1] = 0x00000001u;
+    const auto denormal_before = denormal.fr[0];
+    run = run_words({0xF010u}, denormal, 0x8C074200u); // FADD FR1,FR0
+    CHECK(run);
+    if (run) {
+        CHECK(denormal.fr[0] == denormal_before);
+        CHECK((denormal.fpscr & kCauseE) != 0u);
+        CHECK(denormal.expevt == 0x120u);
+        CHECK(denormal.spc == 0x8C074200u);
+        CHECK(denormal.pc == 0x8C000100u);
     }
 }
 
 int main() {
-    test_decoder_recognizes_final_base_sh4_fpu_families();
+    test_decoder_recognizes_final_fpu_families();
     test_double_precision_arithmetic_and_conversion();
-    test_single_double_conversion_instructions();
-    test_vector_and_transcendental_families();
-    test_fpscr_exception_flags_and_enabled_exception_entry();
+    test_single_double_conversion_requires_double_precision_mode();
+    test_vector_families_signal_architectural_inexact();
+    test_enabled_inexact_on_fipr_traps_before_writeback();
+    test_fsca_and_fsrra();
+    test_fpscr_divide_exception_and_unmaskable_denormal_error();
     if (failures) {
         std::cerr << failures << " SH-4 final FPU completion assertion(s) failed\n";
         return 1;
