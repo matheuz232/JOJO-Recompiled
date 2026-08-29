@@ -33,6 +33,10 @@ jobs:
                   '"enum class Sh4ReferenceStopReason {\\n    left_program,\\n    end_of_stream,\\n    block_limit,\\n};\\n",',
                   '"enum class Sh4ReferenceStopReason {\\n    end_of_stream,\\n    left_program,\\n    block_limit,\\n};\\n",',
               ),
+              (
+                  '"    state.sr |= kSrMd | kSrRb | kSrBl;\\n",',
+                  '"    state.sr |= kSrBl | kSrRb | kSrMd;\\n",',
+              ),
           ]
           for old, new in patches:
               if old not in text:
