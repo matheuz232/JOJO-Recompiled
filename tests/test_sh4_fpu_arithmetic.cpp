@@ -52,10 +52,10 @@ static bool execute_words(const std::vector<std::uint16_t>& words,
 
 static void test_decoder_recognizes_binary_arithmetic() {
     using jojo::Sh4Op;
-    CHECK(jojo::decode_sh4(0xF010u, 0).op != Sh4Op::unsupported); // FADD FR1,FR0
-    CHECK(jojo::decode_sh4(0xF231u, 0).op != Sh4Op::unsupported); // FSUB FR3,FR2
-    CHECK(jojo::decode_sh4(0xF452u, 0).op != Sh4Op::unsupported); // FMUL FR5,FR4
-    CHECK(jojo::decode_sh4(0xF673u, 0).op != Sh4Op::unsupported); // FDIV FR7,FR6
+    CHECK(jojo::decode_sh4(0xF010u, 0).op == Sh4Op::fadd); // FADD FR1,FR0
+    CHECK(jojo::decode_sh4(0xF231u, 0).op == Sh4Op::fsub); // FSUB FR3,FR2
+    CHECK(jojo::decode_sh4(0xF452u, 0).op == Sh4Op::fmul); // FMUL FR5,FR4
+    CHECK(jojo::decode_sh4(0xF673u, 0).op == Sh4Op::fdiv); // FDIV FR7,FR6
 }
 
 static void test_normal_single_precision_operations() {
@@ -98,6 +98,13 @@ static void test_rounding_mode_selects_nearest_or_toward_zero() {
     if (execute_words({0xF010u}, nearest, 0x8C052000u)) {
         CHECK(nearest.fr[0] == 0x3F800001u);
     }
+
+    jojo::Sh4ReferenceState negative_toward_zero{};
+    negative_toward_zero.fr[0] = 0xBF800000u; // -1.0
+    negative_toward_zero.fr[1] = 0xB3C00000u; // -3 * 2^-25
+    if (execute_words({0xF010u}, negative_toward_zero, 0x8C052800u)) {
+        CHECK(negative_toward_zero.fr[0] == 0xBF800000u);
+    }
 }
 
 static void test_dn_flushes_a_subnormal_result_to_zero() {
@@ -107,6 +114,13 @@ static void test_dn_flushes_a_subnormal_result_to_zero() {
 
     const bool ok = execute_words({0xF012u}, state, 0x8C053000u); // FMUL FR1,FR0
     if (ok) CHECK(state.fr[0] == 0x00000000u);
+
+    jojo::Sh4ReferenceState negative{};
+    negative.fr[0] = 0x80800000u; // Smallest negative normal.
+    negative.fr[1] = std::bit_cast<std::uint32_t>(0.5f);
+    if (execute_words({0xF012u}, negative, 0x8C053800u)) {
+        CHECK(negative.fr[0] == 0x80000000u);
+    }
 }
 
 static void test_unsupported_modes_fail_without_changing_destination() {
