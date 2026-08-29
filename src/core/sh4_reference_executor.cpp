@@ -26,6 +26,8 @@ constexpr std::uint32_t kFpscrWritableMask = 0x003FFFFFu;
 constexpr std::uint32_t kFpscrFrBit = 0x00200000u;
 constexpr std::uint32_t kFpscrSzBit = 0x00100000u;
 constexpr std::uint32_t kFpscrPrBit = 0x00080000u;
+constexpr std::uint32_t kFpscrDnBit = 0x00040000u;
+constexpr std::uint32_t kFpscrRmMask = 0x00000003u;
 
 void write_fpscr(Sh4ReferenceState& state, std::uint32_t value) noexcept {
     const auto masked = value & kFpscrWritableMask;
@@ -160,6 +162,89 @@ Result<void> store_fpu_memory(const Sh4ReferenceState& state,
     auto first = write_u32(memory, address, bank[base + 1u]);
     if (!first) return first;
     return write_u32(memory, address + 4u, bank[base]);
+}
+
+bool is_single_subnormal(std::uint32_t bits) noexcept {
+    return (bits & 0x7F800000u) == 0u && (bits & 0x007FFFFFu) != 0u;
+}
+
+Result<float> read_single_operand(const Sh4ReferenceState& state,
+                                  std::uint32_t bits) {
+    if (is_single_subnormal(bits)) {
+        if ((state.fpscr & kFpscrDnBit) == 0u) {
+            return Result<float>::failure(
+                ErrorCode::unsupported_format,
+                "reference FPU arithmetic with DN=0 subnormal operands is not implemented");
+        }
+        return Result<float>::success(
+            std::bit_cast<float>(bits & 0x80000000u));
+    }
+
+    const auto value = std::bit_cast<float>(bits);
+    if (!std::isfinite(value)) {
+        return Result<float>::failure(
+            ErrorCode::unsupported_format,
+            "reference FPU arithmetic with infinity or NaN is not implemented");
+    }
+    return Result<float>::success(value);
+}
+
+Result<std::uint32_t> calculate_single_binary(Sh4IrOp op,
+                                               const Sh4ReferenceState& state,
+                                               float destination,
+                                               float source) {
+    const auto rounding_mode = state.fpscr & kFpscrRmMask;
+    if (rounding_mode > 1u) {
+        return Result<std::uint32_t>::failure(
+            ErrorCode::unsupported_format,
+            "reference FPU arithmetic encountered a reserved rounding mode");
+    }
+    if (op == Sh4IrOp::divide_single_float && source == 0.0f) {
+        return Result<std::uint32_t>::failure(
+            ErrorCode::unsupported_format,
+            "reference FDIV division-by-zero flags are not implemented");
+    }
+
+    double exact{};
+    if (op == Sh4IrOp::add_single_float) {
+        exact = static_cast<double>(destination) + static_cast<double>(source);
+    } else if (op == Sh4IrOp::subtract_single_float) {
+        exact = static_cast<double>(destination) - static_cast<double>(source);
+    } else if (op == Sh4IrOp::multiply_single_float) {
+        exact = static_cast<double>(destination) * static_cast<double>(source);
+    } else {
+        exact = static_cast<double>(destination) / static_cast<double>(source);
+    }
+    if (!std::isfinite(exact)) {
+        return Result<std::uint32_t>::failure(
+            ErrorCode::unsupported_format,
+            "reference FPU arithmetic overflow flags are not implemented");
+    }
+
+    auto result = static_cast<float>(exact);
+    if (!std::isfinite(result)) {
+        return Result<std::uint32_t>::failure(
+            ErrorCode::unsupported_format,
+            "reference FPU arithmetic overflow flags are not implemented");
+    }
+    if (rounding_mode == 1u) {
+        const auto rounded = static_cast<double>(result);
+        if ((exact > 0.0 && rounded > exact) || (exact < 0.0 && rounded < exact)) {
+            result = std::nextafter(result, 0.0f);
+        }
+    }
+
+    auto bits = std::bit_cast<std::uint32_t>(result);
+    const bool underflowed_to_zero = result == 0.0f && exact != 0.0;
+    if (is_single_subnormal(bits) || underflowed_to_zero) {
+        if ((state.fpscr & kFpscrDnBit) == 0u) {
+            return Result<std::uint32_t>::failure(
+                ErrorCode::unsupported_format,
+                "reference FPU arithmetic with DN=0 subnormal results is not implemented");
+        }
+        bits &= 0x80000000u;
+    }
+    return Result<std::uint32_t>::success(bits);
 }
 
 bool is_load8(Sh4IrOp op) noexcept {
@@ -306,6 +391,32 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             }
             state.fpul =
                 std::bit_cast<std::uint32_t>(static_cast<std::int32_t>(truncated));
+            return Result<void>::success();
+        }
+        case Sh4IrOp::add_single_float:
+        case Sh4IrOp::subtract_single_float:
+        case Sh4IrOp::multiply_single_float:
+        case Sh4IrOp::divide_single_float: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            if ((state.fpscr & kFpscrPrBit) != 0u) {
+                return Result<void>::failure(
+                    ErrorCode::unsupported_format,
+                    "reference FPU double-precision arithmetic is not implemented");
+            }
+
+            auto destination = read_single_operand(state, state.fr[instruction.dst_reg]);
+            if (!destination) {
+                return Result<void>::failure(destination.error, destination.detail);
+            }
+            auto source = read_single_operand(state, state.fr[instruction.src_reg]);
+            if (!source) return Result<void>::failure(source.error, source.detail);
+            auto result = calculate_single_binary(
+                instruction.op, state, destination.value, source.value);
+            if (!result) return Result<void>::failure(result.error, result.detail);
+            state.fr[instruction.dst_reg] = result.value;
             return Result<void>::success();
         }
         case Sh4IrOp::copy_fpu_registers: {

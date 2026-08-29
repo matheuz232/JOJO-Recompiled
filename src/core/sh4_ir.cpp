@@ -128,6 +128,10 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::fsts: out.op = Sh4IrOp::copy_fpul_to_fr; break;
         case Sh4Op::float_fpul: out.op = Sh4IrOp::convert_fpul_to_float; break;
         case Sh4Op::ftrc: out.op = Sh4IrOp::truncate_float_to_fpul; break;
+        case Sh4Op::fadd: out.op = Sh4IrOp::add_single_float; break;
+        case Sh4Op::fsub: out.op = Sh4IrOp::subtract_single_float; break;
+        case Sh4Op::fmul: out.op = Sh4IrOp::multiply_single_float; break;
+        case Sh4Op::fdiv: out.op = Sh4IrOp::divide_single_float; break;
         case Sh4Op::fmov_reg: out.op = Sh4IrOp::copy_fpu_registers; break;
         case Sh4Op::fmov_store: out.op = Sh4IrOp::store_fpu_memory; break;
         case Sh4Op::fmov_load: out.op = Sh4IrOp::load_fpu_memory; break;

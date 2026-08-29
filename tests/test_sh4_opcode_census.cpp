@@ -25,10 +25,10 @@ static void test_census_counts_and_groups_unknown_words() {
     if (!census) return;
 
     CHECK(census.value.total_words == 5u);
-    CHECK(census.value.supported_words == 2u);
-    CHECK(census.value.unsupported_words == 3u);
-    CHECK(census.value.unsupported.size() == 2u);
-    if (census.value.unsupported.size() != 2u) return;
+    CHECK(census.value.supported_words == 3u);
+    CHECK(census.value.unsupported_words == 2u);
+    CHECK(census.value.unsupported.size() == 1u);
+    if (census.value.unsupported.size() != 1u) return;
 
     CHECK(census.value.unsupported[0].raw == 0xFFFFu);
     CHECK(census.value.unsupported[0].count == 2u);
@@ -36,10 +36,6 @@ static void test_census_counts_and_groups_unknown_words() {
     CHECK(census.value.unsupported[0].sample_addresses[0] == 0x8C010002u);
     CHECK(census.value.unsupported[0].sample_addresses[1] == 0x8C010006u);
 
-    CHECK(census.value.unsupported[1].raw == 0xF123u);
-    CHECK(census.value.unsupported[1].count == 1u);
-    CHECK(census.value.unsupported[1].sample_addresses.size() == 1u);
-    CHECK(census.value.unsupported[1].sample_addresses[0] == 0x8C010008u);
 }
 
 static void test_census_limits_samples_without_losing_frequency() {
