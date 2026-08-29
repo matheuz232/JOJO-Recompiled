@@ -15,14 +15,24 @@ static void append_word(std::vector<std::uint8_t>& bytes, std::uint16_t word) {
     bytes.push_back(static_cast<std::uint8_t>(word >> 8u));
 }
 
-static void test_fd_vectors_before_fpu_state_mutation() {
+static jojo::Result<jojo::Sh4ReferenceRunResult> run_words(
+    const std::vector<std::uint16_t>& words,
+    jojo::Sh4ReferenceState& state,
+    std::uint32_t base) {
     std::vector<std::uint8_t> bytes;
-    append_word(bytes, 0xF010u); // FADD FR1,FR0
-    const auto cfg = jojo::build_sh4_cfg(bytes, 0x8C078000u, 0x8C078000u);
-    CHECK(cfg); if (!cfg) return;
+    for (const auto word : words) append_word(bytes, word);
+    const auto cfg = jojo::build_sh4_cfg(bytes, base, base);
+    if (!cfg) return jojo::Result<jojo::Sh4ReferenceRunResult>::failure(cfg.error, cfg.detail);
+    if (!cfg.value.unsupported_sites.empty()) {
+        return jojo::Result<jojo::Sh4ReferenceRunResult>::failure(
+            jojo::ErrorCode::unsupported_format, "test contains unsupported SH-4 opcode");
+    }
     const auto ir = jojo::lift_sh4_cfg(cfg.value);
-    CHECK(ir); if (!ir) return;
+    if (!ir) return jojo::Result<jojo::Sh4ReferenceRunResult>::failure(ir.error, ir.detail);
+    return jojo::execute_sh4_ir_reference(ir.value, state, {}, 8u);
+}
 
+static void test_fd_vectors_before_fpu_state_mutation() {
     jojo::Sh4ReferenceState state{};
     state.sr = 1u << 15u; // FD
     state.vbr = 0x8C000000u;
@@ -31,7 +41,7 @@ static void test_fd_vectors_before_fpu_state_mutation() {
     state.fr[1] = std::bit_cast<std::uint32_t>(2.0f);
     const auto before = state.fr[0];
 
-    const auto run = jojo::execute_sh4_ir_reference(ir.value, state, {}, 4u);
+    const auto run = run_words({0xF010u}, state, 0x8C078000u); // FADD FR1,FR0
     CHECK(run);
     if (!run) return;
     CHECK(state.fr[0] == before);
@@ -41,8 +51,29 @@ static void test_fd_vectors_before_fpu_state_mutation() {
     CHECK(state.pc == 0x8C000100u);
 }
 
+static void test_fd_in_delay_slot_uses_slot_fpu_disable_vector() {
+    jojo::Sh4ReferenceState state{};
+    state.sr = 1u << 15u; // FD
+    state.vbr = 0x8C000000u;
+    state.r[15] = 0x8CFE0000u;
+    state.fr[0] = std::bit_cast<std::uint32_t>(3.0f);
+    state.fr[1] = std::bit_cast<std::uint32_t>(4.0f);
+    const auto before = state.fr[0];
+
+    // BRA disp=0 followed by FADD in its delay slot.
+    const auto run = run_words({0xA000u, 0xF010u}, state, 0x8C078100u);
+    CHECK(run);
+    if (!run) return;
+    CHECK(state.fr[0] == before);
+    CHECK(state.expevt == 0x820u);
+    CHECK(state.spc == 0x8C078100u);
+    CHECK(state.sgr == 0x8CFE0000u);
+    CHECK(state.pc == 0x8C000100u);
+}
+
 int main() {
     test_fd_vectors_before_fpu_state_mutation();
+    test_fd_in_delay_slot_uses_slot_fpu_disable_vector();
     if (failures) {
         std::cerr << failures << " SH-4 FPU-disable assertion(s) failed\n";
         return 1;
