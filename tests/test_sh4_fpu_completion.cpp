@@ -162,22 +162,56 @@ static void test_enabled_inexact_on_fipr_traps_before_writeback() {
 }
 
 static void test_fsca_and_fsrra() {
+    constexpr std::uint32_t kCauseI = 1u << 12u;
+    constexpr std::uint32_t kFlagI = 1u << 2u;
+    constexpr std::uint32_t kEnableI = 1u << 7u;
+    constexpr std::uint32_t kCauseE = 1u << 17u;
+
     jojo::Sh4ReferenceState state{};
     state.fpul = 0u;
     if (execute_words({0xF0FDu}, state, 0x8C073200u)) {
         CHECK(state.fr[0] == std::bit_cast<std::uint32_t>(0.0f));
         CHECK(state.fr[1] == std::bit_cast<std::uint32_t>(1.0f));
-    }
-
-    constexpr std::uint32_t kCauseI = 1u << 12u;
-    constexpr std::uint32_t kFlagI = 1u << 2u;
-    state.fr[0] = std::bit_cast<std::uint32_t>(4.0f);
-    state.fpscr &= ~(0x3Fu << 12u);
-    state.fpscr &= ~(0x1Fu << 2u);
-    if (execute_words({0xF07Du}, state, 0x8C073300u)) {
-        CHECK(state.fr[0] == std::bit_cast<std::uint32_t>(0.5f));
         CHECK((state.fpscr & kCauseI) != 0u);
         CHECK((state.fpscr & kFlagI) != 0u);
+    }
+
+    jojo::Sh4ReferenceState fsca_trap{};
+    fsca_trap.fpscr |= kEnableI;
+    fsca_trap.vbr = 0x8C000000u;
+    fsca_trap.fpul = 0u;
+    fsca_trap.fr[0] = 0x11111111u;
+    fsca_trap.fr[1] = 0x22222222u;
+    const auto fsca_run = run_words({0xF0FDu}, fsca_trap, 0x8C073280u);
+    CHECK(fsca_run);
+    if (fsca_run) {
+        CHECK(fsca_trap.fr[0] == 0x11111111u);
+        CHECK(fsca_trap.fr[1] == 0x22222222u);
+        CHECK((fsca_trap.fpscr & kCauseI) != 0u);
+        CHECK(fsca_trap.expevt == 0x120u);
+        CHECK(fsca_trap.spc == 0x8C073280u);
+    }
+
+    jojo::Sh4ReferenceState fsrra{};
+    fsrra.fr[0] = std::bit_cast<std::uint32_t>(4.0f);
+    if (execute_words({0xF07Du}, fsrra, 0x8C073300u)) {
+        CHECK(fsrra.fr[0] == std::bit_cast<std::uint32_t>(0.5f));
+        CHECK((fsrra.fpscr & kCauseI) != 0u);
+        CHECK((fsrra.fpscr & kFlagI) != 0u);
+    }
+
+    jojo::Sh4ReferenceState fsrra_denormal{};
+    fsrra_denormal.fpscr &= ~(1u << 18u); // DN=0.
+    fsrra_denormal.vbr = 0x8C000000u;
+    fsrra_denormal.fr[0] = 0x00000001u;
+    const auto before_denormal = fsrra_denormal.fr[0];
+    const auto fsrra_run = run_words({0xF07Du}, fsrra_denormal, 0x8C073380u);
+    CHECK(fsrra_run);
+    if (fsrra_run) {
+        CHECK(fsrra_denormal.fr[0] == before_denormal);
+        CHECK((fsrra_denormal.fpscr & kCauseE) != 0u);
+        CHECK(fsrra_denormal.expevt == 0x120u);
+        CHECK(fsrra_denormal.spc == 0x8C073380u);
     }
 }
 
