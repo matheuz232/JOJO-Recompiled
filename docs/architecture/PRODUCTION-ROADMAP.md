@@ -12,15 +12,19 @@ The repository must never contain game images, extracted copyrighted assets, gen
 
 ## Milestones
 
-### M1 — Production foundation
+### M1 — Production foundation — Complete (100%)
 
-- One Windows end-user executable.
-- First-run conversion flow with progress events and a persistent conversion log.
-- Modern custom-drawn JoJo-inspired first-run visual language.
-- `%LOCALAPPDATA%` application/game-data layout.
-- Graphics model extended to MSAA 8x, windowed/fullscreen/borderless and UI scaling.
-- No external graphics/control tabs in the first-run shell.
-- Windows CI build + tests.
+Completion evidence is tracked in [`../superpowers/plans/2026-08-28-production-foundation.md`](../superpowers/plans/2026-08-28-production-foundation.md).
+
+- [x] One Windows end-user executable.
+- [x] First-run conversion flow with progress events and a persistent conversion log.
+- [x] Modern custom-drawn JoJo-inspired first-run visual language.
+- [x] `%LOCALAPPDATA%` application/game-data layout.
+- [x] Graphics model extended to MSAA 8x, windowed/fullscreen/borderless and UI scaling.
+- [x] No external graphics/control tabs in the first-run shell.
+- [x] Windows CI build + tests.
+
+M1 completion does **not** imply that the commercial game is playable or that the native backend is ready; those remain later milestones.
 
 ### M2 — Disc filesystem + game revision identification
 
