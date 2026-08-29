@@ -1,0 +1,27 @@
+name: Apply FMAC GREEN
+
+on:
+  push:
+    branches:
+      - feature/sh4-fmac
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply deterministic FMAC edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_fmac_green.py
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: implement SH-4 FMAC"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
