@@ -32,6 +32,7 @@ add_library(jojo_core STATIC
   src/core/sh4_ir.cpp
   src/core/sh4_reference_executor.cpp
   src/core/sh4_reference_bus.cpp
+  src/core/sh4_interrupt_entry.cpp
   src/core/revision.cpp
   src/core/conversion.cpp
   src/core/runtime.cpp
