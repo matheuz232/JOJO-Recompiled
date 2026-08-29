@@ -32,6 +32,7 @@ add_library(jojo_core STATIC
   src/core/sh4_ir.cpp
   src/core/sh4_reference_executor.cpp
   src/core/sh4_reference_bus.cpp
+  src/core/sh4_interrupt_entry.cpp
   src/core/revision.cpp
   src/core/conversion.cpp
   src/core/runtime.cpp
@@ -118,3 +119,6 @@ add_test(NAME jojo_dreamcast_bus_diagnostics_tests COMMAND jojo_dreamcast_bus_di
 add_executable(jojo_dreamcast_system_asic_tests tests/test_dreamcast_system_asic.cpp)
 target_link_libraries(jojo_dreamcast_system_asic_tests PRIVATE jojo_core)
 add_test(NAME jojo_dreamcast_system_asic_tests COMMAND jojo_dreamcast_system_asic_tests)
+add_executable(jojo_sh4_interrupt_entry_tests tests/test_sh4_interrupt_entry.cpp)
+target_link_libraries(jojo_sh4_interrupt_entry_tests PRIVATE jojo_core)
+add_test(NAME jojo_sh4_interrupt_entry_tests COMMAND jojo_sh4_interrupt_entry_tests)

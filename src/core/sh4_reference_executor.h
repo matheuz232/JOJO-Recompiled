@@ -18,6 +18,12 @@ struct Sh4ReferenceState {
     std::uint32_t gbr{};
     std::uint32_t mach{};
     std::uint32_t macl{};
+    std::uint32_t sr{};
+    std::uint32_t ssr{};
+    std::uint32_t spc{};
+    std::uint32_t sgr{};
+    std::uint32_t vbr{};
+    std::uint32_t intevt{};
     bool t{};
 };
 
@@ -104,6 +110,10 @@ struct Sh4ReferenceRunResult {
     std::size_t blocks_executed{};
     std::size_t operations_executed{};
 };
+
+[[nodiscard]] Result<bool> accept_sh4_irl_interrupt(
+    Sh4ReferenceState& state,
+    std::uint8_t level);
 
 [[nodiscard]] Result<Sh4ReferenceRunResult> execute_sh4_ir_reference(
     const Sh4IrProgram& program,
