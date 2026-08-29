@@ -54,6 +54,9 @@ static void test_reports_decoder_coverage_and_cfg() {
     if (!result.value.unsupported_histogram.empty()) {
         CHECK(result.value.unsupported_histogram[0].raw_opcode == 0xFFFFu);
         CHECK(result.value.unsupported_histogram[0].count == 2);
+        CHECK(result.value.unsupported_histogram[0].sample_addresses.size() == 2u);
+        CHECK(result.value.unsupported_histogram[0].sample_addresses[0] == 0x8C010004u);
+        CHECK(result.value.unsupported_histogram[0].sample_addresses[1] == 0x8C010006u);
     }
     CHECK(result.value.entry_cfg.entry_address == 0x8C010000u);
     CHECK(result.value.entry_cfg.blocks.size() == 1);
@@ -77,6 +80,10 @@ static void test_histogram_is_count_then_opcode_sorted() {
     if (result.value.unsupported_histogram.size() == 3) {
         CHECK(result.value.unsupported_histogram[0].raw_opcode == 0xFFFEu);
         CHECK(result.value.unsupported_histogram[0].count == 3);
+        CHECK(result.value.unsupported_histogram[0].sample_addresses.size() == 3u);
+        CHECK(result.value.unsupported_histogram[0].sample_addresses[0] == 0x8C010000u);
+        CHECK(result.value.unsupported_histogram[0].sample_addresses[1] == 0x8C010004u);
+        CHECK(result.value.unsupported_histogram[0].sample_addresses[2] == 0x8C01000Au);
         CHECK(result.value.unsupported_histogram[1].raw_opcode == 0xFFFFu);
         CHECK(result.value.unsupported_histogram[1].count == 2);
         CHECK(result.value.unsupported_histogram[2].raw_opcode == 0xFFFDu);
