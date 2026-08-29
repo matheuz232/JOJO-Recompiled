@@ -50,7 +50,7 @@ static void test_frchg_toggles_fpscr_and_preserves_physical_banks() {
 
     bool ok = execute_words({
         0xFBFDu, // FRCHG -> alternate physical bank becomes active
-        0x02FAu, // STS FPSCR,R2
+        0x026Au, // STS FPSCR,R2
     }, state);
     if (!ok) return;
 
@@ -60,7 +60,7 @@ static void test_frchg_toggles_fpscr_and_preserves_physical_banks() {
 
     ok = execute_words({
         0xFBFDu, // FRCHG -> original physical bank becomes active again
-        0x03FAu, // STS FPSCR,R3
+        0x036Au, // STS FPSCR,R3
     }, state, 0x8C020000u);
     if (!ok) return;
 
@@ -76,9 +76,9 @@ static void test_fschg_toggles_sz_without_swapping_banks() {
 
     const bool ok = execute_words({
         0xF3FDu, // FSCHG -> SZ=1
-        0x01FAu, // STS FPSCR,R1
+        0x016Au, // STS FPSCR,R1
         0xF3FDu, // FSCHG -> SZ=0
-        0x02FAu, // STS FPSCR,R2
+        0x026Au, // STS FPSCR,R2
     }, state, 0x8C030000u);
     if (!ok) return;
 
