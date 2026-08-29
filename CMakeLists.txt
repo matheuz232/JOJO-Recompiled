@@ -40,6 +40,7 @@ add_library(jojo_core STATIC
   src/core/conversion.cpp
   src/core/runtime.cpp
   src/core/native_backend.cpp
+  src/core/native_x64.cpp
   src/core/device_id.cpp
 )
 target_include_directories(jojo_core PUBLIC src)
