@@ -182,10 +182,10 @@ static void test_rotate_semantics_and_t_bit() {
     state.pr = 0xDEAD1C00u;
     const bool ok = execute_words({
         0x0018, // SETT
-        0x4C24, // ROTCL R12: old T enters bit0, old bit31 becomes T
+        0x4C24, // ROTCL R12: prior T enters bit0; prior bit31 becomes T
         0x0029, // MOVT R0 -> 0
         0x0018, // SETT
-        0x4D25, // ROTCR R13: old T enters bit31, old bit0 becomes T
+        0x4D25, // ROTCR R13: prior T enters bit31; prior bit0 becomes T
         0x0129, // MOVT R1 -> 0
         0x4A04, // ROTL R10: old bit31 rotates to bit0 and T
         0x0229, // MOVT R2 -> 1
