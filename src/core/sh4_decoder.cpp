@@ -51,6 +51,10 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         i.has_delay_slot = true;
         return i;
     }
+    if (raw == 0x0048u) { i.op = Sh4Op::clrs; return i; }
+    if (raw == 0x0058u) { i.op = Sh4Op::sets; return i; }
+    if (raw == 0x0038u) { i.op = Sh4Op::ldtlb; return i; }
+    if (raw == 0x001Bu) { i.op = Sh4Op::sleep; return i; }
     if (raw == 0x0008u) {
         i.op = Sh4Op::clrt;
         return i;
@@ -183,6 +187,55 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
     }
 
     const auto control_code = static_cast<std::uint16_t>(raw & 0xF0FFu);
+
+    if ((raw & 0xF08Fu) == 0x408Eu) {
+        i.op = Sh4Op::ldc_bank_reg;
+        i.rm = n_field(raw);
+        i.rn = static_cast<std::uint8_t>((raw >> 4u) & 0x7u);
+        return i;
+    }
+    if ((raw & 0xF08Fu) == 0x0082u) {
+        i.op = Sh4Op::stc_bank_reg;
+        i.rn = n_field(raw);
+        i.rm = static_cast<std::uint8_t>((raw >> 4u) & 0x7u);
+        return i;
+    }
+    if ((raw & 0xF08Fu) == 0x4087u) {
+        i.op = Sh4Op::ldc_bank_postinc;
+        i.rm = n_field(raw);
+        i.rn = static_cast<std::uint8_t>((raw >> 4u) & 0x7u);
+        return i;
+    }
+    if ((raw & 0xF08Fu) == 0x4083u) {
+        i.op = Sh4Op::stc_bank_predec;
+        i.rn = n_field(raw);
+        i.rm = static_cast<std::uint8_t>((raw >> 4u) & 0x7u);
+        return i;
+    }
+
+    if (control_code == 0x400Eu) { i.op = Sh4Op::ldc_sr_reg; i.rm = n_field(raw); return i; }
+    if (control_code == 0x402Eu) { i.op = Sh4Op::ldc_vbr_reg; i.rm = n_field(raw); return i; }
+    if (control_code == 0x403Eu) { i.op = Sh4Op::ldc_ssr_reg; i.rm = n_field(raw); return i; }
+    if (control_code == 0x404Eu) { i.op = Sh4Op::ldc_spc_reg; i.rm = n_field(raw); return i; }
+    if (control_code == 0x40FAu) { i.op = Sh4Op::ldc_dbr_reg; i.rm = n_field(raw); return i; }
+    if (control_code == 0x0002u) { i.op = Sh4Op::stc_sr_reg; i.rn = n_field(raw); return i; }
+    if (control_code == 0x0022u) { i.op = Sh4Op::stc_vbr_reg; i.rn = n_field(raw); return i; }
+    if (control_code == 0x0032u) { i.op = Sh4Op::stc_ssr_reg; i.rn = n_field(raw); return i; }
+    if (control_code == 0x0042u) { i.op = Sh4Op::stc_spc_reg; i.rn = n_field(raw); return i; }
+    if (control_code == 0x003Au) { i.op = Sh4Op::stc_sgr_reg; i.rn = n_field(raw); return i; }
+    if (control_code == 0x00FAu) { i.op = Sh4Op::stc_dbr_reg; i.rn = n_field(raw); return i; }
+    if (control_code == 0x4007u) { i.op = Sh4Op::ldc_sr_postinc; i.rm = n_field(raw); return i; }
+    if (control_code == 0x4027u) { i.op = Sh4Op::ldc_vbr_postinc; i.rm = n_field(raw); return i; }
+    if (control_code == 0x4037u) { i.op = Sh4Op::ldc_ssr_postinc; i.rm = n_field(raw); return i; }
+    if (control_code == 0x4047u) { i.op = Sh4Op::ldc_spc_postinc; i.rm = n_field(raw); return i; }
+    if (control_code == 0x40F6u) { i.op = Sh4Op::ldc_dbr_postinc; i.rm = n_field(raw); return i; }
+    if (control_code == 0x4003u) { i.op = Sh4Op::stc_sr_predec; i.rn = n_field(raw); return i; }
+    if (control_code == 0x4023u) { i.op = Sh4Op::stc_vbr_predec; i.rn = n_field(raw); return i; }
+    if (control_code == 0x4033u) { i.op = Sh4Op::stc_ssr_predec; i.rn = n_field(raw); return i; }
+    if (control_code == 0x4043u) { i.op = Sh4Op::stc_spc_predec; i.rn = n_field(raw); return i; }
+    if (control_code == 0x4032u) { i.op = Sh4Op::stc_sgr_predec; i.rn = n_field(raw); return i; }
+    if (control_code == 0x40F2u) { i.op = Sh4Op::stc_dbr_predec; i.rn = n_field(raw); return i; }
+
     if (control_code == 0x401Eu) { i.op = Sh4Op::ldc_gbr_reg; i.rm = n_field(raw); return i; }
     if (control_code == 0x0012u) { i.op = Sh4Op::stc_gbr_reg; i.rn = n_field(raw); return i; }
     if (control_code == 0x4017u) { i.op = Sh4Op::ldc_gbr_postinc; i.rm = n_field(raw); return i; }
@@ -213,15 +266,30 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         i.op = Sh4Op::clrmac;
         return i;
     }
+
+    if (control_code == 0x401Bu) { i.op = Sh4Op::tas_b; i.rn = n_field(raw); return i; }
+    if (control_code == 0x00C3u) { i.op = Sh4Op::movca_l; i.rn = n_field(raw); return i; }
+    if (control_code == 0x0093u) { i.op = Sh4Op::ocbi; i.rn = n_field(raw); return i; }
+    if (control_code == 0x00A3u) { i.op = Sh4Op::ocbp; i.rn = n_field(raw); return i; }
+    if (control_code == 0x00B3u) { i.op = Sh4Op::ocbwb; i.rn = n_field(raw); return i; }
+    if (control_code == 0x0083u) { i.op = Sh4Op::pref; i.rn = n_field(raw); return i; }
+    if ((raw & 0xFF00u) == 0xC300u) {
+        i.op = Sh4Op::trapa;
+        i.immediate = static_cast<std::int32_t>(raw & 0x00FFu);
+        return i;
+    }
     const auto multiply_code = static_cast<std::uint16_t>(raw & 0xF00Fu);
     if (multiply_code == 0x0007u || multiply_code == 0x200Fu ||
         multiply_code == 0x200Eu || multiply_code == 0x300Du ||
-        multiply_code == 0x3005u) {
+        multiply_code == 0x3005u || multiply_code == 0x000Fu ||
+        multiply_code == 0x400Fu) {
         if (multiply_code == 0x0007u) i.op = Sh4Op::mul_l;
         else if (multiply_code == 0x200Fu) i.op = Sh4Op::muls_w;
         else if (multiply_code == 0x200Eu) i.op = Sh4Op::mulu_w;
         else if (multiply_code == 0x300Du) i.op = Sh4Op::dmuls_l;
-        else i.op = Sh4Op::dmulu_l;
+        else if (multiply_code == 0x3005u) i.op = Sh4Op::dmulu_l;
+        else if (multiply_code == 0x000Fu) i.op = Sh4Op::mac_l;
+        else i.op = Sh4Op::mac_w;
         i.rn = n_field(raw);
         i.rm = m_field(raw);
         return i;

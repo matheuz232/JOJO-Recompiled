@@ -15,7 +15,11 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
 
     switch (input.op) {
         case Sh4Op::nop: out.op = Sh4IrOp::nop; break;
+        case Sh4Op::clrs: out.op = Sh4IrOp::clear_s; break;
+        case Sh4Op::sets: out.op = Sh4IrOp::set_s; break;
         case Sh4Op::clrt: out.op = Sh4IrOp::clear_t; break;
+        case Sh4Op::ldtlb: out.op = Sh4IrOp::ldtlb_event; break;
+        case Sh4Op::sleep: out.op = Sh4IrOp::sleep_cpu; break;
         case Sh4Op::sett: out.op = Sh4IrOp::set_t; break;
         case Sh4Op::movt: out.op = Sh4IrOp::move_t; break;
         case Sh4Op::mov_imm: out.op = Sh4IrOp::set_imm; break;
@@ -55,6 +59,32 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::stc_gbr_reg: out.op = Sh4IrOp::copy_gbr_to_reg; break;
         case Sh4Op::ldc_gbr_postinc: out.op = Sh4IrOp::load_gbr_postinc32; break;
         case Sh4Op::stc_gbr_predec: out.op = Sh4IrOp::store_gbr_predec32; break;
+        case Sh4Op::ldc_sr_reg: out.op = Sh4IrOp::set_control_from_reg; out.imm = 0; break;
+        case Sh4Op::ldc_vbr_reg: out.op = Sh4IrOp::set_control_from_reg; out.imm = 1; break;
+        case Sh4Op::ldc_ssr_reg: out.op = Sh4IrOp::set_control_from_reg; out.imm = 2; break;
+        case Sh4Op::ldc_spc_reg: out.op = Sh4IrOp::set_control_from_reg; out.imm = 3; break;
+        case Sh4Op::ldc_dbr_reg: out.op = Sh4IrOp::set_control_from_reg; out.imm = 5; break;
+        case Sh4Op::stc_sr_reg: out.op = Sh4IrOp::copy_control_to_reg; out.imm = 0; break;
+        case Sh4Op::stc_vbr_reg: out.op = Sh4IrOp::copy_control_to_reg; out.imm = 1; break;
+        case Sh4Op::stc_ssr_reg: out.op = Sh4IrOp::copy_control_to_reg; out.imm = 2; break;
+        case Sh4Op::stc_spc_reg: out.op = Sh4IrOp::copy_control_to_reg; out.imm = 3; break;
+        case Sh4Op::stc_sgr_reg: out.op = Sh4IrOp::copy_control_to_reg; out.imm = 4; break;
+        case Sh4Op::stc_dbr_reg: out.op = Sh4IrOp::copy_control_to_reg; out.imm = 5; break;
+        case Sh4Op::ldc_sr_postinc: out.op = Sh4IrOp::load_control_postinc32; out.imm = 0; break;
+        case Sh4Op::ldc_vbr_postinc: out.op = Sh4IrOp::load_control_postinc32; out.imm = 1; break;
+        case Sh4Op::ldc_ssr_postinc: out.op = Sh4IrOp::load_control_postinc32; out.imm = 2; break;
+        case Sh4Op::ldc_spc_postinc: out.op = Sh4IrOp::load_control_postinc32; out.imm = 3; break;
+        case Sh4Op::ldc_dbr_postinc: out.op = Sh4IrOp::load_control_postinc32; out.imm = 5; break;
+        case Sh4Op::stc_sr_predec: out.op = Sh4IrOp::store_control_predec32; out.imm = 0; break;
+        case Sh4Op::stc_vbr_predec: out.op = Sh4IrOp::store_control_predec32; out.imm = 1; break;
+        case Sh4Op::stc_ssr_predec: out.op = Sh4IrOp::store_control_predec32; out.imm = 2; break;
+        case Sh4Op::stc_spc_predec: out.op = Sh4IrOp::store_control_predec32; out.imm = 3; break;
+        case Sh4Op::stc_sgr_predec: out.op = Sh4IrOp::store_control_predec32; out.imm = 4; break;
+        case Sh4Op::stc_dbr_predec: out.op = Sh4IrOp::store_control_predec32; out.imm = 5; break;
+        case Sh4Op::ldc_bank_reg: out.op = Sh4IrOp::set_bank_from_reg; break;
+        case Sh4Op::stc_bank_reg: out.op = Sh4IrOp::copy_bank_to_reg; break;
+        case Sh4Op::ldc_bank_postinc: out.op = Sh4IrOp::load_bank_postinc32; break;
+        case Sh4Op::stc_bank_predec: out.op = Sh4IrOp::store_bank_predec32; break;
         case Sh4Op::lds_mach_reg: out.op = Sh4IrOp::set_mach_from_reg; break;
         case Sh4Op::lds_macl_reg: out.op = Sh4IrOp::set_macl_from_reg; break;
         case Sh4Op::lds_pr_reg: out.op = Sh4IrOp::set_pr_from_reg; break;
@@ -81,6 +111,8 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::mulu_w: out.op = Sh4IrOp::multiply_unsigned_word; break;
         case Sh4Op::dmuls_l: out.op = Sh4IrOp::multiply_signed_long; break;
         case Sh4Op::dmulu_l: out.op = Sh4IrOp::multiply_unsigned_long; break;
+        case Sh4Op::mac_l: out.op = Sh4IrOp::multiply_accumulate_long; break;
+        case Sh4Op::mac_w: out.op = Sh4IrOp::multiply_accumulate_word; break;
         case Sh4Op::exts_b: out.op = Sh4IrOp::sign_extend_byte; break;
         case Sh4Op::exts_w: out.op = Sh4IrOp::sign_extend_word; break;
         case Sh4Op::extu_b: out.op = Sh4IrOp::zero_extend_byte; break;
@@ -138,6 +170,13 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::shal: out.op = Sh4IrOp::shift_left_one; break;
         case Sh4Op::shad: out.op = Sh4IrOp::shift_arithmetic_dynamic; break;
         case Sh4Op::shld: out.op = Sh4IrOp::shift_logical_dynamic; break;
+        case Sh4Op::tas_b: out.op = Sh4IrOp::test_and_set_byte; break;
+        case Sh4Op::trapa: out.op = Sh4IrOp::trap_imm; break;
+        case Sh4Op::movca_l: out.op = Sh4IrOp::movca_long; break;
+        case Sh4Op::ocbi: out.op = Sh4IrOp::ocbi_event; break;
+        case Sh4Op::ocbp: out.op = Sh4IrOp::ocbp_event; break;
+        case Sh4Op::ocbwb: out.op = Sh4IrOp::ocbwb_event; break;
+        case Sh4Op::pref: out.op = Sh4IrOp::pref_event; break;
         case Sh4Op::fldi0: out.op = Sh4IrOp::set_fr_zero; break;
         case Sh4Op::fldi1: out.op = Sh4IrOp::set_fr_one; break;
         case Sh4Op::flds: out.op = Sh4IrOp::copy_fr_to_fpul; break;
