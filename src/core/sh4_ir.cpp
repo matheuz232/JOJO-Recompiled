@@ -126,6 +126,8 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::fldi1: out.op = Sh4IrOp::set_fr_one; break;
         case Sh4Op::flds: out.op = Sh4IrOp::copy_fr_to_fpul; break;
         case Sh4Op::fsts: out.op = Sh4IrOp::copy_fpul_to_fr; break;
+        case Sh4Op::frchg: out.op = Sh4IrOp::toggle_fpscr_fr; break;
+        case Sh4Op::fschg: out.op = Sh4IrOp::toggle_fpscr_sz; break;
         case Sh4Op::bra:
             out.op = Sh4IrOp::branch_direct;
             if (const auto target = sh4_direct_target(input)) out.target = *target;

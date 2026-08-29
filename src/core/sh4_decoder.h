@@ -122,6 +122,8 @@ enum class Sh4Op {
     fldi1,
     flds,
     fsts,
+    frchg,
+    fschg,
     bra,
     bsr,
     bt,
