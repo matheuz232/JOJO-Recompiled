@@ -116,6 +116,8 @@ enum class Sh4IrOp {
     set_fr_one,
     copy_fr_to_fpul,
     copy_fpul_to_fr,
+    toggle_fpscr_fr,
+    toggle_fpscr_sz,
     branch_direct,
     branch_if_t,
     branch_if_not_t,

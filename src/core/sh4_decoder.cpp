@@ -384,6 +384,14 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         i.rn = n_field(raw);
         return i;
     }
+    if (raw == 0xFBFDu) {
+        i.op = Sh4Op::frchg;
+        return i;
+    }
+    if (raw == 0xF3FDu) {
+        i.op = Sh4Op::fschg;
+        return i;
+    }
 
     if ((raw & 0xF000u) == 0xA000u) {
         i.op = Sh4Op::bra;

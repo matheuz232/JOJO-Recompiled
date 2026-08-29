@@ -22,6 +22,7 @@ std::int32_t as_signed(std::uint32_t value) noexcept {
 
 constexpr std::uint32_t kFpscrWritableMask = 0x003FFFFFu;
 constexpr std::uint32_t kFpscrFrBit = 0x00200000u;
+constexpr std::uint32_t kFpscrSzBit = 0x00100000u;
 
 void write_fpscr(Sh4ReferenceState& state, std::uint32_t value) noexcept {
     const auto masked = value & kFpscrWritableMask;
@@ -218,6 +219,12 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             state.fr[instruction.dst_reg] = state.fpul;
             return Result<void>::success();
         }
+        case Sh4IrOp::toggle_fpscr_fr:
+            write_fpscr(state, state.fpscr ^ kFpscrFrBit);
+            return Result<void>::success();
+        case Sh4IrOp::toggle_fpscr_sz:
+            write_fpscr(state, state.fpscr ^ kFpscrSzBit);
+            return Result<void>::success();
         case Sh4IrOp::add_imm: {
             auto reg = require_register(instruction.dst_reg);
             if (!reg) return reg;
