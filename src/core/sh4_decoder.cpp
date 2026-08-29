@@ -404,6 +404,12 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         i.rm = m_field(raw);
         return i;
     }
+    if (fpu_binary_code == 0xF004u || fpu_binary_code == 0xF005u) {
+        i.op = fpu_binary_code == 0xF004u ? Sh4Op::fcmp_eq : Sh4Op::fcmp_gt;
+        i.rn = n_field(raw);
+        i.rm = m_field(raw);
+        return i;
+    }
     if ((raw & 0xF00Fu) == 0xF00Cu) {
         i.op = Sh4Op::fmov_reg;
         i.rn = n_field(raw);

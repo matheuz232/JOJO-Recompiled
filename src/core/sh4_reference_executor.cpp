@@ -189,6 +189,25 @@ Result<float> read_single_operand(const Sh4ReferenceState& state,
     return Result<float>::success(value);
 }
 
+Result<float> read_single_compare_operand(const Sh4ReferenceState& state,
+                                          std::uint32_t bits) {
+    if (is_single_subnormal(bits)) {
+        if ((state.fpscr & kFpscrDnBit) == 0u) {
+            return Result<float>::failure(
+                ErrorCode::unsupported_format,
+                "reference FPU compare with DN=0 subnormal operands is not implemented");
+        }
+        return Result<float>::success(std::bit_cast<float>(bits & 0x80000000u));
+    }
+    const auto value = std::bit_cast<float>(bits);
+    if (std::isnan(value)) {
+        return Result<float>::failure(
+            ErrorCode::unsupported_format,
+            "reference FPU compare NaN exception flags are not implemented");
+    }
+    return Result<float>::success(value);
+}
+
 Result<std::uint32_t> calculate_single_binary(Sh4IrOp op,
                                                const Sh4ReferenceState& state,
                                                float destination,
@@ -417,6 +436,26 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
                 instruction.op, state, destination.value, source.value);
             if (!result) return Result<void>::failure(result.error, result.detail);
             state.fr[instruction.dst_reg] = result.value;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::compare_single_float_eq:
+        case Sh4IrOp::compare_single_float_gt: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            if ((state.fpscr & kFpscrPrBit) != 0u) {
+                return Result<void>::failure(
+                    ErrorCode::unsupported_format,
+                    "reference FPU double-precision compare is not implemented");
+            }
+            auto destination = read_single_compare_operand(state, state.fr[instruction.dst_reg]);
+            if (!destination) return Result<void>::failure(destination.error, destination.detail);
+            auto source = read_single_compare_operand(state, state.fr[instruction.src_reg]);
+            if (!source) return Result<void>::failure(source.error, source.detail);
+            state.t = instruction.op == Sh4IrOp::compare_single_float_eq
+                ? destination.value == source.value
+                : destination.value > source.value;
             return Result<void>::success();
         }
         case Sh4IrOp::copy_fpu_registers: {
