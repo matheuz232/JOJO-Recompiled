@@ -127,6 +127,7 @@ enum class Sh4Op {
     fneg,
     fabs,
     fsqrt,
+    fmac,
     fadd,
     fsub,
     fmul,
