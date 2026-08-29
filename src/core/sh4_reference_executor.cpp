@@ -95,12 +95,14 @@ Result<void> write_u32(Sh4ReferenceMemoryView memory,
 
 bool is_load8(Sh4IrOp op) noexcept {
     return op == Sh4IrOp::load_mem8_signed || op == Sh4IrOp::load_postinc8_signed ||
-           op == Sh4IrOp::load_disp8_signed || op == Sh4IrOp::load_indexed8_signed;
+           op == Sh4IrOp::load_disp8_signed || op == Sh4IrOp::load_indexed8_signed ||
+           op == Sh4IrOp::load_gbr_disp8_signed;
 }
 
 bool is_load16(Sh4IrOp op) noexcept {
     return op == Sh4IrOp::load_mem16_signed || op == Sh4IrOp::load_postinc16_signed ||
-           op == Sh4IrOp::load_disp16_signed || op == Sh4IrOp::load_indexed16_signed;
+           op == Sh4IrOp::load_disp16_signed || op == Sh4IrOp::load_indexed16_signed ||
+           op == Sh4IrOp::load_gbr_disp16_signed;
 }
 
 Result<std::uint32_t> load_memory_value(Sh4IrOp op,
@@ -127,12 +129,14 @@ Result<std::uint32_t> load_memory_value(Sh4IrOp op,
 
 bool is_store8(Sh4IrOp op) noexcept {
     return op == Sh4IrOp::store_mem8 || op == Sh4IrOp::store_predec8 ||
-           op == Sh4IrOp::store_disp8 || op == Sh4IrOp::store_indexed8;
+           op == Sh4IrOp::store_disp8 || op == Sh4IrOp::store_indexed8 ||
+           op == Sh4IrOp::store_gbr_disp8;
 }
 
 bool is_store16(Sh4IrOp op) noexcept {
     return op == Sh4IrOp::store_mem16 || op == Sh4IrOp::store_predec16 ||
-           op == Sh4IrOp::store_disp16 || op == Sh4IrOp::store_indexed16;
+           op == Sh4IrOp::store_disp16 || op == Sh4IrOp::store_indexed16 ||
+           op == Sh4IrOp::store_gbr_disp16;
 }
 
 Result<void> store_memory_value(Sh4IrOp op,
@@ -293,6 +297,21 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             auto value = load_memory_value(instruction.op, memory, address);
             if (!value) return Result<void>::failure(value.error, value.detail);
             state.r[instruction.dst_reg] = value.value;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::store_gbr_disp8:
+        case Sh4IrOp::store_gbr_disp16:
+        case Sh4IrOp::store_gbr_disp32: {
+            const auto address = state.gbr + static_cast<std::uint32_t>(instruction.imm);
+            return store_memory_value(instruction.op, memory, address, state.r[0]);
+        }
+        case Sh4IrOp::load_gbr_disp8_signed:
+        case Sh4IrOp::load_gbr_disp16_signed:
+        case Sh4IrOp::load_gbr_disp32: {
+            const auto address = state.gbr + static_cast<std::uint32_t>(instruction.imm);
+            auto value = load_memory_value(instruction.op, memory, address);
+            if (!value) return Result<void>::failure(value.error, value.detail);
+            state.r[0] = value.value;
             return Result<void>::success();
         }
 
