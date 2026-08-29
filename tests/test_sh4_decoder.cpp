@@ -84,6 +84,34 @@ static void test_control_flow() {
     CHECK(jojo::decode_sh4(0x002B, 0x4006).op == Sh4Op::rte);
 }
 
+static void test_missing_scalar_isa_patterns() {
+    auto i = jojo::decode_sh4(0x212C, 0x5000); // CMP/STR R2,R1
+    CHECK(i.op == Sh4Op::cmp_str_reg);
+    CHECK(i.rn == 1 && i.rm == 2);
+
+    i = jojo::decode_sh4(0x2127, 0x5002); // DIV0S R2,R1
+    CHECK(i.op == Sh4Op::div0s);
+    CHECK(i.rn == 1 && i.rm == 2);
+    CHECK(jojo::decode_sh4(0x0019, 0x5004).op == Sh4Op::div0u);
+    CHECK(jojo::decode_sh4(0x3124, 0x5006).op == Sh4Op::div1);
+
+    CHECK(jojo::decode_sh4(0x4120, 0x5008).op == Sh4Op::shal);
+    i = jojo::decode_sh4(0x412C, 0x500A); // SHAD R2,R1
+    CHECK(i.op == Sh4Op::shad && i.rn == 1 && i.rm == 2);
+    i = jojo::decode_sh4(0x412D, 0x500C); // SHLD R2,R1
+    CHECK(i.op == Sh4Op::shld && i.rn == 1 && i.rm == 2);
+
+    CHECK(jojo::decode_sh4(0xCC55, 0x5010).op == Sh4Op::tst_b_imm_gbr);
+    CHECK(jojo::decode_sh4(0xCD55, 0x5012).op == Sh4Op::and_b_imm_gbr);
+    CHECK(jojo::decode_sh4(0xCE55, 0x5014).op == Sh4Op::xor_b_imm_gbr);
+    CHECK(jojo::decode_sh4(0xCF55, 0x5016).op == Sh4Op::or_b_imm_gbr);
+
+    i = jojo::decode_sh4(0x0323, 0x5020); // BRAF R3
+    CHECK(i.op == Sh4Op::braf && i.rn == 3 && i.has_delay_slot && i.is_branch);
+    i = jojo::decode_sh4(0x0403, 0x5022); // BSRF R4
+    CHECK(i.op == Sh4Op::bsrf && i.rn == 4 && i.has_delay_slot && i.writes_pr);
+}
+
 static void test_pc_relative_literals() {
     auto i = jojo::decode_sh4(0x9320, 0x1000); // MOV.W @(0x20,PC),R3
     CHECK(i.op == Sh4Op::movw_pc);
@@ -126,6 +154,7 @@ static void test_stream_and_unsupported() {
 int main() {
     test_fixed_and_integer_instructions();
     test_control_flow();
+    test_missing_scalar_isa_patterns();
     test_pc_relative_literals();
     test_stream_and_unsupported();
     if (failures) {
