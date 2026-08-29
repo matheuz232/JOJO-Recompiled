@@ -155,7 +155,7 @@ static void test_dt_decrements_and_sets_t_only_on_zero() {
     state.pr = 0xDEAD1800u;
     const bool ok = execute_words({
         0x4510, // DT R5 -> 1, T=0
-        0x0710, // DT R7: R7 starts 0 -> 0xFFFFFFFF, T=0
+        0x4710, // DT R7: R7 starts 0 -> 0xFFFFFFFF, T=0
         0x4510, // DT R5 -> 0, T=1
         0x0629, // MOVT R6 -> 1
         0x000B,
