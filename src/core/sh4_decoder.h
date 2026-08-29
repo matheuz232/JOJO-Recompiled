@@ -128,6 +128,8 @@ enum class Sh4Op {
     fsub,
     fmul,
     fdiv,
+    fcmp_eq,
+    fcmp_gt,
     fmov_reg,
     fmov_store,
     fmov_load,

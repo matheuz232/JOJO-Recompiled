@@ -122,6 +122,8 @@ enum class Sh4IrOp {
     subtract_single_float,
     multiply_single_float,
     divide_single_float,
+    compare_single_float_eq,
+    compare_single_float_gt,
     copy_fpu_registers,
     store_fpu_memory,
     load_fpu_memory,
