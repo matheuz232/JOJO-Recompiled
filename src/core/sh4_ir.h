@@ -114,6 +114,8 @@ enum class Sh4IrOp {
     shift_right_logical_const,
     set_fr_zero,
     set_fr_one,
+    copy_fr_to_fpul,
+    copy_fpul_to_fr,
     branch_direct,
     branch_if_t,
     branch_if_not_t,

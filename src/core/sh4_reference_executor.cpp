@@ -206,6 +206,18 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
                 : 0x3F800000u;
             return Result<void>::success();
         }
+        case Sh4IrOp::copy_fr_to_fpul: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            state.fpul = state.fr[instruction.src_reg];
+            return Result<void>::success();
+        }
+        case Sh4IrOp::copy_fpul_to_fr: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            state.fr[instruction.dst_reg] = state.fpul;
+            return Result<void>::success();
+        }
         case Sh4IrOp::add_imm: {
             auto reg = require_register(instruction.dst_reg);
             if (!reg) return reg;
