@@ -23,6 +23,7 @@ add_library(jojo_core STATIC
   src/core/dreamcast_boot.cpp
   src/core/dreamcast_analysis.cpp
   src/core/sh4_decoder.cpp
+  src/core/sh4_opcode_census.cpp
   src/core/sh4_cfg.cpp
   src/core/sh4_ir.cpp
   src/core/sh4_reference_executor.cpp
