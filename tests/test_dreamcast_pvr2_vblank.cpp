@@ -24,6 +24,22 @@ static void write32(jojo::DreamcastReferenceBus& bus, std::uint32_t address, std
     CHECK(bus.write8(address + 3u, static_cast<std::uint8_t>(value >> 24u)));
 }
 
+static std::uint32_t read32(jojo::DreamcastReferenceBus& bus, std::uint32_t address) {
+    const auto b0 = bus.read8(address + 0u);
+    const auto b1 = bus.read8(address + 1u);
+    const auto b2 = bus.read8(address + 2u);
+    const auto b3 = bus.read8(address + 3u);
+    CHECK(b0);
+    CHECK(b1);
+    CHECK(b2);
+    CHECK(b3);
+    if (!b0 || !b1 || !b2 || !b3) return 0u;
+    return static_cast<std::uint32_t>(b0.value)
+        | (static_cast<std::uint32_t>(b1.value) << 8u)
+        | (static_cast<std::uint32_t>(b2.value) << 16u)
+        | (static_cast<std::uint32_t>(b3.value) << 24u);
+}
+
 static void test_vblank_begin_reaches_sh4_through_holly_irq_path() {
     auto memory = blank_memory();
     jojo::DreamcastSystemAsic asic;
@@ -80,9 +96,40 @@ static void test_scan_timing_raises_vblank_edges_automatically() {
     if (asic.pending_irq_level()) CHECK(*asic.pending_irq_level() == 9u);
 }
 
+static void test_spg_mmio_programs_scan_timing_and_vblank_edges() {
+    auto memory = blank_memory();
+    jojo::DreamcastSystemAsic asic;
+    jojo::DreamcastReferenceBus bus(memory);
+    bus.attach_device(jojo::DreamcastBusRegion::system_asic, asic);
+
+    jojo::DreamcastPvr2 pvr(asic);
+    bus.attach_device(jojo::DreamcastBusRegion::pvr_registers, pvr);
+
+    write32(bus, 0x005F6930u, (1u << 3u) | (1u << 4u));
+
+    // SPG_VBLANK_INT: VBlank-out line 0, VBlank-in line 4.
+    write32(bus, 0x005F80CCu, 4u);
+    // SPG_LOAD: terminal V counter 5 and H counter 3 => 6 lines x 4 PVR clocks.
+    write32(bus, 0x005F80D8u, (5u << 16u) | 3u);
+
+    CHECK(read32(bus, 0x005F80CCu) == 4u);
+    CHECK(read32(bus, 0x005F80D8u) == ((5u << 16u) | 3u));
+
+    pvr.advance_cycles(15u);
+    CHECK(!asic.pending_irq_level().has_value());
+    pvr.advance_cycles(1u);
+    CHECK(asic.pending_irq_level().has_value());
+
+    write32(bus, 0x005F6900u, 1u << 3u);
+    CHECK(!asic.pending_irq_level().has_value());
+    pvr.advance_cycles(8u);
+    CHECK(asic.pending_irq_level().has_value());
+}
+
 int main() {
     test_vblank_begin_reaches_sh4_through_holly_irq_path();
     test_scan_timing_raises_vblank_edges_automatically();
+    test_spg_mmio_programs_scan_timing_and_vblank_edges();
     if (failures) {
         std::cerr << failures << " Dreamcast PVR2 VBlank assertion(s) failed\n";
         return 1;
