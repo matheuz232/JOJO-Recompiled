@@ -38,4 +38,11 @@
 - [x] Refactor ISO9660 extent reads through logical sectors.
 - [x] Remove ISO-only conversion gate.
 - [x] Verify ISO/BIN/CUE/GDI synthetic conversions.
-- [ ] Verify Linux and Windows CI.
+- [x] Verify Linux and Windows CI.
+
+## Completion audit
+
+- Synthetic tests cover cooked ISO, raw 2352-byte BIN Mode 1 and Mode 2 Form 1, CUE index mapping, GDI data-track selection, descriptor path safety, and conversion through ISO/BIN/CUE/GDI.
+- All media reads are read-only and bounded; descriptor paths cannot escape their own directory.
+- CI #480 (`de88afc8e7cddda31e5da3ffb14bd7a8fda03106`) passed the complete test suite on Linux and Windows/MSVC, including the Windows Release executable artifact.
+- No commercial disc image, extracted asset, or game byte is stored in the repository or test fixtures.
