@@ -196,6 +196,10 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
     if (control_code == 0x4002u) { i.op = Sh4Op::sts_mach_predec; i.rn = n_field(raw); return i; }
     if (control_code == 0x4012u) { i.op = Sh4Op::sts_macl_predec; i.rn = n_field(raw); return i; }
     if (control_code == 0x4022u) { i.op = Sh4Op::sts_pr_predec; i.rn = n_field(raw); return i; }
+    if (control_code == 0x405Au) { i.op = Sh4Op::lds_fpul_reg; i.rm = n_field(raw); return i; }
+    if (control_code == 0x005Au) { i.op = Sh4Op::sts_fpul_reg; i.rn = n_field(raw); return i; }
+    if (control_code == 0x4056u) { i.op = Sh4Op::lds_fpul_postinc; i.rm = n_field(raw); return i; }
+    if (control_code == 0x4052u) { i.op = Sh4Op::sts_fpul_predec; i.rn = n_field(raw); return i; }
 
     if (raw == 0x0028u) {
         i.op = Sh4Op::clrmac;
