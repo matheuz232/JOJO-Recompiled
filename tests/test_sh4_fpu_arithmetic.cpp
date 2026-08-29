@@ -58,6 +58,11 @@ static void test_decoder_recognizes_binary_arithmetic() {
     CHECK(jojo::decode_sh4(0xF673u, 0).op == Sh4Op::fdiv); // FDIV FR7,FR6
 }
 
+static void test_decoder_recognizes_fmac() {
+    using jojo::Sh4Op;
+    CHECK(jojo::decode_sh4(0xF23Eu, 0).op != Sh4Op::unsupported); // FMAC FR0,FR3,FR2
+}
+
 static void test_normal_single_precision_operations() {
     jojo::Sh4ReferenceState state{};
     state.fr[0] = std::bit_cast<std::uint32_t>(1.25f);
@@ -81,6 +86,16 @@ static void test_normal_single_precision_operations() {
     CHECK(state.fr[2] == std::bit_cast<std::uint32_t>(6.0f));
     CHECK(state.fr[4] == std::bit_cast<std::uint32_t>(12.0f));
     CHECK(state.fr[6] == std::bit_cast<std::uint32_t>(2.0f));
+}
+
+static void test_fmac_multiplies_fr0_and_source_then_adds_destination() {
+    jojo::Sh4ReferenceState state{};
+    state.fr[0] = std::bit_cast<std::uint32_t>(2.0f);
+    state.fr[2] = std::bit_cast<std::uint32_t>(1.0f);
+    state.fr[3] = std::bit_cast<std::uint32_t>(4.0f);
+
+    const bool ok = execute_words({0xF23Eu}, state, 0x8C050800u); // FMAC FR0,FR3,FR2
+    if (ok) CHECK(state.fr[2] == std::bit_cast<std::uint32_t>(9.0f));
 }
 
 static void test_rounding_mode_selects_nearest_or_toward_zero() {
@@ -140,12 +155,28 @@ static void test_unsupported_modes_fail_without_changing_destination() {
     CHECK(division_by_zero.fr[2] == std::bit_cast<std::uint32_t>(1.0f));
 }
 
+static void test_fmac_rejects_double_precision_without_mutation() {
+    jojo::Sh4ReferenceState state{};
+    state.fpscr |= 0x00080000u; // PR=1.
+    state.fr[0] = std::bit_cast<std::uint32_t>(2.0f);
+    state.fr[2] = std::bit_cast<std::uint32_t>(1.0f);
+    state.fr[3] = std::bit_cast<std::uint32_t>(4.0f);
+    const auto before = state.fr[2];
+
+    const auto run = run_words({0xF23Eu}, state, 0x8C056000u);
+    CHECK(!run);
+    CHECK(state.fr[2] == before);
+}
+
 int main() {
     test_decoder_recognizes_binary_arithmetic();
+    test_decoder_recognizes_fmac();
     test_normal_single_precision_operations();
+    test_fmac_multiplies_fr0_and_source_then_adds_destination();
     test_rounding_mode_selects_nearest_or_toward_zero();
     test_dn_flushes_a_subnormal_result_to_zero();
     test_unsupported_modes_fail_without_changing_destination();
+    test_fmac_rejects_double_precision_without_mutation();
     if (failures) {
         std::cerr << failures << " SH-4 FPU arithmetic assertion(s) failed\n";
         return 1;
