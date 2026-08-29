@@ -17,6 +17,7 @@ enum class DreamcastBootEncoding {
 struct UnsupportedOpcodeCount {
     std::uint16_t raw_opcode{};
     std::size_t count{};
+    std::vector<std::uint32_t> sample_addresses;
 };
 
 struct DreamcastBootAnalysis {
