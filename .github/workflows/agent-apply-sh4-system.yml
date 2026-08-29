@@ -18,17 +18,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Repair applicator anchor for current reference-state header
+      - name: Normalize applicator anchors for current sources
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path('.agent/apply_sh4_system.py')
           text = p.read_text(encoding='utf-8')
-          old = '"#include <string>\\n#include <vector>\\n",\n    "#include <string>\\n#include <utility>\\n#include <vector>\\n",'
-          new = '"#include <span>\\n#include <string>\\n",\n    "#include <span>\\n#include <string>\\n#include <utility>\\n",'
-          if old not in text:
-              raise SystemExit('expected stale include anchor not found in applicator')
-          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          patches = [
+              (
+                  '"#include <string>\\n#include <vector>\\n",\n    "#include <string>\\n#include <utility>\\n#include <vector>\\n",',
+                  '"#include <span>\\n#include <string>\\n",\n    "#include <span>\\n#include <string>\\n#include <utility>\\n",',
+              ),
+              (
+                  '"enum class Sh4ReferenceStopReason {\\n    left_program,\\n    end_of_stream,\\n    block_limit,\\n};\\n",',
+                  '"enum class Sh4ReferenceStopReason {\\n    end_of_stream,\\n    left_program,\\n    block_limit,\\n};\\n",',
+              ),
+          ]
+          for old, new in patches:
+              if old not in text:
+                  raise SystemExit(f'expected stale applicator anchor not found: {old[:80]}')
+              text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8')
           PY
       - name: Apply SH-4 system/control implementation
         run: python3 .agent/apply_sh4_system.py
