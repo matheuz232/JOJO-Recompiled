@@ -53,8 +53,36 @@ static void test_vblank_begin_reaches_sh4_through_holly_irq_path() {
     CHECK(state.intevt == 0x000002C0u);
 }
 
+static void test_scan_timing_raises_vblank_edges_automatically() {
+    auto memory = blank_memory();
+    jojo::DreamcastSystemAsic asic;
+    jojo::DreamcastReferenceBus bus(memory);
+    bus.attach_device(jojo::DreamcastBusRegion::system_asic, asic);
+
+    write32(bus, 0x005F6930u, (1u << 3u) | (1u << 4u));
+
+    jojo::DreamcastPvr2 pvr(asic);
+    pvr.configure_scan_timing({4u, 6u, 4u, 0u});
+
+    pvr.advance_cycles(15u);
+    CHECK(!asic.pending_irq_level().has_value());
+
+    pvr.advance_cycles(1u);
+    CHECK(asic.pending_irq_level().has_value());
+    if (asic.pending_irq_level()) CHECK(*asic.pending_irq_level() == 9u);
+
+    // Acknowledge VBlank-begin, then advance through scanline 5 and frame wrap.
+    write32(bus, 0x005F6900u, 1u << 3u);
+    CHECK(!asic.pending_irq_level().has_value());
+
+    pvr.advance_cycles(8u);
+    CHECK(asic.pending_irq_level().has_value());
+    if (asic.pending_irq_level()) CHECK(*asic.pending_irq_level() == 9u);
+}
+
 int main() {
     test_vblank_begin_reaches_sh4_through_holly_irq_path();
+    test_scan_timing_raises_vblank_edges_automatically();
     if (failures) {
         std::cerr << failures << " Dreamcast PVR2 VBlank assertion(s) failed\n";
         return 1;
