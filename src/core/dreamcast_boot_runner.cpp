@@ -1,5 +1,6 @@
 #include "core/dreamcast_boot_runner.h"
 
+#include "core/dreamcast_bus.h"
 #include "core/sh4_cfg.h"
 #include "core/sh4_ir.h"
 
@@ -48,13 +49,10 @@ Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
         return Result<DreamcastBootRunResult>::failure(ir.error, ir.detail);
     }
 
-    Sh4ReferenceMemoryView memory_view{
-        kDreamcastMainRamCachedBase,
-        result.memory.main_ram,
-    };
+    DreamcastReferenceBus bus(result.memory);
     auto run = execute_sh4_ir_reference(ir.value,
                                         result.state,
-                                        memory_view,
+                                        bus,
                                         max_blocks);
     if (!run) {
         return Result<DreamcastBootRunResult>::failure(run.error, run.detail);

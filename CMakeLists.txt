@@ -23,12 +23,14 @@ add_library(jojo_core STATIC
   src/core/dreamcast_boot.cpp
   src/core/dreamcast_analysis.cpp
   src/core/dreamcast_memory.cpp
+  src/core/dreamcast_bus.cpp
   src/core/dreamcast_boot_runner.cpp
   src/core/sh4_decoder.cpp
   src/core/sh4_opcode_census.cpp
   src/core/sh4_cfg.cpp
   src/core/sh4_ir.cpp
   src/core/sh4_reference_executor.cpp
+  src/core/sh4_reference_bus.cpp
   src/core/revision.cpp
   src/core/conversion.cpp
   src/core/runtime.cpp
@@ -106,3 +108,6 @@ add_test(NAME jojo_dreamcast_executable_memory_tests COMMAND jojo_dreamcast_exec
 add_executable(jojo_dreamcast_boot_runner_tests tests/test_dreamcast_boot_runner.cpp)
 target_link_libraries(jojo_dreamcast_boot_runner_tests PRIVATE jojo_core)
 add_test(NAME jojo_dreamcast_boot_runner_tests COMMAND jojo_dreamcast_boot_runner_tests)
+add_executable(jojo_sh4_memory_bus_tests tests/test_sh4_memory_bus.cpp)
+target_link_libraries(jojo_sh4_memory_bus_tests PRIVATE jojo_core)
+add_test(NAME jojo_sh4_memory_bus_tests COMMAND jojo_sh4_memory_bus_tests)
