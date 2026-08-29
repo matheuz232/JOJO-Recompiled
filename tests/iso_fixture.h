@@ -22,6 +22,16 @@ inline void be32(std::vector<std::uint8_t>& image, std::size_t off, std::uint32_
     image[off + 3] = static_cast<std::uint8_t>(v);
 }
 
+inline void fixed_ascii(std::vector<std::uint8_t>& image,
+                        std::size_t off,
+                        std::size_t width,
+                        std::string_view text) {
+    std::fill_n(image.begin() + static_cast<std::ptrdiff_t>(off), width,
+                static_cast<std::uint8_t>(' '));
+    const auto count = std::min(width, text.size());
+    std::copy_n(text.begin(), count, image.begin() + static_cast<std::ptrdiff_t>(off));
+}
+
 inline std::size_t dir_record(std::vector<std::uint8_t>& image, std::size_t off,
                               std::uint32_t lba, std::uint32_t size,
                               std::uint8_t flags, std::string_view name,
@@ -44,6 +54,19 @@ inline std::size_t dir_record(std::vector<std::uint8_t>& image, std::size_t off,
 
 inline std::filesystem::path write_image(const std::filesystem::path& path) {
     std::vector<std::uint8_t> image(24 * sector, 0);
+
+    fixed_ascii(image, 0x000, 16, "SEGA SEGAKATANA");
+    fixed_ascii(image, 0x010, 16, "SEGA ENTERPRISES");
+    fixed_ascii(image, 0x020, 16, "GD-ROM1/1");
+    fixed_ascii(image, 0x030, 8, "JUE");
+    fixed_ascii(image, 0x038, 8, "0000000");
+    fixed_ascii(image, 0x040, 10, "T-00000");
+    fixed_ascii(image, 0x04A, 6, "V1.000");
+    fixed_ascii(image, 0x050, 16, "20000101");
+    fixed_ascii(image, 0x060, 16, "1ST_READ.BIN");
+    fixed_ascii(image, 0x070, 16, "OPENAI TEST");
+    fixed_ascii(image, 0x080, 128, "JOJO RECOMPILED SYNTHETIC FIXTURE");
+
     const std::size_t pvd = 16 * sector;
     image[pvd] = 1;
     std::copy_n("CD001", 5, image.begin() + static_cast<std::ptrdiff_t>(pvd + 1));
