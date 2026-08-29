@@ -692,8 +692,9 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             pending = PendingTransfer{state.pr, std::nullopt};
             return Result<void>::success();
         case Sh4IrOp::return_exception:
-            return Result<void>::failure(ErrorCode::unsupported_format,
-                                         "reference executor does not model SPC/SSR for RTE yet");
+            state.sr = state.ssr;
+            pending = PendingTransfer{state.spc, std::nullopt};
+            return Result<void>::success();
         case Sh4IrOp::load_pc_word: {
             auto dst = require_register(instruction.dst_reg);
             if (!dst) return dst;
@@ -743,11 +744,10 @@ Result<std::uint32_t> resolve_exit(const Sh4IrBlock& block,
         case Sh4IrExit::indirect_call:
         case Sh4IrExit::indirect_jump:
         case Sh4IrExit::return_subroutine:
+        case Sh4IrExit::return_exception:
             if (!pending) return Result<std::uint32_t>::failure(ErrorCode::invalid_argument, "IR control-flow block did not latch a target");
             if ((block.exit == Sh4IrExit::direct_branch || block.exit == Sh4IrExit::direct_call) && block.branch_target && pending->target != *block.branch_target) return Result<std::uint32_t>::failure(ErrorCode::invalid_argument, "latched direct target disagrees with CFG metadata");
             return Result<std::uint32_t>::success(pending->target);
-        case Sh4IrExit::return_exception:
-            return Result<std::uint32_t>::failure(ErrorCode::unsupported_format, "reference executor does not model exception return state yet");
     }
     return Result<std::uint32_t>::failure(ErrorCode::unsupported_format,
                                           "reference executor encountered an unknown IR block exit");
