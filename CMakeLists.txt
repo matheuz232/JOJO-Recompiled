@@ -164,3 +164,6 @@ add_test(NAME jojo_sh4_fpu_arithmetic_tests COMMAND jojo_sh4_fpu_arithmetic_test
 add_executable(jojo_sh4_fpu_compare_tests tests/test_sh4_fpu_compare.cpp)
 target_link_libraries(jojo_sh4_fpu_compare_tests PRIVATE jojo_core)
 add_test(NAME jojo_sh4_fpu_compare_tests COMMAND jojo_sh4_fpu_compare_tests)
+add_executable(jojo_sh4_fpu_unary_tests tests/test_sh4_fpu_unary.cpp)
+target_link_libraries(jojo_sh4_fpu_unary_tests PRIVATE jojo_core)
+add_test(NAME jojo_sh4_fpu_unary_tests COMMAND jojo_sh4_fpu_unary_tests)
