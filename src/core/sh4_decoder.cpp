@@ -545,6 +545,37 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         i.rm = m_field(raw);
         return i;
     }
+    if ((raw & 0xF0FFu) == 0xF0ADu) {
+        i.op = Sh4Op::fcnvsd;
+        i.rn = n_field(raw);
+        return i;
+    }
+    if ((raw & 0xF0FFu) == 0xF0BDu) {
+        i.op = Sh4Op::fcnvds;
+        i.rm = n_field(raw);
+        return i;
+    }
+    if ((raw & 0xF0FFu) == 0xF0EDu) {
+        i.op = Sh4Op::fipr;
+        i.rn = static_cast<std::uint8_t>(((raw >> 10u) & 0x3u) * 4u);
+        i.rm = static_cast<std::uint8_t>(((raw >> 8u) & 0x3u) * 4u);
+        return i;
+    }
+    if ((raw & 0xF0FFu) == 0xF07Du) {
+        i.op = Sh4Op::fsrra;
+        i.rn = n_field(raw);
+        return i;
+    }
+    if ((raw & 0xF1FFu) == 0xF0FDu) {
+        i.op = Sh4Op::fsca;
+        i.rn = static_cast<std::uint8_t>(n_field(raw) & 0x0Eu);
+        return i;
+    }
+    if ((raw & 0xF3FFu) == 0xF1FDu) {
+        i.op = Sh4Op::ftrv;
+        i.rn = static_cast<std::uint8_t>(((raw >> 10u) & 0x3u) * 4u);
+        return i;
+    }
     if ((raw & 0xF00Fu) == 0xF00Cu) {
         i.op = Sh4Op::fmov_reg;
         i.rn = n_field(raw);
