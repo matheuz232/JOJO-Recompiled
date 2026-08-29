@@ -2,7 +2,6 @@
 #include "core/dreamcast_interrupts.h"
 #include "core/dreamcast_pvr2.h"
 #include "core/dreamcast_system_asic.h"
-#include "core/sh4_interrupt_entry.h"
 
 #include <cstdint>
 #include <iostream>
@@ -51,7 +50,7 @@ static void test_vblank_begin_reaches_sh4_through_holly_irq_path() {
     if (delivered) CHECK(delivered.value);
     CHECK(state.pc == 0x8C000600u);
     CHECK(state.spc == 0x8C010000u);
-    CHECK(state.intevt == jojo::sh4_irl_intevt(9u));
+    CHECK(state.intevt == 0x000002C0u);
 }
 
 int main() {
