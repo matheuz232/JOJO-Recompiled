@@ -23,18 +23,7 @@ jobs:
           from pathlib import Path
           p = Path('src/core/sh4_reference_executor.h')
           text = p.read_text(encoding='utf-8')
-          block = '''enum class Sh4ReferenceSystemEvent {
-    none,
-    ldtlb,
-    movca_l,
-    ocbi,
-    ocbp,
-    ocbwb,
-    pref,
-    sleep,
-};
-
-'''
+          block = "enum class Sh4ReferenceSystemEvent {\n    none,\n    ldtlb,\n    movca_l,\n    ocbi,\n    ocbp,\n    ocbwb,\n    pref,\n    sleep,\n};\n\n"
           if text.count(block) != 1:
               raise SystemExit('expected exactly one Sh4ReferenceSystemEvent enum')
           text = text.replace(block, '', 1)
