@@ -70,6 +70,10 @@ static void test_decoder_patterns() {
     CHECK(jojo::decode_sh4(0x4D19, 0).op == Sh4Op::shlr8);
     CHECK(jojo::decode_sh4(0x4D28, 0).op == Sh4Op::shll16);
     CHECK(jojo::decode_sh4(0x4D29, 0).op == Sh4Op::shlr16);
+    CHECK(jojo::decode_sh4(0x4A04, 0).op == Sh4Op::rotl);
+    CHECK(jojo::decode_sh4(0x4B05, 0).op == Sh4Op::rotr);
+    CHECK(jojo::decode_sh4(0x4C24, 0).op == Sh4Op::rotcl);
+    CHECK(jojo::decode_sh4(0x4D25, 0).op == Sh4Op::rotcr);
 }
 
 static void test_logic_t_and_unary_execution() {
@@ -169,6 +173,40 @@ static void test_dt_decrements_and_sets_t_only_on_zero() {
     CHECK(state.t);
 }
 
+static void test_rotate_semantics_and_t_bit() {
+    jojo::Sh4ReferenceState state{};
+    state.r[10] = 0x80000001u;
+    state.r[11] = 0x80000001u;
+    state.r[12] = 0x40000000u;
+    state.r[13] = 0x00000002u;
+    state.pr = 0xDEAD1C00u;
+    const bool ok = execute_words({
+        0x0018, // SETT
+        0x4C24, // ROTCL R12: old T enters bit0, old bit31 becomes T
+        0x0029, // MOVT R0 -> 0
+        0x0018, // SETT
+        0x4D25, // ROTCR R13: old T enters bit31, old bit0 becomes T
+        0x0129, // MOVT R1 -> 0
+        0x4A04, // ROTL R10: old bit31 rotates to bit0 and T
+        0x0229, // MOVT R2 -> 1
+        0x4B05, // ROTR R11: old bit0 rotates to bit31 and T
+        0x0329, // MOVT R3 -> 1
+        0x000B,
+        0x0009,
+    }, state, 0x8C011C00u);
+    if (!ok) return;
+
+    CHECK(state.r[10] == 0x00000003u);
+    CHECK(state.r[11] == 0xC0000000u);
+    CHECK(state.r[12] == 0x80000001u);
+    CHECK(state.r[13] == 0x80000001u);
+    CHECK(state.r[0] == 0u);
+    CHECK(state.r[1] == 0u);
+    CHECK(state.r[2] == 1u);
+    CHECK(state.r[3] == 1u);
+    CHECK(state.t);
+}
+
 static void test_shift_semantics_and_t_bit() {
     jojo::Sh4ReferenceState state{};
     state.r[10] = 0x80000001u;
@@ -212,6 +250,7 @@ int main() {
     test_logic_t_and_unary_execution();
     test_signed_and_unsigned_comparisons();
     test_dt_decrements_and_sets_t_only_on_zero();
+    test_rotate_semantics_and_t_bit();
     test_shift_semantics_and_t_bit();
     if (failures) {
         std::cerr << failures << " expanded SH-4 integer assertion(s) failed\n";
