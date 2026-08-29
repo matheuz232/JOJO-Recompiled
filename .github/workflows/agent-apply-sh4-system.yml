@@ -1,0 +1,30 @@
+name: agent-apply-sh4-system
+
+on:
+  push:
+    branches:
+      - feature/sh4-cpu-system-completion
+    paths:
+      - .agent/apply_sh4_system.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply SH-4 system/control implementation
+        run: python3 .agent/apply_sh4_system.py
+      - name: Commit implementation and remove applicator
+        run: |
+          rm .agent/apply_sh4_system.py .github/workflows/agent-apply-sh4-system.yml
+          rmdir .agent 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: complete SH-4 system and MAC instruction families"
+          git push origin HEAD:${GITHUB_REF_NAME}
