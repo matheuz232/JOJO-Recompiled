@@ -86,6 +86,31 @@ static void test_gbr_loads_sign_extend_byte_and_word() {
     CHECK(state.r[0] == 0x12345678u);
 }
 
+static void test_gbr_byte_immediate_logic() {
+    std::vector<std::uint8_t> memory(32, 0);
+    memory[5] = 0xA5u;
+    jojo::Sh4ReferenceState state{};
+    state.gbr = 0xC000u;
+    state.r[0] = 5u;
+    state.pr = 0xDEAD2800u;
+
+    CHECK(execute_words({0xCC0Fu, 0x000Bu, 0x0009u}, state, {0xC000u, memory}));
+    CHECK(!state.t);
+    CHECK(memory[5] == 0xA5u);
+
+    state.pr = 0xDEAD2800u;
+    CHECK(execute_words({0xCD0Fu, 0x000Bu, 0x0009u}, state, {0xC000u, memory}));
+    CHECK(memory[5] == 0x05u);
+
+    state.pr = 0xDEAD2800u;
+    CHECK(execute_words({0xCEF0u, 0x000Bu, 0x0009u}, state, {0xC000u, memory}));
+    CHECK(memory[5] == 0xF5u);
+
+    state.pr = 0xDEAD2800u;
+    CHECK(execute_words({0xCF0Au, 0x000Bu, 0x0009u}, state, {0xC000u, memory}));
+    CHECK(memory[5] == 0xFFu);
+}
+
 static void test_gbr_access_is_bounded() {
     std::vector<std::uint8_t> memory(8, 0);
     jojo::Sh4ReferenceState state{};
@@ -110,6 +135,7 @@ int main() {
     test_decoder_patterns_and_scaled_displacements();
     test_gbr_stores_use_r0_and_little_endian();
     test_gbr_loads_sign_extend_byte_and_word();
+    test_gbr_byte_immediate_logic();
     test_gbr_access_is_bounded();
     if (failures) {
         std::cerr << failures << " SH-4 GBR memory assertion(s) failed\n";
