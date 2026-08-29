@@ -405,6 +405,37 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             state.r[instruction.dst_reg] = address;
             return Result<void>::success();
         }
+        case Sh4IrOp::set_fpul_from_reg: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            state.fpul = state.r[instruction.src_reg];
+            return Result<void>::success();
+        }
+        case Sh4IrOp::copy_fpul_to_reg: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            state.r[instruction.dst_reg] = state.fpul;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::load_fpul_postinc32: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto address = state.r[instruction.src_reg];
+            auto value = read_u32(memory, address);
+            if (!value) return Result<void>::failure(value.error, value.detail);
+            state.fpul = value.value;
+            state.r[instruction.src_reg] += 4u;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::store_fpul_predec32: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            const auto address = state.r[instruction.dst_reg] - 4u;
+            auto stored = write_u32(memory, address, state.fpul);
+            if (!stored) return stored;
+            state.r[instruction.dst_reg] = address;
+            return Result<void>::success();
+        }
 
         case Sh4IrOp::clear_mac:
             state.mach = 0u;
