@@ -145,7 +145,9 @@ static void test_missing_system_isa_patterns() {
     CHECK(jojo::decode_sh4(0x412E, 0x6052).op == Sh4Op::ldc_vbr_reg);
     CHECK(jojo::decode_sh4(0x413E, 0x6054).op == Sh4Op::ldc_ssr_reg);
     CHECK(jojo::decode_sh4(0x414E, 0x6056).op == Sh4Op::ldc_spc_reg);
-    CHECK(jojo::decode_sh4(0x41FA, 0x6058).op == Sh4Op::ldc_dbr_reg);
+    CHECK(jojo::decode_sh4(0x413A, 0x6058).op == Sh4Op::ldc_sgr_reg);
+    CHECK(jojo::decode_sh4(0x4136, 0x605A).op == Sh4Op::ldc_sgr_postinc);
+    CHECK(jojo::decode_sh4(0x41FA, 0x605C).op == Sh4Op::ldc_dbr_reg);
 
     i = jojo::decode_sh4(0x0182, 0x6060); // STC R0_BANK,R1
     CHECK(i.op == Sh4Op::stc_bank_reg && i.rn == 1 && i.rm == 0);
