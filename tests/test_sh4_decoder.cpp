@@ -112,6 +112,47 @@ static void test_missing_scalar_isa_patterns() {
     CHECK(i.op == Sh4Op::bsrf && i.rn == 4 && i.has_delay_slot && i.writes_pr);
 }
 
+static void test_missing_system_isa_patterns() {
+    CHECK(jojo::decode_sh4(0x0048, 0x6000).op == Sh4Op::clrs);
+    CHECK(jojo::decode_sh4(0x0058, 0x6002).op == Sh4Op::sets);
+    CHECK(jojo::decode_sh4(0x0038, 0x6004).op == Sh4Op::ldtlb);
+    CHECK(jojo::decode_sh4(0x001B, 0x6006).op == Sh4Op::sleep);
+
+    auto i = jojo::decode_sh4(0x012F, 0x6010); // MAC.L @R2+,@R1+
+    CHECK(i.op == Sh4Op::mac_l && i.rn == 1 && i.rm == 2);
+    i = jojo::decode_sh4(0x412F, 0x6012); // MAC.W @R2+,@R1+
+    CHECK(i.op == Sh4Op::mac_w && i.rn == 1 && i.rm == 2);
+
+    i = jojo::decode_sh4(0x411B, 0x6020); // TAS.B @R1
+    CHECK(i.op == Sh4Op::tas_b && i.rn == 1);
+    i = jojo::decode_sh4(0xC37F, 0x6022); // TRAPA #0x7f
+    CHECK(i.op == Sh4Op::trapa && i.immediate == 0x7F);
+
+    CHECK(jojo::decode_sh4(0x01C3, 0x6030).op == Sh4Op::movca_l);
+    CHECK(jojo::decode_sh4(0x0193, 0x6032).op == Sh4Op::ocbi);
+    CHECK(jojo::decode_sh4(0x01A3, 0x6034).op == Sh4Op::ocbp);
+    CHECK(jojo::decode_sh4(0x01B3, 0x6036).op == Sh4Op::ocbwb);
+    CHECK(jojo::decode_sh4(0x0183, 0x6038).op == Sh4Op::pref);
+
+    CHECK(jojo::decode_sh4(0x0102, 0x6040).op == Sh4Op::stc_sr_reg);
+    CHECK(jojo::decode_sh4(0x0122, 0x6042).op == Sh4Op::stc_vbr_reg);
+    CHECK(jojo::decode_sh4(0x0132, 0x6044).op == Sh4Op::stc_ssr_reg);
+    CHECK(jojo::decode_sh4(0x0142, 0x6046).op == Sh4Op::stc_spc_reg);
+    CHECK(jojo::decode_sh4(0x013A, 0x6048).op == Sh4Op::stc_sgr_reg);
+    CHECK(jojo::decode_sh4(0x01FA, 0x604A).op == Sh4Op::stc_dbr_reg);
+
+    CHECK(jojo::decode_sh4(0x410E, 0x6050).op == Sh4Op::ldc_sr_reg);
+    CHECK(jojo::decode_sh4(0x412E, 0x6052).op == Sh4Op::ldc_vbr_reg);
+    CHECK(jojo::decode_sh4(0x413E, 0x6054).op == Sh4Op::ldc_ssr_reg);
+    CHECK(jojo::decode_sh4(0x414E, 0x6056).op == Sh4Op::ldc_spc_reg);
+    CHECK(jojo::decode_sh4(0x41FA, 0x6058).op == Sh4Op::ldc_dbr_reg);
+
+    i = jojo::decode_sh4(0x0182, 0x6060); // STC R0_BANK,R1
+    CHECK(i.op == Sh4Op::stc_bank_reg && i.rn == 1 && i.rm == 0);
+    i = jojo::decode_sh4(0x418E, 0x6062); // LDC R1,R0_BANK
+    CHECK(i.op == Sh4Op::ldc_bank_reg && i.rn == 0 && i.rm == 1);
+}
+
 static void test_pc_relative_literals() {
     auto i = jojo::decode_sh4(0x9320, 0x1000); // MOV.W @(0x20,PC),R3
     CHECK(i.op == Sh4Op::movw_pc);
@@ -155,6 +196,7 @@ int main() {
     test_fixed_and_integer_instructions();
     test_control_flow();
     test_missing_scalar_isa_patterns();
+    test_missing_system_isa_patterns();
     test_pc_relative_literals();
     test_stream_and_unsupported();
     if (failures) {
