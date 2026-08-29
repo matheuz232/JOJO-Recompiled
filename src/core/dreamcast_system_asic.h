@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 
 namespace jojo {
 
@@ -15,6 +16,8 @@ public:
     void raise_normal(std::uint32_t bits) noexcept { status_[0] |= bits; }
     void raise_external(std::uint32_t bits) noexcept { status_[1] |= bits; }
     void raise_error(std::uint32_t bits) noexcept { status_[2] |= bits; }
+
+    [[nodiscard]] std::optional<std::uint8_t> pending_irq_level() const noexcept;
 
 private:
     [[nodiscard]] static std::uint32_t physical_address(std::uint32_t address) noexcept;

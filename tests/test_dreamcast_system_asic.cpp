@@ -71,6 +71,38 @@ static void test_status_bits_are_raised_and_acknowledged_write_one_to_clear() {
     CHECK(read32(bus, 0x005F6908u) == 0x00002000u);
 }
 
+static void test_pending_irq_level_uses_masks_and_hardware_priority() {
+    auto memory = blank_memory();
+    jojo::DreamcastSystemAsic asic;
+    jojo::DreamcastReferenceBus bus(memory);
+    bus.attach_device(jojo::DreamcastBusRegion::system_asic, asic);
+
+    CHECK(!asic.pending_irq_level().has_value());
+
+    // IRQ9 group: normal mask slot at SB_IML6NRM (0x005F6930).
+    write32(bus, 0x005F6930u, 0x00000004u);
+    asic.raise_normal(0x00000004u);
+    CHECK(asic.pending_irq_level().has_value());
+    if (asic.pending_irq_level()) CHECK(*asic.pending_irq_level() == 9u);
+
+    // IRQ11 outranks IRQ9 when both groups contain a pending source.
+    write32(bus, 0x005F6924u, 0x00000002u);
+    asic.raise_external(0x00000002u);
+    CHECK(asic.pending_irq_level().has_value());
+    if (asic.pending_irq_level()) CHECK(*asic.pending_irq_level() == 11u);
+
+    // IRQ13 is the highest Holly interrupt level.
+    write32(bus, 0x005F6918u, 0x00002000u);
+    asic.raise_error(0x00002000u);
+    CHECK(asic.pending_irq_level().has_value());
+    if (asic.pending_irq_level()) CHECK(*asic.pending_irq_level() == 13u);
+
+    // Acknowledge the IRQ13 error source; resolution must fall back to IRQ11.
+    write32(bus, 0x005F6908u, 0x00002000u);
+    CHECK(asic.pending_irq_level().has_value());
+    if (asic.pending_irq_level()) CHECK(*asic.pending_irq_level() == 11u);
+}
+
 static void test_unimplemented_system_asic_offsets_fail_instead_of_faking_values() {
     auto memory = blank_memory();
     jojo::DreamcastSystemAsic asic;
@@ -86,6 +118,7 @@ static void test_unimplemented_system_asic_offsets_fail_instead_of_faking_values
 int main() {
     test_interrupt_masks_are_byte_addressable_through_bus();
     test_status_bits_are_raised_and_acknowledged_write_one_to_clear();
+    test_pending_irq_level_uses_masks_and_hardware_priority();
     test_unimplemented_system_asic_offsets_fail_instead_of_faking_values();
     if (failures) {
         std::cerr << failures << " Dreamcast System ASIC assertion(s) failed\n";
