@@ -60,7 +60,7 @@ static void test_decoder_recognizes_binary_arithmetic() {
 
 static void test_decoder_recognizes_fmac() {
     using jojo::Sh4Op;
-    CHECK(jojo::decode_sh4(0xF23Eu, 0).op != Sh4Op::unsupported); // FMAC FR0,FR3,FR2
+    CHECK(jojo::decode_sh4(0xF23Eu, 0).op == Sh4Op::fmac); // FMAC FR0,FR3,FR2
 }
 
 static void test_normal_single_precision_operations() {
@@ -108,7 +108,7 @@ static void test_fmac_uses_one_final_rounding() {
     const bool ok = execute_words({0xF23Eu}, state, 0x8C050C00u);
     if (ok) {
         CHECK(state.fr[2] == 0x4336D367u);
-        CHECK(state.fr[2] != 0x4336D366u); // FMUL then FADD would double-round here.
+        CHECK(state.fr[2] != 0x4336D366u); // A split FMUL + FADD would double-round here.
     }
 }
 
