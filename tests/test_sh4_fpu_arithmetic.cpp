@@ -98,6 +98,20 @@ static void test_fmac_multiplies_fr0_and_source_then_adds_destination() {
     if (ok) CHECK(state.fr[2] == std::bit_cast<std::uint32_t>(9.0f));
 }
 
+static void test_fmac_uses_one_final_rounding() {
+    jojo::Sh4ReferenceState state{};
+    state.fpscr &= ~0x3u; // RM=0, round to nearest/even.
+    state.fr[0] = 0x434B9203u;
+    state.fr[2] = 0xC3173550u;
+    state.fr[3] = 0x3FD20847u;
+
+    const bool ok = execute_words({0xF23Eu}, state, 0x8C050C00u);
+    if (ok) {
+        CHECK(state.fr[2] == 0x4336D367u);
+        CHECK(state.fr[2] != 0x4336D366u); // FMUL then FADD would double-round here.
+    }
+}
+
 static void test_rounding_mode_selects_nearest_or_toward_zero() {
     jojo::Sh4ReferenceState toward_zero{}; // Reset FPSCR uses RM=1.
     toward_zero.fr[0] = 0x3F800000u; // 1.0
@@ -173,6 +187,7 @@ int main() {
     test_decoder_recognizes_fmac();
     test_normal_single_precision_operations();
     test_fmac_multiplies_fr0_and_source_then_adds_destination();
+    test_fmac_uses_one_final_rounding();
     test_rounding_mode_selects_nearest_or_toward_zero();
     test_dn_flushes_a_subnormal_result_to_zero();
     test_unsupported_modes_fail_without_changing_destination();
