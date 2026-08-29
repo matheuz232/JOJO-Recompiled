@@ -20,6 +20,7 @@ Result<GameRevisionMatch> identify_game_revision(
             ErrorCode::unknown_revision,
             "no verified revision profiles are registered yet for this game");
     }
+    std::string first_mismatch;
     for (const auto& profile : profiles) {
         if (profile.revision_id.empty() || profile.files.empty()) continue;
         bool matches = true;
@@ -27,12 +28,18 @@ Result<GameRevisionMatch> identify_game_revision(
             auto file = read_iso9660_file(image, expected.path);
             if (!file) {
                 if (file.error == ErrorCode::file_not_found) {
+                    if (first_mismatch.empty()) {
+                        first_mismatch = "profile '" + profile.revision_id + "' is missing " + expected.path;
+                    }
                     matches = false;
                     break;
                 }
                 return Result<GameRevisionMatch>::failure(file.error, file.detail);
             }
             if (file.value.size() != expected.size_bytes || fnv1a64(file.value) != expected.fnv1a64) {
+                if (first_mismatch.empty()) {
+                    first_mismatch = "profile '" + profile.revision_id + "' fingerprint mismatch for " + expected.path;
+                }
                 matches = false;
                 break;
             }
@@ -41,9 +48,9 @@ Result<GameRevisionMatch> identify_game_revision(
             return Result<GameRevisionMatch>::success(GameRevisionMatch{profile.revision_id});
         }
     }
-    return Result<GameRevisionMatch>::failure(
-        ErrorCode::unknown_revision,
-        "disc image does not match any supported game revision profile");
+    std::string detail = "disc image does not match any supported game revision profile";
+    if (!first_mismatch.empty()) detail += "; " + first_mismatch;
+    return Result<GameRevisionMatch>::failure(ErrorCode::unknown_revision, std::move(detail));
 }
 
 }

@@ -137,6 +137,30 @@ static void test_revision_matcher() {
     fs::remove(path, ec);
 }
 
+static void test_revision_mismatch_reports_profile_and_path() {
+    const auto path = temp_file("revision_diagnostic.iso");
+    test_iso::write_image(path);
+    const auto mounted = jojo::open_iso9660(path);
+    CHECK(mounted);
+    if (mounted) {
+        jojo::GameRevisionProfile profile{
+            "synthetic-test-revision",
+            {
+                {"/1ST_READ.BIN", 12, test_fnv1a64("HELLO-SH4!!!")},
+                {"/DATA/ASSET.DAT", 5, test_fnv1a64("ABCDE") ^ 1ull},
+            }
+        };
+        const auto unknown = jojo::identify_game_revision(mounted.value, {profile});
+        CHECK(!unknown);
+        CHECK(unknown.error == jojo::ErrorCode::unknown_revision);
+        CHECK(unknown.detail.find("synthetic-test-revision") != std::string::npos);
+        CHECK(unknown.detail.find("/DATA/ASSET.DAT") != std::string::npos);
+        CHECK(unknown.detail.find("fingerprint mismatch") != std::string::npos);
+    }
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
 static void test_track_aware_media_mounts_same_iso9660() {
     const auto base = temp_file("track_base.iso");
     const auto bin = temp_file("track_raw.bin");
@@ -172,6 +196,7 @@ int main() {
     test_nested_lookup_and_bounded_read();
     test_rejects_bad_pvd_and_out_of_bounds_entry();
     test_revision_matcher();
+    test_revision_mismatch_reports_profile_and_path();
     test_track_aware_media_mounts_same_iso9660();
     if (failures) {
         std::cerr << failures << " ISO9660 assertion(s) failed\n";

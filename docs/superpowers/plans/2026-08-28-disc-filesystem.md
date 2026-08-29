@@ -39,4 +39,12 @@
 ### Task 4: Integrate conversion discovery stage
 - [x] Add progress stages for filesystem discovery and revision identification.
 - [x] Keep unsupported real revisions explicit until verified signatures exist.
-- [ ] Verify Linux and Windows CI.
+- [x] Verify Linux and Windows CI.
+
+## Completion audit
+
+- The matcher requires multiple declarative file signatures for a revision profile and does not guess game offsets.
+- Unknown media remains `unknown_revision`; when a profile is rejected, diagnostics report the profile and first mismatching/missing disc path without exposing expected hashes or game bytes.
+- TDD RED: `da08416559b7af245427ab1c6894258c3e080eaa`; CI #479 built successfully and failed only `jojo_iso_tests` on the new diagnostic assertions (38/39 tests passed).
+- GREEN: `de88afc8e7cddda31e5da3ffb14bd7a8fda03106`; CI #480 passed the full suite on Linux and Windows/MSVC, including Windows Release artifact generation.
+- Commercial revision profiles remain intentionally unregistered until their signatures can be independently verified from legally supplied media. This preserves explicit failure instead of inventing support.

@@ -26,13 +26,18 @@ Completion evidence is tracked in [`../superpowers/plans/2026-08-28-production-f
 
 M1 completion does **not** imply that the commercial game is playable or that the native backend is ready; those remain later milestones.
 
-### M2 — Disc filesystem + game revision identification
+### M2 — Disc filesystem + game revision identification — Complete (100%)
 
-- Read-only disc filesystem abstraction.
-- ISO9660 parser first; track-aware BIN/CUE/GDI readers follow behind the same interface.
-- Locate executable/data files without hard-coded host paths.
-- Identify supported game revision using multiple fingerprints.
-- Reject unknown revisions with actionable diagnostics rather than guessing offsets.
+Completion evidence is tracked in [`../superpowers/plans/2026-08-28-disc-filesystem.md`](../superpowers/plans/2026-08-28-disc-filesystem.md) and [`../superpowers/plans/2026-08-28-track-media.md`](../superpowers/plans/2026-08-28-track-media.md).
+
+- [x] Read-only disc filesystem abstraction.
+- [x] ISO9660 parser with track-aware ISO/BIN/CUE/GDI readers behind the same logical-sector interface.
+- [x] Locate executable/data files through the disc filesystem without hard-coded host paths.
+- [x] Identify a supported revision from multiple declarative file fingerprints.
+- [x] Reject unknown revisions explicitly with profile/file-level diagnostics instead of guessing offsets.
+- [x] Linux and Windows/MSVC CI coverage for the complete media/filesystem/revision pipeline.
+
+M2 completion covers the safe media, filesystem and revision-profile infrastructure. Commercial revision fingerprints are intentionally **not** guessed or copied from game data: until signatures are independently verified from legally supplied media, that media remains an explicit `unknown_revision`. M2 completion does **not** imply that a commercial revision is enabled, that the native backend is ready, or that the game boots.
 
 ### M3 — Native recompiler backend
 
