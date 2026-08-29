@@ -170,3 +170,7 @@ add_test(NAME jojo_sh4_fpu_unary_tests COMMAND jojo_sh4_fpu_unary_tests)
 add_executable(jojo_sh4_fpu_completion_tests tests/test_sh4_fpu_completion.cpp)
 target_link_libraries(jojo_sh4_fpu_completion_tests PRIVATE jojo_core)
 add_test(NAME jojo_sh4_fpu_completion_tests COMMAND jojo_sh4_fpu_completion_tests)
+
+add_executable(jojo_sh4_fpu_disable_tests tests/test_sh4_fpu_disable.cpp)
+target_link_libraries(jojo_sh4_fpu_disable_tests PRIVATE jojo_core)
+add_test(NAME jojo_sh4_fpu_disable_tests COMMAND jojo_sh4_fpu_disable_tests)

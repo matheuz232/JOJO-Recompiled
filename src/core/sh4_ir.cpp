@@ -195,6 +195,12 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::fdiv: out.op = Sh4IrOp::divide_single_float; break;
         case Sh4Op::fcmp_eq: out.op = Sh4IrOp::compare_single_float_eq; break;
         case Sh4Op::fcmp_gt: out.op = Sh4IrOp::compare_single_float_gt; break;
+        case Sh4Op::fcnvsd: out.op = Sh4IrOp::convert_single_to_double; break;
+        case Sh4Op::fcnvds: out.op = Sh4IrOp::convert_double_to_single; break;
+        case Sh4Op::fipr: out.op = Sh4IrOp::inner_product_single; break;
+        case Sh4Op::fsca: out.op = Sh4IrOp::sine_cosine_single; break;
+        case Sh4Op::fsrra: out.op = Sh4IrOp::reciprocal_sqrt_single; break;
+        case Sh4Op::ftrv: out.op = Sh4IrOp::matrix_transform_single; break;
         case Sh4Op::fmov_reg: out.op = Sh4IrOp::copy_fpu_registers; break;
         case Sh4Op::fmov_store: out.op = Sh4IrOp::store_fpu_memory; break;
         case Sh4Op::fmov_load: out.op = Sh4IrOp::load_fpu_memory; break;
