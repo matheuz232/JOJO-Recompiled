@@ -219,6 +219,26 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             state.fr[instruction.dst_reg] = state.fpul;
             return Result<void>::success();
         }
+        case Sh4IrOp::copy_fpu_registers: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            if ((state.fpscr & kFpscrSzBit) == 0u) {
+                state.fr[instruction.dst_reg] = state.fr[instruction.src_reg];
+                return Result<void>::success();
+            }
+
+            auto& source_bank = (instruction.src_reg & 1u) != 0u ? state.xf : state.fr;
+            auto& destination_bank = (instruction.dst_reg & 1u) != 0u ? state.xf : state.fr;
+            const auto source_base = static_cast<std::uint8_t>(instruction.src_reg & 0x0Eu);
+            const auto destination_base = static_cast<std::uint8_t>(instruction.dst_reg & 0x0Eu);
+            const auto first = source_bank[source_base];
+            const auto second = source_bank[source_base + 1u];
+            destination_bank[destination_base] = first;
+            destination_bank[destination_base + 1u] = second;
+            return Result<void>::success();
+        }
         case Sh4IrOp::toggle_fpscr_fr:
             write_fpscr(state, state.fpscr ^ kFpscrFrBit);
             return Result<void>::success();
