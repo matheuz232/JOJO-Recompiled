@@ -94,3 +94,6 @@ add_test(NAME jojo_sh4_data_manipulation_tests COMMAND jojo_sh4_data_manipulatio
 add_executable(jojo_sh4_carry_overflow_tests tests/test_sh4_carry_overflow.cpp)
 target_link_libraries(jojo_sh4_carry_overflow_tests PRIVATE jojo_core)
 add_test(NAME jojo_sh4_carry_overflow_tests COMMAND jojo_sh4_carry_overflow_tests)
+add_executable(jojo_sh4_opcode_census_tests tests/test_sh4_opcode_census.cpp)
+target_link_libraries(jojo_sh4_opcode_census_tests PRIVATE jojo_core)
+add_test(NAME jojo_sh4_opcode_census_tests COMMAND jojo_sh4_opcode_census_tests)
