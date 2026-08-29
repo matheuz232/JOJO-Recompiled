@@ -13,6 +13,7 @@ struct Sh4ReferenceState {
     std::array<std::uint32_t, 16> r{};
     std::uint32_t pc{};
     std::uint32_t pr{};
+    std::uint32_t gbr{};
     bool t{};
 };
 
