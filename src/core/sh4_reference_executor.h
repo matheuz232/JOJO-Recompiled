@@ -15,6 +15,7 @@ namespace jojo {
 struct Sh4ReferenceState {
     std::array<std::uint32_t, 16> r{};
     std::array<std::uint32_t, 16> fr{};
+    std::uint32_t fpul{};
     std::uint32_t pc{};
     std::uint32_t pr{};
     std::uint32_t gbr{};
