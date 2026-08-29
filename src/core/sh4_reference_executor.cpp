@@ -412,6 +412,51 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
                 std::bit_cast<std::uint32_t>(static_cast<std::int32_t>(truncated));
             return Result<void>::success();
         }
+        case Sh4IrOp::negate_single_float:
+        case Sh4IrOp::absolute_single_float: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            if ((state.fpscr & kFpscrPrBit) != 0u) {
+                return Result<void>::failure(
+                    ErrorCode::unsupported_format,
+                    "reference FPU double-precision unary operations are not implemented");
+            }
+            if (instruction.op == Sh4IrOp::negate_single_float) {
+                state.fr[instruction.dst_reg] ^= 0x80000000u;
+            } else {
+                state.fr[instruction.dst_reg] &= 0x7FFFFFFFu;
+            }
+            return Result<void>::success();
+        }
+        case Sh4IrOp::sqrt_single_float: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            if ((state.fpscr & kFpscrPrBit) != 0u) {
+                return Result<void>::failure(
+                    ErrorCode::unsupported_format,
+                    "reference FPU double-precision square root is not implemented");
+            }
+            const auto rounding_mode = state.fpscr & kFpscrRmMask;
+            if (rounding_mode > 1u) {
+                return Result<void>::failure(
+                    ErrorCode::unsupported_format,
+                    "reference FSQRT encountered a reserved rounding mode");
+            }
+            auto operand = read_single_operand(state, state.fr[instruction.dst_reg]);
+            if (!operand) return Result<void>::failure(operand.error, operand.detail);
+            if (operand.value < 0.0f) {
+                return Result<void>::failure(
+                    ErrorCode::unsupported_format,
+                    "reference FSQRT invalid-operation flags are not implemented");
+            }
+            const auto exact = std::sqrt(static_cast<double>(operand.value));
+            auto result = static_cast<float>(exact);
+            if (rounding_mode == 1u && static_cast<double>(result) > exact) {
+                result = std::nextafter(result, 0.0f);
+            }
+            state.fr[instruction.dst_reg] = std::bit_cast<std::uint32_t>(result);
+            return Result<void>::success();
+        }
         case Sh4IrOp::add_single_float:
         case Sh4IrOp::subtract_single_float:
         case Sh4IrOp::multiply_single_float:
