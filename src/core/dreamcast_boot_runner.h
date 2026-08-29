@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/dreamcast_bus.h"
 #include "core/dreamcast_memory.h"
 #include "core/result.h"
 #include "core/sh4_reference_executor.h"
@@ -15,6 +16,7 @@ enum class DreamcastBootStopReason {
     left_program,
     block_limit,
     unsupported_opcode,
+    unmapped_bus_access,
 };
 
 struct DreamcastBootRunResult {
@@ -25,6 +27,7 @@ struct DreamcastBootRunResult {
     std::size_t operations_executed{};
     std::optional<std::uint32_t> unsupported_address;
     std::optional<std::uint16_t> unsupported_raw;
+    std::optional<DreamcastBusFault> bus_fault;
 };
 
 [[nodiscard]] Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
