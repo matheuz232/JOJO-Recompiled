@@ -30,6 +30,13 @@ static std::filesystem::path temp_install(const char* suffix) {
     return root;
 }
 
+static const jojo::NativeCompiledBlock* first_native_block(const jojo::NativeBackend& backend) {
+    for (const auto& block : backend.blocks) {
+        if (block.uses_native_lowering) return &block;
+    }
+    return nullptr;
+}
+
 static void test_compiles_backend_and_steps_deterministically() {
     auto left = jojo::create_native_runtime(synthetic_program());
     auto right = jojo::create_native_runtime(synthetic_program());
@@ -40,6 +47,12 @@ static void test_compiles_backend_and_steps_deterministically() {
     CHECK(!left.value.backend.program_hash.empty());
     CHECK(left.value.backend.ir.blocks.size() == right.value.backend.ir.blocks.size());
     CHECK(left.value.backend.native_block_count > 0u);
+    const auto* native = first_native_block(left.value.backend);
+    CHECK(native != nullptr);
+    if (native) {
+        CHECK(native->native_code.size() > 1u);
+        CHECK(native->native_code.back() == 0xC3u); // x86-64 RET
+    }
     CHECK(left.value.frame_index == 0u);
     CHECK(left.value.cpu.pc == jojo::kDreamcastBootLoadAddress);
 
@@ -50,6 +63,8 @@ static void test_compiles_backend_and_steps_deterministically() {
 
     CHECK(!left_step.value.used_reference_fallback);
     CHECK(!right_step.value.used_reference_fallback);
+    CHECK(left_step.value.native_code_executed);
+    CHECK(right_step.value.native_code_executed);
     CHECK(left.value.cpu.r[0] == 3u);
     CHECK(right.value.cpu.r[0] == 3u);
     CHECK(left.value.frame_index == 1u);
@@ -70,6 +85,7 @@ static void test_cache_is_written_reused_and_rebuilt_on_abi_or_program_change() 
     CHECK(first.value.abi_version == jojo::native_backend_abi_version());
     CHECK(first.value.block_count > 0u);
     CHECK(first.value.operation_count >= 3u);
+    CHECK(first.value.native_code_bytes > 0u);
     CHECK(first.value.manifest_path == install / "cache" / "native" / "backend_cache.ini");
     CHECK(first.value.plan_path == install / "cache" / "native" / "compiled_plan.bin");
     CHECK(std::filesystem::is_regular_file(first.value.manifest_path));
@@ -82,6 +98,9 @@ static void test_cache_is_written_reused_and_rebuilt_on_abi_or_program_change() 
         CHECK(loaded.value.program_hash == first.value.program_hash);
         CHECK(loaded.value.ir.blocks.size() == first.value.block_count);
         CHECK(loaded.value.native_block_count > 0u);
+        const auto* loaded_native = first_native_block(loaded.value);
+        CHECK(loaded_native != nullptr);
+        if (loaded_native) CHECK(!loaded_native->native_code.empty());
     }
 
     const auto second = jojo::ensure_native_backend_cache(synthetic_program(), install);
@@ -89,6 +108,7 @@ static void test_cache_is_written_reused_and_rebuilt_on_abi_or_program_change() 
     if (second) {
         CHECK(!second.value.rebuilt);
         CHECK(second.value.program_hash == first.value.program_hash);
+        CHECK(second.value.native_code_bytes == first.value.native_code_bytes);
     }
 
     {
@@ -98,6 +118,7 @@ static void test_cache_is_written_reused_and_rebuilt_on_abi_or_program_change() 
         out << "program_hash=" << first.value.program_hash << "\n";
         out << "block_count=" << first.value.block_count << "\n";
         out << "operation_count=" << first.value.operation_count << "\n";
+        out << "native_code_bytes=" << first.value.native_code_bytes << "\n";
     }
     const auto core_rebuild = jojo::ensure_native_backend_cache(synthetic_program(), install);
     CHECK(core_rebuild);
@@ -110,6 +131,7 @@ static void test_cache_is_written_reused_and_rebuilt_on_abi_or_program_change() 
         out << "program_hash=" << first.value.program_hash << "\n";
         out << "block_count=" << first.value.block_count << "\n";
         out << "operation_count=" << first.value.operation_count << "\n";
+        out << "native_code_bytes=" << first.value.native_code_bytes << "\n";
     }
     const auto abi_rebuild = jojo::ensure_native_backend_cache(synthetic_program(), install);
     CHECK(abi_rebuild);
@@ -138,6 +160,7 @@ static void test_cache_manifest_records_current_backend_version() {
     CHECK(text.find("abi_version=" + std::to_string(jojo::native_backend_abi_version())) != std::string::npos);
     CHECK(text.find("core_version=") != std::string::npos);
     CHECK(text.find("program_hash=" + cache.value.program_hash) != std::string::npos);
+    CHECK(text.find("native_code_bytes=" + std::to_string(cache.value.native_code_bytes)) != std::string::npos);
 
     std::error_code ec;
     std::filesystem::remove_all(install, ec);
