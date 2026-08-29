@@ -232,6 +232,20 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         return i;
     }
 
+    const auto arithmetic_code = static_cast<std::uint16_t>(raw & 0xF00Fu);
+    if (arithmetic_code == 0x300Eu || arithmetic_code == 0x300Fu ||
+        arithmetic_code == 0x300Au || arithmetic_code == 0x300Bu ||
+        arithmetic_code == 0x600Au) {
+        if (arithmetic_code == 0x300Eu) i.op = Sh4Op::addc_reg;
+        else if (arithmetic_code == 0x300Fu) i.op = Sh4Op::addv_reg;
+        else if (arithmetic_code == 0x300Au) i.op = Sh4Op::subc_reg;
+        else if (arithmetic_code == 0x300Bu) i.op = Sh4Op::subv_reg;
+        else i.op = Sh4Op::negc_reg;
+        i.rn = n_field(raw);
+        i.rm = m_field(raw);
+        return i;
+    }
+
     if ((raw & 0xF00Fu) == 0x300Cu) {
         i.op = Sh4Op::add_reg;
         i.rn = n_field(raw);
