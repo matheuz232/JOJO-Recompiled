@@ -1,0 +1,54 @@
+name: agent-fix-sh4-system-header
+
+on:
+  push:
+    branches:
+      - feature/sh4-cpu-system-completion
+    paths:
+      - .github/workflows/agent-fix-sh4-system-header.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Declare system event before reference state
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/core/sh4_reference_executor.h')
+          text = p.read_text(encoding='utf-8')
+          block = '''enum class Sh4ReferenceSystemEvent {
+    none,
+    ldtlb,
+    movca_l,
+    ocbi,
+    ocbp,
+    ocbwb,
+    pref,
+    sleep,
+};
+
+'''
+          if text.count(block) != 1:
+              raise SystemExit('expected exactly one Sh4ReferenceSystemEvent enum')
+          text = text.replace(block, '', 1)
+          anchor = 'namespace jojo {\n\nstruct Sh4ReferenceState {'
+          if text.count(anchor) != 1:
+              raise SystemExit('reference-state insertion anchor not found')
+          text = text.replace(anchor, 'namespace jojo {\n\n' + block + 'struct Sh4ReferenceState {', 1)
+          p.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit fix and remove workflow
+        run: |
+          rm .github/workflows/agent-fix-sh4-system-header.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: declare SH-4 system event before state"
+          git push origin HEAD:${GITHUB_REF_NAME}
