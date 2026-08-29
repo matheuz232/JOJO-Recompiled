@@ -10,7 +10,7 @@ Reach the first genuinely playable Windows build without falsely marking the ins
 4. [x] Build a Dreamcast executable loader and deterministic memory map for the analyzed boot executable. **M3.1 complete (100%).**
 5. [ ] Add MMIO/device boundaries and deterministic timing surfaces required to get from reset/bootstrap into game code.
 6. [ ] Implement the minimum PVR2/video, Maple/input, GD-ROM/data access and AICA/audio behavior needed for first interactive gameplay, keeping rendering/audio adapters outside deterministic gameplay state.
-7. [ ] Replace the current reference-only execution path with a production backend while retaining the reference executor as an oracle for differential tests.
+7. [x] Introduce a production native-runtime path that consumes compiled/lowered blocks while retaining the reference executor as an explicit fallback/oracle for blocks that do not yet have a dedicated host lowering. **M3.2 complete; M3 complete (100%).**
 8. [ ] Mark conversion output `native-ready` only after an end-to-end test proves that the generated installation launches through `JOJO-Recompiled.exe` into an interactive game state using user-provided legally obtained data.
 9. [ ] After first playable, harden performance, graphics/aspect handling, controls, mods, training instrumentation and rollback networking against the approved design.
 
@@ -19,10 +19,22 @@ Reach the first genuinely playable Windows build without falsely marking the ins
 - RED `eca5b75accb90ec98c0a7bc40ecd8fbb9345493d`: CI #533 failed at compile time because executable preparation did not yet exist.
 - Additional RED `305c1d110578f4322138bf4dd743df9a3f26443d` requires the Dreamcast bus to recognize all Area-3 main-RAM mirrors and aliases.
 - GREEN head `8b840070fabcbe6132ee2466f33e57b9b47ebd3b`: CI #537 passed the full suite on Linux and Windows/MSVC, including the Windows Release executable artifact.
-- The loader now analyzes supported plain GD-ROM boot media before loading, rejects unsupported MIL-CD/unknown encoding, zero-initializes the 16 MiB RAM backing, and exposes all four 16 MiB mirrors across the 64 MiB Area-3 window consistently through physical/P1/P2 aliases.
+- PR #61 merged M3.1 into `main` as `776ad6a14874bcb473dff14e391f15e1bd753b1c`; post-merge CI #541 passed Linux and Windows/MSVC.
+- The loader analyzes supported plain GD-ROM boot media before loading, rejects unsupported MIL-CD/unknown encoding, zero-initializes the 16 MiB RAM backing, and exposes all four 16 MiB mirrors across the 64 MiB Area-3 window consistently through physical/P1/P2 aliases.
 - No copyrighted game bytes or commercial fingerprints were added; all tests use synthetic program data.
 
-M3.1 completion does **not** mark the installation `native-ready` and does not prove commercial game boot or playability. Steps 5–8 remain required.
+## M3.2 completion evidence
+
+- RED head `11554ef14f2d5b116f2a45ea2f96b298ae9bc70c`: CI #544 failed exactly because `core/native_backend.h` and the production native-runtime/cache API did not exist yet.
+- The production backend lowers eligible straight-line SH-4 IR blocks to a compact host-native operation plan (`MOV #imm`, `ADD #imm`, register moves/adds and T-bit primitives are covered by the initial lowering set) and records blocks without dedicated lowering as explicit reference fallbacks instead of pretending they are native.
+- `create_native_runtime()` owns the prepared executable memory, CPU state and compiled backend. `step_native_frame()` advances the compiled plan deterministically, tracks a frame index and hashes CPU + the complete 16 MiB RAM backing for deterministic state comparison.
+- The synthetic native-path regression requires at least one genuinely lowered block and asserts `used_reference_fallback == false`; two independently created runtimes produce the same register result, execution counts and state hash.
+- The backend exposes an independent ABI version. `<converted-game>/cache/native/backend_cache.ini` records ABI/core/program identity and `<converted-game>/cache/native/compiled_plan.bin` serializes the reloadable IR/compiled-plan data.
+- Cache reuse is verified when identity matches. CI #549 independently verifies automatic rebuild for stale `core_version`, stale backend ABI and changed program content rather than combining those invalidation cases.
+- GREEN CI #548 passed the complete implementation on Linux and Windows/MSVC; CI #549 passed the stricter independent-invalidation regression on Linux and Windows/MSVC, including the Windows Release executable artifact.
+- No game image, extracted game bytes, commercial fingerprint or generated copyrighted asset is present in the implementation or tests.
+
+**M3 — Native recompiler backend: Complete (100%) by the architecture criteria in `docs/architecture/PRODUCTION-ROADMAP.md`.** This is deliberately narrower than “game playable”: not every IR operation has a dedicated host-native lowering yet, reference fallback remains explicit for non-lowered blocks, and the conversion manifest remains non-`native-ready`. Steps 5, 6 and 8 still require real device behavior, real game boot/frame/input evidence and legally supplied game data.
 
 ## Global constraints
 - TDD: no production behavior without a failing test first.
