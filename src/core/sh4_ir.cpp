@@ -103,6 +103,7 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::cmp_gt_reg: out.op = Sh4IrOp::compare_signed_gt; break;
         case Sh4Op::cmp_pz: out.op = Sh4IrOp::compare_pz; break;
         case Sh4Op::cmp_pl: out.op = Sh4IrOp::compare_pl; break;
+        case Sh4Op::dt: out.op = Sh4IrOp::decrement_and_test; break;
         case Sh4Op::tst_reg: out.op = Sh4IrOp::test_bits_reg; break;
         case Sh4Op::and_reg: out.op = Sh4IrOp::bit_and_reg; break;
         case Sh4Op::xor_reg: out.op = Sh4IrOp::bit_xor_reg; break;

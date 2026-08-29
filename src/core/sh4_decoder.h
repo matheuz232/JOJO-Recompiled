@@ -99,6 +99,7 @@ enum class Sh4Op {
     cmp_gt_reg,
     cmp_pz,
     cmp_pl,
+    dt,
     tst_reg,
     and_reg,
     xor_reg,

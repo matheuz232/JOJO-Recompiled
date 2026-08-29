@@ -97,6 +97,7 @@ enum class Sh4IrOp {
     compare_signed_gt,
     compare_pz,
     compare_pl,
+    decrement_and_test,
     test_bits_reg,
     bit_and_reg,
     bit_xor_reg,

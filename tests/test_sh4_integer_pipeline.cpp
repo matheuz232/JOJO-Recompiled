@@ -47,6 +47,8 @@ static void test_decoder_patterns() {
     CHECK(jojo::decode_sh4(0x3127, 0).op == Sh4Op::cmp_gt_reg);
     CHECK(jojo::decode_sh4(0x4111, 0).op == Sh4Op::cmp_pz);
     CHECK(jojo::decode_sh4(0x4215, 0).op == Sh4Op::cmp_pl);
+    i = jojo::decode_sh4(0x4510, 0);
+    CHECK(i.op == Sh4Op::dt && i.rn == 5); // DT R5
 
     CHECK(jojo::decode_sh4(0x2458, 0).op == Sh4Op::tst_reg);
     CHECK(jojo::decode_sh4(0x2459, 0).op == Sh4Op::and_reg);
@@ -145,6 +147,28 @@ static void test_signed_and_unsigned_comparisons() {
     CHECK(state.t);
 }
 
+static void test_dt_decrements_and_sets_t_only_on_zero() {
+    jojo::Sh4ReferenceState state{};
+    state.r[5] = 2u;
+    state.r[6] = 0u;
+    state.t = true;
+    state.pr = 0xDEAD1800u;
+    const bool ok = execute_words({
+        0x4510, // DT R5 -> 1, T=0
+        0x4710, // DT R7: R7 starts 0 -> 0xFFFFFFFF, T=0
+        0x4510, // DT R5 -> 0, T=1
+        0x0629, // MOVT R6 -> 1
+        0x000B,
+        0x0009,
+    }, state, 0x8C011800u);
+    if (!ok) return;
+
+    CHECK(state.r[5] == 0u);
+    CHECK(state.r[7] == 0xFFFFFFFFu);
+    CHECK(state.r[6] == 1u);
+    CHECK(state.t);
+}
+
 static void test_shift_semantics_and_t_bit() {
     jojo::Sh4ReferenceState state{};
     state.r[10] = 0x80000001u;
@@ -187,6 +211,7 @@ int main() {
     test_decoder_patterns();
     test_logic_t_and_unary_execution();
     test_signed_and_unsigned_comparisons();
+    test_dt_decrements_and_sets_t_only_on_zero();
     test_shift_semantics_and_t_bit();
     if (failures) {
         std::cerr << failures << " expanded SH-4 integer assertion(s) failed\n";
