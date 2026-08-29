@@ -1,6 +1,7 @@
 #include "core/dreamcast_boot_runner.h"
 
 #include "core/dreamcast_bus.h"
+#include "core/dreamcast_interrupts.h"
 #include "core/dreamcast_system_asic.h"
 #include "core/sh4_cfg.h"
 #include "core/sh4_ir.h"
@@ -53,11 +54,13 @@ Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
     DreamcastReferenceBus bus(result.memory);
     DreamcastSystemAsic system_asic;
     bus.attach_device(DreamcastBusRegion::system_asic, system_asic);
+    const auto irq_boundary_hook = make_dreamcast_system_irq_boundary_hook(system_asic);
 
     auto run = execute_sh4_ir_reference(ir.value,
                                         result.state,
                                         bus,
-                                        max_blocks);
+                                        max_blocks,
+                                        irq_boundary_hook);
     if (!run) {
         if (bus.last_fault().has_value()) {
             result.stop_reason = DreamcastBootStopReason::unmapped_bus_access;

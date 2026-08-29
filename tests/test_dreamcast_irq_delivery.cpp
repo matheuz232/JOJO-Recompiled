@@ -50,9 +50,30 @@ static void test_cpu_mask_keeps_pending_holly_irq_undelivered() {
     CHECK(asic.pending_irq_level().has_value());
 }
 
+static void test_boundary_hook_services_pending_holly_irq() {
+    jojo::DreamcastSystemAsic asic;
+    write32(asic, 0x005F6910u, 0x00000004u);
+    asic.raise_normal(0x00000004u);
+
+    jojo::Sh4ReferenceState state{};
+    state.pc = 0x8C010100u;
+    state.vbr = 0x8C000000u;
+    state.r[15] = 0x8CFF0000u;
+
+    const auto hook = jojo::make_dreamcast_system_irq_boundary_hook(asic);
+    const auto serviced = hook(state);
+    CHECK(serviced);
+    if (!serviced) return;
+
+    CHECK(state.spc == 0x8C010100u);
+    CHECK(state.pc == 0x8C000600u);
+    CHECK(state.intevt == 0x00000240u);
+}
+
 int main() {
     test_pending_holly_irq_enters_sh4_interrupt_vector();
     test_cpu_mask_keeps_pending_holly_irq_undelivered();
+    test_boundary_hook_services_pending_holly_irq();
     if (failures) {
         std::cerr << failures << " Dreamcast IRQ delivery assertion(s) failed\n";
         return 1;
