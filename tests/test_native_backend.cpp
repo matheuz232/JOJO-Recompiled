@@ -1,4 +1,5 @@
 #include "core/native_backend.h"
+#include "core/version.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -92,10 +93,23 @@ static void test_cache_is_written_reused_and_rebuilt_on_abi_or_program_change() 
 
     {
         std::ofstream out(first.value.manifest_path, std::ios::trunc);
-        out << "abi_version=0\n";
-        out << "core_version=stale\n";
+        out << "abi_version=" << jojo::native_backend_abi_version() << "\n";
+        out << "core_version=stale-core-version\n";
         out << "program_hash=" << first.value.program_hash << "\n";
-        out << "block_count=0\noperation_count=0\n";
+        out << "block_count=" << first.value.block_count << "\n";
+        out << "operation_count=" << first.value.operation_count << "\n";
+    }
+    const auto core_rebuild = jojo::ensure_native_backend_cache(synthetic_program(), install);
+    CHECK(core_rebuild);
+    if (core_rebuild) CHECK(core_rebuild.value.rebuilt);
+
+    {
+        std::ofstream out(first.value.manifest_path, std::ios::trunc);
+        out << "abi_version=0\n";
+        out << "core_version=" << jojo::core_version() << "\n";
+        out << "program_hash=" << first.value.program_hash << "\n";
+        out << "block_count=" << first.value.block_count << "\n";
+        out << "operation_count=" << first.value.operation_count << "\n";
     }
     const auto abi_rebuild = jojo::ensure_native_backend_cache(synthetic_program(), install);
     CHECK(abi_rebuild);
