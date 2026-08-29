@@ -63,6 +63,7 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::ldc_vbr_reg: out.op = Sh4IrOp::set_control_from_reg; out.imm = 1; break;
         case Sh4Op::ldc_ssr_reg: out.op = Sh4IrOp::set_control_from_reg; out.imm = 2; break;
         case Sh4Op::ldc_spc_reg: out.op = Sh4IrOp::set_control_from_reg; out.imm = 3; break;
+        case Sh4Op::ldc_sgr_reg: out.op = Sh4IrOp::set_control_from_reg; out.imm = 4; break;
         case Sh4Op::ldc_dbr_reg: out.op = Sh4IrOp::set_control_from_reg; out.imm = 5; break;
         case Sh4Op::stc_sr_reg: out.op = Sh4IrOp::copy_control_to_reg; out.imm = 0; break;
         case Sh4Op::stc_vbr_reg: out.op = Sh4IrOp::copy_control_to_reg; out.imm = 1; break;
@@ -74,6 +75,7 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::ldc_vbr_postinc: out.op = Sh4IrOp::load_control_postinc32; out.imm = 1; break;
         case Sh4Op::ldc_ssr_postinc: out.op = Sh4IrOp::load_control_postinc32; out.imm = 2; break;
         case Sh4Op::ldc_spc_postinc: out.op = Sh4IrOp::load_control_postinc32; out.imm = 3; break;
+        case Sh4Op::ldc_sgr_postinc: out.op = Sh4IrOp::load_control_postinc32; out.imm = 4; break;
         case Sh4Op::ldc_dbr_postinc: out.op = Sh4IrOp::load_control_postinc32; out.imm = 5; break;
         case Sh4Op::stc_sr_predec: out.op = Sh4IrOp::store_control_predec32; out.imm = 0; break;
         case Sh4Op::stc_vbr_predec: out.op = Sh4IrOp::store_control_predec32; out.imm = 1; break;

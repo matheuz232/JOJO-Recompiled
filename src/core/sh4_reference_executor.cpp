@@ -426,6 +426,7 @@ void set_control_value(Sh4ReferenceState& state, std::int32_t selector, std::uin
         case 1: state.vbr = value; break;
         case 2: state.ssr = value; break;
         case 3: state.spc = value; break;
+        case 4: state.sgr = value; break;
         case 5: state.dbr = value; break;
         default: break;
     }

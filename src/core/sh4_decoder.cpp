@@ -217,6 +217,7 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
     if (control_code == 0x402Eu) { i.op = Sh4Op::ldc_vbr_reg; i.rm = n_field(raw); return i; }
     if (control_code == 0x403Eu) { i.op = Sh4Op::ldc_ssr_reg; i.rm = n_field(raw); return i; }
     if (control_code == 0x404Eu) { i.op = Sh4Op::ldc_spc_reg; i.rm = n_field(raw); return i; }
+    if (control_code == 0x403Au) { i.op = Sh4Op::ldc_sgr_reg; i.rm = n_field(raw); return i; }
     if (control_code == 0x40FAu) { i.op = Sh4Op::ldc_dbr_reg; i.rm = n_field(raw); return i; }
     if (control_code == 0x0002u) { i.op = Sh4Op::stc_sr_reg; i.rn = n_field(raw); return i; }
     if (control_code == 0x0022u) { i.op = Sh4Op::stc_vbr_reg; i.rn = n_field(raw); return i; }
@@ -228,6 +229,7 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
     if (control_code == 0x4027u) { i.op = Sh4Op::ldc_vbr_postinc; i.rm = n_field(raw); return i; }
     if (control_code == 0x4037u) { i.op = Sh4Op::ldc_ssr_postinc; i.rm = n_field(raw); return i; }
     if (control_code == 0x4047u) { i.op = Sh4Op::ldc_spc_postinc; i.rm = n_field(raw); return i; }
+    if (control_code == 0x4036u) { i.op = Sh4Op::ldc_sgr_postinc; i.rm = n_field(raw); return i; }
     if (control_code == 0x40F6u) { i.op = Sh4Op::ldc_dbr_postinc; i.rm = n_field(raw); return i; }
     if (control_code == 0x4003u) { i.op = Sh4Op::stc_sr_predec; i.rn = n_field(raw); return i; }
     if (control_code == 0x4023u) { i.op = Sh4Op::stc_vbr_predec; i.rn = n_field(raw); return i; }
