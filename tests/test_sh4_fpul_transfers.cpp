@@ -46,14 +46,22 @@ static void test_decoder_recognizes_fpul_transfer_forms() {
     CHECK(jojo::decode_sh4(0x4452u, 0).op != Sh4Op::unsupported); // STS.L FPUL,@-R4
 }
 
+static void test_decoder_recognizes_fpscr_transfer_forms() {
+    using jojo::Sh4Op;
+    CHECK(jojo::decode_sh4(0x416Au, 0).op != Sh4Op::unsupported); // LDS R1,FPSCR
+    CHECK(jojo::decode_sh4(0x026Au, 0).op != Sh4Op::unsupported); // STS FPSCR,R2
+    CHECK(jojo::decode_sh4(0x4366u, 0).op != Sh4Op::unsupported); // LDS.L @R3+,FPSCR
+    CHECK(jojo::decode_sh4(0x4462u, 0).op != Sh4Op::unsupported); // STS.L FPSCR,@-R4
+}
+
 static void test_register_forms_round_trip_fpul() {
     jojo::Sh4ReferenceState state{};
     state.r[1] = 0x89ABCDEFu;
     state.r[2] = 0x11223344u;
 
     const bool ok = execute_words({
-        0x415Au, // LDS R1,FPUL
-        0x025Au, // STS FPUL,R2
+        0x415Au,
+        0x025Au,
         0x000Bu,
         0x0009u,
     }, state);
@@ -75,8 +83,8 @@ static void test_memory_forms_round_trip_fpul_little_endian() {
     state.r[4] = 0x9010u;
 
     const bool ok = execute_words({
-        0x4356u, // LDS.L @R3+,FPUL
-        0x4452u, // STS.L FPUL,@-R4
+        0x4356u,
+        0x4452u,
         0x000Bu,
         0x0009u,
     }, state, {0x9000u, memory});
@@ -92,12 +100,13 @@ static void test_memory_forms_round_trip_fpul_little_endian() {
 
 int main() {
     test_decoder_recognizes_fpul_transfer_forms();
+    test_decoder_recognizes_fpscr_transfer_forms();
     test_register_forms_round_trip_fpul();
     test_memory_forms_round_trip_fpul_little_endian();
     if (failures) {
-        std::cerr << failures << " SH-4 FPUL transfer assertion(s) failed\n";
+        std::cerr << failures << " SH-4 FPUL/FPSCR transfer assertion(s) failed\n";
         return 1;
     }
-    std::cout << "all SH-4 FPUL transfer assertions passed\n";
+    std::cout << "all SH-4 FPUL/FPSCR transfer assertions passed\n";
     return 0;
 }
