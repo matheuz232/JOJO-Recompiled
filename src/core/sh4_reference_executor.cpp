@@ -1,6 +1,7 @@
 #include "core/sh4_reference_executor.h"
 
 #include <bit>
+#include <cstdint>
 #include <optional>
 
 namespace jojo {
@@ -393,6 +394,49 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             auto stored = write_u32(memory, address, value);
             if (!stored) return stored;
             state.r[instruction.dst_reg] = address;
+            return Result<void>::success();
+        }
+
+        case Sh4IrOp::clear_mac:
+            state.mach = 0u;
+            state.macl = 0u;
+            return Result<void>::success();
+        case Sh4IrOp::multiply_low32:
+        case Sh4IrOp::multiply_signed_word:
+        case Sh4IrOp::multiply_unsigned_word:
+        case Sh4IrOp::multiply_signed_long:
+        case Sh4IrOp::multiply_unsigned_long: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+
+            const auto lhs = state.r[instruction.dst_reg];
+            const auto rhs = state.r[instruction.src_reg];
+            if (instruction.op == Sh4IrOp::multiply_low32) {
+                const auto product = static_cast<std::uint64_t>(lhs) * static_cast<std::uint64_t>(rhs);
+                state.macl = static_cast<std::uint32_t>(product);
+            } else if (instruction.op == Sh4IrOp::multiply_signed_word) {
+                const auto lhs16 = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(lhs & 0xFFFFu));
+                const auto rhs16 = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(rhs & 0xFFFFu));
+                const auto product = static_cast<std::int32_t>(lhs16) * static_cast<std::int32_t>(rhs16);
+                state.macl = static_cast<std::uint32_t>(product);
+            } else if (instruction.op == Sh4IrOp::multiply_unsigned_word) {
+                const auto lhs16 = static_cast<std::uint32_t>(lhs & 0xFFFFu);
+                const auto rhs16 = static_cast<std::uint32_t>(rhs & 0xFFFFu);
+                state.macl = lhs16 * rhs16;
+            } else {
+                std::uint64_t product{};
+                if (instruction.op == Sh4IrOp::multiply_signed_long) {
+                    const auto signed_product = static_cast<std::int64_t>(as_signed(lhs)) *
+                                                static_cast<std::int64_t>(as_signed(rhs));
+                    product = static_cast<std::uint64_t>(signed_product);
+                } else {
+                    product = static_cast<std::uint64_t>(lhs) * static_cast<std::uint64_t>(rhs);
+                }
+                state.mach = static_cast<std::uint32_t>(product >> 32u);
+                state.macl = static_cast<std::uint32_t>(product);
+            }
             return Result<void>::success();
         }
 
