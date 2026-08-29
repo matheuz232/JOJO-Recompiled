@@ -34,7 +34,7 @@ static jojo::Sh4IrProgram make_program(const std::vector<std::uint16_t>& words) 
 
 static jojo::DreamcastExecutableMemory blank_memory() {
     jojo::DreamcastBootProgram program{};
-    program.bytes = {0x09u, 0x00u}; // NOP, only to allocate canonical RAM backing.
+    program.bytes = {0x09u, 0x00u};
     const auto loaded = jojo::load_dreamcast_boot_memory(program);
     CHECK(loaded);
     return loaded ? loaded.value : jojo::DreamcastExecutableMemory{};
@@ -44,10 +44,10 @@ static void test_executor_uses_dreamcast_ram_aliases_through_bus() {
     auto memory = blank_memory();
     jojo::DreamcastReferenceBus bus(memory);
     jojo::Sh4ReferenceState state{};
-    state.r[1] = 0xAC000200u; // uncached alias
+    state.r[1] = 0xAC000200u;
     state.r[2] = 0xA1B2C3D4u;
 
-    const auto ir = make_program({0x2122u}); // MOV.L R2,@R1
+    const auto ir = make_program({0x2122u});
     const auto run = jojo::execute_sh4_ir_reference(ir, state, bus, 8u);
     CHECK(run);
     if (!run) return;
@@ -65,9 +65,9 @@ static void test_executor_can_load_through_a_different_alias() {
     CHECK(stored);
     jojo::DreamcastReferenceBus bus(memory);
     jojo::Sh4ReferenceState state{};
-    state.r[1] = 0x8C000300u; // cached alias
+    state.r[1] = 0x8C000300u;
 
-    const auto ir = make_program({0x6212u}); // MOV.L @R1,R2
+    const auto ir = make_program({0x6212u});
     const auto run = jojo::execute_sh4_ir_reference(ir, state, bus, 8u);
     CHECK(run);
     if (run) CHECK(state.r[2] == 0x78563412u);
@@ -77,10 +77,10 @@ static void test_unmapped_bus_access_fails_explicitly() {
     auto memory = blank_memory();
     jojo::DreamcastReferenceBus bus(memory);
     jojo::Sh4ReferenceState state{};
-    state.r[1] = 0x04000000u; // not main RAM; no MMIO handler yet
+    state.r[1] = 0x04000000u;
     state.r[2] = 0x11223344u;
 
-    const auto ir = make_program({0x2122u}); // MOV.L R2,@R1
+    const auto ir = make_program({0x2122u});
     const auto run = jojo::execute_sh4_ir_reference(ir, state, bus, 8u);
     CHECK(!run);
     if (!run) CHECK(run.error == jojo::ErrorCode::invalid_argument);
@@ -88,13 +88,16 @@ static void test_unmapped_bus_access_fails_explicitly() {
 
 static void test_boot_harness_uses_dreamcast_bus_aliases() {
     jojo::DreamcastBootProgram program{};
-    append_program_word(program, 0x2122u); // MOV.L R2,@R1
+    append_program_word(program, 0x2122u);
 
     jojo::Sh4ReferenceState initial{};
-    initial.r[1] = 0xAC000400u; // uncached main-RAM alias
+    initial.r[1] = 0xAC000400u;
     initial.r[2] = 0xCAFEBABEu;
 
     const auto run = jojo::run_dreamcast_boot_reference(program, initial, 8u);
+    if (!run) {
+        std::cerr << "boot bus failure: " << run.detail << "\n";
+    }
     CHECK(run);
     if (!run) return;
 
