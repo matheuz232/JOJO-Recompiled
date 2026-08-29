@@ -373,6 +373,18 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         return i;
     }
 
+    const auto fpu_transfer_code = static_cast<std::uint16_t>(raw & 0xF0FFu);
+    if (fpu_transfer_code == 0xF01Du) {
+        i.op = Sh4Op::flds;
+        i.rm = n_field(raw);
+        return i;
+    }
+    if (fpu_transfer_code == 0xF00Du) {
+        i.op = Sh4Op::fsts;
+        i.rn = n_field(raw);
+        return i;
+    }
+
     if ((raw & 0xF000u) == 0xA000u) {
         i.op = Sh4Op::bra;
         i.displacement = sign_extend12(raw) * 2;

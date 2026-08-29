@@ -120,6 +120,8 @@ enum class Sh4Op {
     shlr16,
     fldi0,
     fldi1,
+    flds,
+    fsts,
     bra,
     bsr,
     bt,
