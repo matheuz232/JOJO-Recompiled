@@ -24,7 +24,7 @@ jobs:
           from pathlib import Path
           p = Path('.agent/apply_sh4_system.py')
           text = p.read_text(encoding='utf-8')
-          patches = [
+          one_off = [
               (
                   '"#include <string>\\n#include <vector>\\n",\n    "#include <string>\\n#include <utility>\\n#include <vector>\\n",',
                   '"#include <span>\\n#include <string>\\n",\n    "#include <span>\\n#include <string>\\n#include <utility>\\n",',
@@ -38,10 +38,26 @@ jobs:
                   '"    state.sr |= kSrBl | kSrRb | kSrMd;\\n",',
               ),
           ]
-          for old, new in patches:
-              if old not in text:
-                  raise SystemExit(f'expected stale applicator anchor not found: {old[:80]}')
+          for old, new in one_off:
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one stale applicator anchor: {old[:80]}')
               text = text.replace(old, new, 1)
+
+          grouped = [
+              (
+                  '"        case Sh4IrOp::set_mach_from_reg: {\\n"',
+                  '"        case Sh4IrOp::set_mach_from_reg:\\n        case Sh4IrOp::set_macl_from_reg:\\n        case Sh4IrOp::set_pr_from_reg: {\\n"',
+              ),
+              (
+                  '"        case Sh4IrOp::multiply_unsigned_long: {\\n"',
+                  '"        case Sh4IrOp::multiply_low32:\\n        case Sh4IrOp::multiply_signed_word:\\n        case Sh4IrOp::multiply_unsigned_word:\\n        case Sh4IrOp::multiply_signed_long:\\n        case Sh4IrOp::multiply_unsigned_long: {\\n"',
+              ),
+          ]
+          for old, new in grouped:
+              count = text.count(old)
+              if count != 2:
+                  raise SystemExit(f'expected two grouped applicator anchors, found {count}: {old}')
+              text = text.replace(old, new)
           p.write_text(text, encoding='utf-8')
           PY
       - name: Apply SH-4 system/control implementation
