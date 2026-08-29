@@ -1,7 +1,5 @@
 #include "core/dreamcast_analysis.h"
-#include "core/sh4_decoder.h"
-#include <algorithm>
-#include <map>
+#include "core/sh4_opcode_census.h"
 #include <string_view>
 
 namespace jojo {
@@ -38,11 +36,11 @@ Result<DreamcastBootAnalysis> analyze_dreamcast_boot_program(
             "Dreamcast boot media type is unknown; refusing to guess program encoding");
     }
 
-    auto decoded = decode_sh4_stream(program.bytes, kDreamcastProgramLoadAddress);
-    if (!decoded) {
-        return Result<DreamcastBootAnalysis>::failure(decoded.error, decoded.detail);
+    auto census = analyze_sh4_opcode_census(program.bytes, kDreamcastProgramLoadAddress);
+    if (!census) {
+        return Result<DreamcastBootAnalysis>::failure(census.error, census.detail);
     }
-    if (decoded.value.empty()) {
+    if (census.value.total_words == 0u) {
         return Result<DreamcastBootAnalysis>::failure(
             ErrorCode::invalid_installation, "Dreamcast boot program is empty");
     }
@@ -50,27 +48,14 @@ Result<DreamcastBootAnalysis> analyze_dreamcast_boot_program(
     DreamcastBootAnalysis analysis{};
     analysis.encoding = encoding;
     analysis.load_address = kDreamcastProgramLoadAddress;
-    analysis.word_count = decoded.value.size();
-
-    std::map<std::uint16_t, std::size_t> unsupported_counts;
-    for (const auto& instruction : decoded.value) {
-        if (instruction.op == Sh4Op::unsupported) {
-            ++analysis.unsupported_word_count;
-            ++unsupported_counts[instruction.raw];
-        } else {
-            ++analysis.supported_word_count;
-        }
+    analysis.word_count = census.value.total_words;
+    analysis.supported_word_count = census.value.supported_words;
+    analysis.unsupported_word_count = census.value.unsupported_words;
+    analysis.unsupported_histogram.reserve(census.value.unsupported.size());
+    for (auto& entry : census.value.unsupported) {
+        analysis.unsupported_histogram.push_back(
+            UnsupportedOpcodeCount{entry.raw, entry.count, std::move(entry.sample_addresses)});
     }
-
-    analysis.unsupported_histogram.reserve(unsupported_counts.size());
-    for (const auto& [opcode, count] : unsupported_counts) {
-        analysis.unsupported_histogram.push_back({opcode, count});
-    }
-    std::sort(analysis.unsupported_histogram.begin(), analysis.unsupported_histogram.end(),
-              [](const UnsupportedOpcodeCount& a, const UnsupportedOpcodeCount& b) {
-                  if (a.count != b.count) return a.count > b.count;
-                  return a.raw_opcode < b.raw_opcode;
-              });
 
     auto cfg = build_sh4_cfg(program.bytes,
                              kDreamcastProgramLoadAddress,
