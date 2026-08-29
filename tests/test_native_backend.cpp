@@ -38,6 +38,7 @@ static void test_compiles_backend_and_steps_deterministically() {
     CHECK(left.value.backend.abi_version == jojo::native_backend_abi_version());
     CHECK(!left.value.backend.program_hash.empty());
     CHECK(left.value.backend.ir.blocks.size() == right.value.backend.ir.blocks.size());
+    CHECK(left.value.backend.native_block_count > 0u);
     CHECK(left.value.frame_index == 0u);
     CHECK(left.value.cpu.pc == jojo::kDreamcastBootLoadAddress);
 
@@ -46,6 +47,8 @@ static void test_compiles_backend_and_steps_deterministically() {
     CHECK(left_step && right_step);
     if (!left_step || !right_step) return;
 
+    CHECK(!left_step.value.used_reference_fallback);
+    CHECK(!right_step.value.used_reference_fallback);
     CHECK(left.value.cpu.r[0] == 3u);
     CHECK(right.value.cpu.r[0] == 3u);
     CHECK(left.value.frame_index == 1u);
@@ -70,6 +73,15 @@ static void test_cache_is_written_reused_and_rebuilt_on_abi_or_program_change() 
     CHECK(first.value.plan_path == install / "cache" / "native" / "compiled_plan.bin");
     CHECK(std::filesystem::is_regular_file(first.value.manifest_path));
     CHECK(std::filesystem::is_regular_file(first.value.plan_path));
+
+    const auto loaded = jojo::load_native_backend_cache(first.value.plan_path);
+    CHECK(loaded);
+    if (loaded) {
+        CHECK(loaded.value.abi_version == jojo::native_backend_abi_version());
+        CHECK(loaded.value.program_hash == first.value.program_hash);
+        CHECK(loaded.value.ir.blocks.size() == first.value.block_count);
+        CHECK(loaded.value.native_block_count > 0u);
+    }
 
     const auto second = jojo::ensure_native_backend_cache(synthetic_program(), install);
     CHECK(second);
