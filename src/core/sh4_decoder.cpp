@@ -179,26 +179,23 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
     }
 
     const auto control_code = static_cast<std::uint16_t>(raw & 0xF0FFu);
-    if (control_code == 0x401Eu) {
-        i.op = Sh4Op::ldc_gbr_reg;
-        i.rm = n_field(raw);
-        return i;
-    }
-    if (control_code == 0x0012u) {
-        i.op = Sh4Op::stc_gbr_reg;
-        i.rn = n_field(raw);
-        return i;
-    }
-    if (control_code == 0x4017u) {
-        i.op = Sh4Op::ldc_gbr_postinc;
-        i.rm = n_field(raw);
-        return i;
-    }
-    if (control_code == 0x4013u) {
-        i.op = Sh4Op::stc_gbr_predec;
-        i.rn = n_field(raw);
-        return i;
-    }
+    if (control_code == 0x401Eu) { i.op = Sh4Op::ldc_gbr_reg; i.rm = n_field(raw); return i; }
+    if (control_code == 0x0012u) { i.op = Sh4Op::stc_gbr_reg; i.rn = n_field(raw); return i; }
+    if (control_code == 0x4017u) { i.op = Sh4Op::ldc_gbr_postinc; i.rm = n_field(raw); return i; }
+    if (control_code == 0x4013u) { i.op = Sh4Op::stc_gbr_predec; i.rn = n_field(raw); return i; }
+
+    if (control_code == 0x400Au) { i.op = Sh4Op::lds_mach_reg; i.rm = n_field(raw); return i; }
+    if (control_code == 0x401Au) { i.op = Sh4Op::lds_macl_reg; i.rm = n_field(raw); return i; }
+    if (control_code == 0x402Au) { i.op = Sh4Op::lds_pr_reg; i.rm = n_field(raw); return i; }
+    if (control_code == 0x000Au) { i.op = Sh4Op::sts_mach_reg; i.rn = n_field(raw); return i; }
+    if (control_code == 0x001Au) { i.op = Sh4Op::sts_macl_reg; i.rn = n_field(raw); return i; }
+    if (control_code == 0x002Au) { i.op = Sh4Op::sts_pr_reg; i.rn = n_field(raw); return i; }
+    if (control_code == 0x4006u) { i.op = Sh4Op::lds_mach_postinc; i.rm = n_field(raw); return i; }
+    if (control_code == 0x4016u) { i.op = Sh4Op::lds_macl_postinc; i.rm = n_field(raw); return i; }
+    if (control_code == 0x4026u) { i.op = Sh4Op::lds_pr_postinc; i.rm = n_field(raw); return i; }
+    if (control_code == 0x4002u) { i.op = Sh4Op::sts_mach_predec; i.rn = n_field(raw); return i; }
+    if (control_code == 0x4012u) { i.op = Sh4Op::sts_macl_predec; i.rn = n_field(raw); return i; }
+    if (control_code == 0x4022u) { i.op = Sh4Op::sts_pr_predec; i.rn = n_field(raw); return i; }
 
     if ((raw & 0xF00Fu) == 0x300Cu) {
         i.op = Sh4Op::add_reg;
