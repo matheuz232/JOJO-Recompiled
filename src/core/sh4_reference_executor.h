@@ -9,11 +9,24 @@
 #include <functional>
 #include <span>
 #include <string>
+#include <utility>
 
 namespace jojo {
 
+enum class Sh4ReferenceSystemEvent {
+    none,
+    ldtlb,
+    movca_l,
+    ocbi,
+    ocbp,
+    ocbwb,
+    pref,
+    sleep,
+};
+
 struct Sh4ReferenceState {
     std::array<std::uint32_t, 16> r{};
+    std::array<std::uint32_t, 8> r_bank{};
     std::array<std::uint32_t, 16> fr{};
     std::array<std::uint32_t, 16> xf{};
     std::uint32_t fpul{};
@@ -28,9 +41,33 @@ struct Sh4ReferenceState {
     std::uint32_t spc{};
     std::uint32_t sgr{};
     std::uint32_t vbr{};
+    std::uint32_t dbr{};
+    std::uint32_t tra{};
+    std::uint32_t expevt{};
     std::uint32_t intevt{};
     bool t{};
+    bool sleeping{};
+    Sh4ReferenceSystemEvent last_system_event{Sh4ReferenceSystemEvent::none};
+    std::uint32_t system_event_address{};
 };
+
+inline std::uint32_t read_sh4_reference_sr(const Sh4ReferenceState& state) noexcept {
+    return (state.sr & ~1u) | (state.t ? 1u : 0u);
+}
+
+inline void write_sh4_reference_sr(Sh4ReferenceState& state, std::uint32_t value) noexcept {
+    constexpr std::uint32_t md = 0x40000000u;
+    constexpr std::uint32_t rb = 0x20000000u;
+    const bool old_bank_one = (state.sr & (md | rb)) == (md | rb);
+    const bool new_bank_one = (value & (md | rb)) == (md | rb);
+    if (old_bank_one != new_bank_one) {
+        for (std::size_t index = 0; index < state.r_bank.size(); ++index) {
+            std::swap(state.r[index], state.r_bank[index]);
+        }
+    }
+    state.sr = value & ~1u;
+    state.t = (value & 1u) != 0u;
+}
 
 using Sh4ReferenceBlockBoundaryHook = std::function<Result<void>(Sh4ReferenceState&)>;
 
@@ -107,9 +144,10 @@ struct Sh4ReferenceMemoryView {
 };
 
 enum class Sh4ReferenceStopReason {
-    end_of_stream,
     left_program,
+    end_of_stream,
     block_limit,
+    sleep,
 };
 
 struct Sh4ReferenceRunResult {

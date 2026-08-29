@@ -25,11 +25,11 @@ Result<bool> accept_sh4_irl_interrupt(Sh4ReferenceState& state,
     }
 
     state.spc = state.pc;
-    state.ssr = state.sr;
+    state.ssr = read_sh4_reference_sr(state);
     state.sgr = state.r[15];
     state.intevt = 0x00000200u +
                    static_cast<std::uint32_t>(15u - level) * 0x20u;
-    state.sr |= kSrBl | kSrRb | kSrMd;
+    write_sh4_reference_sr(state, read_sh4_reference_sr(state) | kSrMd | kSrRb | kSrBl);
     state.pc = state.vbr + 0x00000600u;
     return Result<bool>::success(true);
 }

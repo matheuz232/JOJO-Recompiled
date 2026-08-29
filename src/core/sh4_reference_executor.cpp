@@ -30,6 +30,10 @@ constexpr std::uint32_t kFpscrDnBit = 0x00040000u;
 constexpr std::uint32_t kFpscrRmMask = 0x00000003u;
 constexpr std::uint32_t kSrQBit = 0x00000100u;
 constexpr std::uint32_t kSrMBit = 0x00000200u;
+constexpr std::uint32_t kSrSBit = 0x00000002u;
+constexpr std::uint32_t kSrBlBit = 0x10000000u;
+constexpr std::uint32_t kSrRbBit = 0x20000000u;
+constexpr std::uint32_t kSrMdBit = 0x40000000u;
 
 void write_fpscr(Sh4ReferenceState& state, std::uint32_t value) noexcept {
     const auto masked = value & kFpscrWritableMask;
@@ -378,7 +382,55 @@ std::uint32_t memory_width(Sh4IrOp op) noexcept {
 struct PendingTransfer {
     std::uint32_t target{};
     std::optional<bool> condition;
+    bool immediate{};
 };
+
+void enter_general_exception(const Sh4IrInstruction& instruction,
+                             Sh4ReferenceState& state,
+                             std::optional<PendingTransfer>& pending,
+                             std::uint32_t event_code) {
+    state.spc = instruction.in_delay_slot
+        ? instruction.source_address - 2u
+        : instruction.source_address;
+    state.ssr = read_sh4_reference_sr(state);
+    state.sgr = state.r[15];
+    state.expevt = event_code;
+    write_sh4_reference_sr(state, state.ssr | kSrMdBit | kSrRbBit | kSrBlBit);
+    pending = PendingTransfer{state.vbr + 0x100u, std::nullopt, true};
+}
+
+bool require_privileged(const Sh4IrInstruction& instruction,
+                        Sh4ReferenceState& state,
+                        std::optional<PendingTransfer>& pending) {
+    if ((state.sr & kSrMdBit) != 0u) return true;
+    enter_general_exception(instruction, state, pending,
+                            instruction.in_delay_slot ? 0x1A0u : 0x180u);
+    return false;
+}
+
+std::uint32_t control_value(const Sh4ReferenceState& state, std::int32_t selector) {
+    switch (selector) {
+        case 0: return read_sh4_reference_sr(state);
+        case 1: return state.vbr;
+        case 2: return state.ssr;
+        case 3: return state.spc;
+        case 4: return state.sgr;
+        case 5: return state.dbr;
+        default: return 0u;
+    }
+}
+
+void set_control_value(Sh4ReferenceState& state, std::int32_t selector, std::uint32_t value) {
+    switch (selector) {
+        case 0: write_sh4_reference_sr(state, value); break;
+        case 1: state.vbr = value; break;
+        case 2: state.ssr = value; break;
+        case 3: state.spc = value; break;
+        case 4: state.sgr = value; break;
+        case 5: state.dbr = value; break;
+        default: break;
+    }
+}
 
 Result<void> execute_op(const Sh4IrInstruction& instruction,
                         Sh4ReferenceState& state,
@@ -386,6 +438,23 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
                         std::optional<PendingTransfer>& pending) {
     switch (instruction.op) {
         case Sh4IrOp::nop:
+            return Result<void>::success();
+        case Sh4IrOp::clear_s:
+            state.sr &= ~kSrSBit;
+            return Result<void>::success();
+        case Sh4IrOp::set_s:
+            state.sr |= kSrSBit;
+            return Result<void>::success();
+        case Sh4IrOp::ldtlb_event:
+            if (!require_privileged(instruction, state, pending)) return Result<void>::success();
+            state.last_system_event = Sh4ReferenceSystemEvent::ldtlb;
+            state.system_event_address = 0u;
+            return Result<void>::success();
+        case Sh4IrOp::sleep_cpu:
+            if (!require_privileged(instruction, state, pending)) return Result<void>::success();
+            state.sleeping = true;
+            state.last_system_event = Sh4ReferenceSystemEvent::sleep;
+            state.system_event_address = 0u;
             return Result<void>::success();
         case Sh4IrOp::clear_t:
             state.t = false;
@@ -403,6 +472,51 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             auto reg = require_register(instruction.dst_reg);
             if (!reg) return reg;
             state.r[instruction.dst_reg] = static_cast<std::uint32_t>(instruction.imm);
+            return Result<void>::success();
+        }
+        case Sh4IrOp::test_and_set_byte: {
+            auto reg = require_register(instruction.dst_reg);
+            if (!reg) return reg;
+            const auto address = state.r[instruction.dst_reg];
+            auto value = read_u8(memory, address);
+            if (!value) return Result<void>::failure(value.error, value.detail);
+            state.t = value.value == 0u;
+            return write_u8(memory, address, static_cast<std::uint8_t>(value.value | 0x80u));
+        }
+        case Sh4IrOp::trap_imm:
+            if (instruction.in_delay_slot) {
+                enter_general_exception(instruction, state, pending, 0x1A0u);
+                return Result<void>::success();
+            }
+            state.spc = instruction.source_address + 2u;
+            state.ssr = read_sh4_reference_sr(state);
+            state.sgr = state.r[15];
+            state.tra = static_cast<std::uint32_t>(instruction.imm & 0xFF) << 2u;
+            state.expevt = 0x160u;
+            write_sh4_reference_sr(state, state.ssr | kSrMdBit | kSrRbBit | kSrBlBit);
+            pending = PendingTransfer{state.vbr + 0x100u, std::nullopt, true};
+            return Result<void>::success();
+        case Sh4IrOp::movca_long: {
+            auto reg = require_register(instruction.dst_reg);
+            if (!reg) return reg;
+            const auto address = state.r[instruction.dst_reg];
+            auto stored = write_u32(memory, address, state.r[0]);
+            if (!stored) return stored;
+            state.last_system_event = Sh4ReferenceSystemEvent::movca_l;
+            state.system_event_address = address;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::ocbi_event:
+        case Sh4IrOp::ocbp_event:
+        case Sh4IrOp::ocbwb_event:
+        case Sh4IrOp::pref_event: {
+            auto reg = require_register(instruction.dst_reg);
+            if (!reg) return reg;
+            state.system_event_address = state.r[instruction.dst_reg];
+            if (instruction.op == Sh4IrOp::ocbi_event) state.last_system_event = Sh4ReferenceSystemEvent::ocbi;
+            else if (instruction.op == Sh4IrOp::ocbp_event) state.last_system_event = Sh4ReferenceSystemEvent::ocbp;
+            else if (instruction.op == Sh4IrOp::ocbwb_event) state.last_system_event = Sh4ReferenceSystemEvent::ocbwb;
+            else state.last_system_event = Sh4ReferenceSystemEvent::pref;
             return Result<void>::success();
         }
         case Sh4IrOp::set_fr_zero:
@@ -808,6 +922,89 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             return Result<void>::success();
         }
 
+        case Sh4IrOp::set_control_from_reg: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            if (!require_privileged(instruction, state, pending)) return Result<void>::success();
+            if (instruction.imm == 0 && instruction.in_delay_slot) {
+                enter_general_exception(instruction, state, pending, 0x1A0u);
+                return Result<void>::success();
+            }
+            const auto value = state.r[instruction.src_reg];
+            set_control_value(state, instruction.imm, value);
+            return Result<void>::success();
+        }
+        case Sh4IrOp::copy_control_to_reg: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            if (!require_privileged(instruction, state, pending)) return Result<void>::success();
+            state.r[instruction.dst_reg] = control_value(state, instruction.imm);
+            return Result<void>::success();
+        }
+        case Sh4IrOp::load_control_postinc32: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            if (!require_privileged(instruction, state, pending)) return Result<void>::success();
+            if (instruction.imm == 0 && instruction.in_delay_slot) {
+                enter_general_exception(instruction, state, pending, 0x1A0u);
+                return Result<void>::success();
+            }
+            const auto address = state.r[instruction.src_reg];
+            auto value = read_u32(memory, address);
+            if (!value) return Result<void>::failure(value.error, value.detail);
+            state.r[instruction.src_reg] = address + 4u;
+            set_control_value(state, instruction.imm, value.value);
+            return Result<void>::success();
+        }
+        case Sh4IrOp::store_control_predec32: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            if (!require_privileged(instruction, state, pending)) return Result<void>::success();
+            const auto address = state.r[instruction.dst_reg] - 4u;
+            auto stored = write_u32(memory, address, control_value(state, instruction.imm));
+            if (!stored) return stored;
+            state.r[instruction.dst_reg] = address;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::set_bank_from_reg: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            if (instruction.dst_reg >= 8u) return Result<void>::failure(ErrorCode::invalid_argument, "SH-4 bank index is out of range");
+            if (!require_privileged(instruction, state, pending)) return Result<void>::success();
+            state.r_bank[instruction.dst_reg] = state.r[instruction.src_reg];
+            return Result<void>::success();
+        }
+        case Sh4IrOp::copy_bank_to_reg: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            if (instruction.src_reg >= 8u) return Result<void>::failure(ErrorCode::invalid_argument, "SH-4 bank index is out of range");
+            if (!require_privileged(instruction, state, pending)) return Result<void>::success();
+            state.r[instruction.dst_reg] = state.r_bank[instruction.src_reg];
+            return Result<void>::success();
+        }
+        case Sh4IrOp::load_bank_postinc32: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            if (instruction.dst_reg >= 8u) return Result<void>::failure(ErrorCode::invalid_argument, "SH-4 bank index is out of range");
+            if (!require_privileged(instruction, state, pending)) return Result<void>::success();
+            const auto address = state.r[instruction.src_reg];
+            auto value = read_u32(memory, address);
+            if (!value) return Result<void>::failure(value.error, value.detail);
+            state.r[instruction.src_reg] = address + 4u;
+            state.r_bank[instruction.dst_reg] = value.value;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::store_bank_predec32: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            if (instruction.src_reg >= 8u) return Result<void>::failure(ErrorCode::invalid_argument, "SH-4 bank index is out of range");
+            if (!require_privileged(instruction, state, pending)) return Result<void>::success();
+            const auto address = state.r[instruction.dst_reg] - 4u;
+            auto stored = write_u32(memory, address, state.r_bank[instruction.src_reg]);
+            if (!stored) return stored;
+            state.r[instruction.dst_reg] = address;
+            return Result<void>::success();
+        }
         case Sh4IrOp::set_mach_from_reg:
         case Sh4IrOp::set_macl_from_reg:
         case Sh4IrOp::set_pr_from_reg: {
@@ -924,6 +1121,80 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             state.mach = 0u;
             state.macl = 0u;
             return Result<void>::success();
+        case Sh4IrOp::multiply_accumulate_long: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto dst_address = state.r[instruction.dst_reg];
+            const auto src_address = state.r[instruction.src_reg];
+            auto lhs_raw = read_u32(memory, src_address);
+            if (!lhs_raw) return Result<void>::failure(lhs_raw.error, lhs_raw.detail);
+            auto rhs_raw = read_u32(memory, dst_address);
+            if (!rhs_raw) return Result<void>::failure(rhs_raw.error, rhs_raw.detail);
+            const auto lhs = std::bit_cast<std::int32_t>(lhs_raw.value);
+            const auto rhs = std::bit_cast<std::int32_t>(rhs_raw.value);
+            const auto product = static_cast<std::int64_t>(lhs) * static_cast<std::int64_t>(rhs);
+            const std::uint64_t combined = (static_cast<std::uint64_t>(state.mach) << 32u) | state.macl;
+            std::uint64_t result_bits{};
+            if ((state.sr & kSrSBit) == 0u) {
+                result_bits = combined + static_cast<std::uint64_t>(product);
+            } else {
+                constexpr std::int64_t min48 = -(static_cast<std::int64_t>(1) << 47u);
+                constexpr std::int64_t max48 = (static_cast<std::int64_t>(1) << 47u) - 1;
+                const auto accumulator = std::bit_cast<std::int64_t>(combined);
+                std::int64_t sum{};
+                if (product > 0 && accumulator > std::numeric_limits<std::int64_t>::max() - product) sum = max48;
+                else if (product < 0 && accumulator < std::numeric_limits<std::int64_t>::min() - product) sum = min48;
+                else {
+                    sum = accumulator + product;
+                    if (sum < min48) sum = min48;
+                    if (sum > max48) sum = max48;
+                }
+                result_bits = std::bit_cast<std::uint64_t>(sum);
+            }
+            state.macl = static_cast<std::uint32_t>(result_bits);
+            state.mach = static_cast<std::uint32_t>(result_bits >> 32u);
+            if (instruction.dst_reg == instruction.src_reg) state.r[instruction.dst_reg] = dst_address + 8u;
+            else {
+                state.r[instruction.dst_reg] = dst_address + 4u;
+                state.r[instruction.src_reg] = src_address + 4u;
+            }
+            return Result<void>::success();
+        }
+        case Sh4IrOp::multiply_accumulate_word: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto dst_address = state.r[instruction.dst_reg];
+            const auto src_address = state.r[instruction.src_reg];
+            auto lhs_raw = read_u16(memory, src_address);
+            if (!lhs_raw) return Result<void>::failure(lhs_raw.error, lhs_raw.detail);
+            auto rhs_raw = read_u16(memory, dst_address);
+            if (!rhs_raw) return Result<void>::failure(rhs_raw.error, rhs_raw.detail);
+            const auto lhs = std::bit_cast<std::int16_t>(lhs_raw.value);
+            const auto rhs = std::bit_cast<std::int16_t>(rhs_raw.value);
+            const auto product = static_cast<std::int32_t>(lhs) * static_cast<std::int32_t>(rhs);
+            if ((state.sr & kSrSBit) != 0u) {
+                const auto accumulator = static_cast<std::int64_t>(std::bit_cast<std::int32_t>(state.macl));
+                const auto sum = accumulator + static_cast<std::int64_t>(product);
+                if (sum > std::numeric_limits<std::int32_t>::max()) { state.macl = 0x7FFFFFFFu; state.mach = 1u; }
+                else if (sum < std::numeric_limits<std::int32_t>::min()) { state.macl = 0x80000000u; state.mach = 1u; }
+                else state.macl = std::bit_cast<std::uint32_t>(static_cast<std::int32_t>(sum));
+            } else {
+                const std::uint64_t combined = (static_cast<std::uint64_t>(state.mach) << 32u) | state.macl;
+                const auto result = combined + static_cast<std::uint64_t>(static_cast<std::int64_t>(product));
+                state.macl = static_cast<std::uint32_t>(result);
+                state.mach = static_cast<std::uint32_t>(result >> 32u);
+            }
+            if (instruction.dst_reg == instruction.src_reg) state.r[instruction.dst_reg] = dst_address + 4u;
+            else {
+                state.r[instruction.dst_reg] = dst_address + 2u;
+                state.r[instruction.src_reg] = src_address + 2u;
+            }
+            return Result<void>::success();
+        }
         case Sh4IrOp::multiply_low32:
         case Sh4IrOp::multiply_signed_word:
         case Sh4IrOp::multiply_unsigned_word:
@@ -1353,7 +1624,8 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             pending = PendingTransfer{state.pr, std::nullopt};
             return Result<void>::success();
         case Sh4IrOp::return_exception:
-            state.sr = state.ssr;
+            if (!require_privileged(instruction, state, pending)) return Result<void>::success();
+            write_sh4_reference_sr(state, state.ssr);
             pending = PendingTransfer{state.spc, std::nullopt};
             return Result<void>::success();
         case Sh4IrOp::load_pc_word: {
@@ -1437,8 +1709,23 @@ Result<Sh4ReferenceRunResult> execute_sh4_ir_reference(
             auto executed = execute_op(instruction, state, memory, pending);
             if (!executed) return Result<Sh4ReferenceRunResult>::failure(executed.error, executed.detail);
             ++run.operations_executed;
+            if (state.sleeping) {
+                ++run.blocks_executed;
+                state.pc = instruction.source_address + 2u;
+                run.stop_reason = Sh4ReferenceStopReason::sleep;
+                return Result<Sh4ReferenceRunResult>::success(run);
+            }
+            if (pending && pending->immediate) break;
         }
         ++run.blocks_executed;
+        if (pending && pending->immediate) {
+            state.pc = pending->target;
+            if (!find_sh4_ir_block(program, state.pc)) {
+                run.stop_reason = Sh4ReferenceStopReason::left_program;
+                return Result<Sh4ReferenceRunResult>::success(run);
+            }
+            continue;
+        }
         Sh4ReferenceStopReason exit_reason{Sh4ReferenceStopReason::left_program};
         auto next_pc = resolve_exit(*block, pending, exit_reason);
         if (!next_pc) return Result<Sh4ReferenceRunResult>::failure(next_pc.error, next_pc.detail);
