@@ -178,6 +178,28 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         return i;
     }
 
+    const auto control_code = static_cast<std::uint16_t>(raw & 0xF0FFu);
+    if (control_code == 0x401Eu) {
+        i.op = Sh4Op::ldc_gbr_reg;
+        i.rm = n_field(raw);
+        return i;
+    }
+    if (control_code == 0x0012u) {
+        i.op = Sh4Op::stc_gbr_reg;
+        i.rn = n_field(raw);
+        return i;
+    }
+    if (control_code == 0x4017u) {
+        i.op = Sh4Op::ldc_gbr_postinc;
+        i.rm = n_field(raw);
+        return i;
+    }
+    if (control_code == 0x4013u) {
+        i.op = Sh4Op::stc_gbr_predec;
+        i.rn = n_field(raw);
+        return i;
+    }
+
     if ((raw & 0xF00Fu) == 0x300Cu) {
         i.op = Sh4Op::add_reg;
         i.rn = n_field(raw);
