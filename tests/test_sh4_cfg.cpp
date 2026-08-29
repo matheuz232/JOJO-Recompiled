@@ -96,6 +96,28 @@ static void test_records_calls_and_indirect_flow() {
     CHECK(jump && jump->exit == jojo::Sh4BlockExit::indirect_jump);
 }
 
+static void test_records_register_relative_flow() {
+    std::vector<std::uint8_t> bytes;
+    append_word(bytes, 0x0303); // 2800 BSRF R3
+    append_word(bytes, 0x0009); // 2802 delay
+    append_word(bytes, 0x0423); // 2804 BRAF R4
+    append_word(bytes, 0x0009); // 2806 delay
+
+    const auto cfg = jojo::build_sh4_cfg(bytes, 0x2800, 0x2800);
+    CHECK(cfg);
+    if (!cfg) return;
+    CHECK(cfg.value.blocks.size() == 2);
+    CHECK(cfg.value.indirect_call_sites.size() == 1);
+    CHECK(cfg.value.indirect_call_sites[0] == 0x2800u);
+    CHECK(cfg.value.indirect_jump_sites.size() == 1);
+    CHECK(cfg.value.indirect_jump_sites[0] == 0x2804u);
+    const auto* call = block_at(cfg.value, 0x2800u);
+    CHECK(call && call->exit == jojo::Sh4BlockExit::indirect_call);
+    CHECK(call && call->fallthrough_target.value_or(0) == 0x2804u);
+    const auto* jump = block_at(cfg.value, 0x2804u);
+    CHECK(jump && jump->exit == jojo::Sh4BlockExit::indirect_jump);
+}
+
 static void test_validation() {
     std::vector<std::uint8_t> short_branch;
     append_word(short_branch, 0xA000); // needs delay slot, absent
@@ -132,6 +154,7 @@ static void test_unsupported_terminates_block() {
 int main() {
     test_partitions_conditional_and_delayed_branches();
     test_records_calls_and_indirect_flow();
+    test_records_register_relative_flow();
     test_validation();
     test_unsupported_terminates_block();
     if (failures) {

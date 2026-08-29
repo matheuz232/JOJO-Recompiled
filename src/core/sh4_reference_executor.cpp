@@ -28,6 +28,8 @@ constexpr std::uint32_t kFpscrSzBit = 0x00100000u;
 constexpr std::uint32_t kFpscrPrBit = 0x00080000u;
 constexpr std::uint32_t kFpscrDnBit = 0x00040000u;
 constexpr std::uint32_t kFpscrRmMask = 0x00000003u;
+constexpr std::uint32_t kSrQBit = 0x00000100u;
+constexpr std::uint32_t kSrMBit = 0x00000200u;
 
 void write_fpscr(Sh4ReferenceState& state, std::uint32_t value) noexcept {
     const auto masked = value & kFpscrWritableMask;
@@ -1075,6 +1077,64 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             state.t = subtrahend != 0u;
             return Result<void>::success();
         }
+        case Sh4IrOp::compare_string_bytes: {
+            auto lhs = require_register(instruction.dst_reg);
+            if (!lhs) return lhs;
+            auto rhs = require_register(instruction.src_reg);
+            if (!rhs) return rhs;
+            const auto value = state.r[instruction.dst_reg] ^ state.r[instruction.src_reg];
+            state.t = (value & 0x000000FFu) == 0u ||
+                      (value & 0x0000FF00u) == 0u ||
+                      (value & 0x00FF0000u) == 0u ||
+                      (value & 0xFF000000u) == 0u;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::divide_init_unsigned:
+            state.sr &= ~(kSrQBit | kSrMBit);
+            state.t = false;
+            return Result<void>::success();
+        case Sh4IrOp::divide_init_signed: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const bool q = (state.r[instruction.dst_reg] & 0x80000000u) != 0u;
+            const bool m = (state.r[instruction.src_reg] & 0x80000000u) != 0u;
+            state.sr = (state.sr & ~(kSrQBit | kSrMBit)) |
+                       (q ? kSrQBit : 0u) | (m ? kSrMBit : 0u);
+            state.t = q != m;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::divide_step: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            bool old_q = (state.sr & kSrQBit) != 0u;
+            const bool m = (state.sr & kSrMBit) != 0u;
+            bool q = (state.r[instruction.dst_reg] & 0x80000000u) != 0u;
+            auto& rn = state.r[instruction.dst_reg];
+            const auto rm = state.r[instruction.src_reg];
+            rn = (rn << 1u) | (state.t ? 1u : 0u);
+            std::uint32_t before{};
+            bool carry_or_borrow{};
+            if (!old_q && !m) {
+                before = rn; rn -= rm; carry_or_borrow = rn > before;
+                q = q ? !carry_or_borrow : carry_or_borrow;
+            } else if (!old_q && m) {
+                before = rn; rn += rm; carry_or_borrow = rn < before;
+                q = q ? carry_or_borrow : !carry_or_borrow;
+            } else if (old_q && !m) {
+                before = rn; rn += rm; carry_or_borrow = rn < before;
+                q = q ? !carry_or_borrow : carry_or_borrow;
+            } else {
+                before = rn; rn -= rm; carry_or_borrow = rn > before;
+                q = q ? carry_or_borrow : !carry_or_borrow;
+            }
+            if (q) state.sr |= kSrQBit; else state.sr &= ~kSrQBit;
+            state.t = q == m;
+            return Result<void>::success();
+        }
         case Sh4IrOp::compare_eq: {
             auto lhs = require_register(instruction.dst_reg);
             if (!lhs) return lhs;
@@ -1147,6 +1207,24 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             else state.r[instruction.dst_reg] |= value;
             return Result<void>::success();
         }
+        case Sh4IrOp::test_gbr_byte_imm:
+        case Sh4IrOp::and_gbr_byte_imm:
+        case Sh4IrOp::xor_gbr_byte_imm:
+        case Sh4IrOp::or_gbr_byte_imm: {
+            const auto address = state.gbr + state.r[0];
+            auto loaded = read_u8(memory, address);
+            if (!loaded) return Result<void>::failure(loaded.error, loaded.detail);
+            const auto immediate = static_cast<std::uint8_t>(instruction.imm & 0xFF);
+            if (instruction.op == Sh4IrOp::test_gbr_byte_imm) {
+                state.t = (loaded.value & immediate) == 0u;
+                return Result<void>::success();
+            }
+            std::uint8_t result = loaded.value;
+            if (instruction.op == Sh4IrOp::and_gbr_byte_imm) result &= immediate;
+            else if (instruction.op == Sh4IrOp::xor_gbr_byte_imm) result ^= immediate;
+            else result |= immediate;
+            return write_u8(memory, address, result);
+        }
         case Sh4IrOp::bit_not:
         case Sh4IrOp::negate: {
             auto dst = require_register(instruction.dst_reg);
@@ -1156,6 +1234,30 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             state.r[instruction.dst_reg] = instruction.op == Sh4IrOp::bit_not
                 ? ~state.r[instruction.src_reg]
                 : 0u - state.r[instruction.src_reg];
+            return Result<void>::success();
+        }
+        case Sh4IrOp::shift_arithmetic_dynamic:
+        case Sh4IrOp::shift_logical_dynamic: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto count_value = state.r[instruction.src_reg];
+            const auto value = state.r[instruction.dst_reg];
+            if ((count_value & 0x80000000u) == 0u) {
+                state.r[instruction.dst_reg] = value << (count_value & 31u);
+            } else {
+                const auto count = static_cast<unsigned>(((~count_value) & 31u) + 1u);
+                if (instruction.op == Sh4IrOp::shift_logical_dynamic) {
+                    state.r[instruction.dst_reg] = count >= 32u ? 0u : value >> count;
+                } else if (count >= 32u) {
+                    state.r[instruction.dst_reg] = (value & 0x80000000u) != 0u ? 0xFFFFFFFFu : 0u;
+                } else {
+                    auto shifted = value >> count;
+                    if ((value & 0x80000000u) != 0u) shifted |= (~0u << (32u - count));
+                    state.r[instruction.dst_reg] = shifted;
+                }
+            }
             return Result<void>::success();
         }
         case Sh4IrOp::shift_left_one:
@@ -1219,6 +1321,12 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             state.pr = instruction.source_address + 4u;
             pending = PendingTransfer{instruction.target, std::nullopt};
             return Result<void>::success();
+        case Sh4IrOp::branch_reg_relative: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            pending = PendingTransfer{instruction.source_address + 4u + state.r[instruction.src_reg], std::nullopt};
+            return Result<void>::success();
+        }
         case Sh4IrOp::jump_reg: {
             auto src = require_register(instruction.src_reg);
             if (!src) return src;
@@ -1229,6 +1337,14 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             auto src = require_register(instruction.src_reg);
             if (!src) return src;
             const auto target = state.r[instruction.src_reg];
+            state.pr = instruction.source_address + 4u;
+            pending = PendingTransfer{target, std::nullopt};
+            return Result<void>::success();
+        }
+        case Sh4IrOp::call_reg_relative: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto target = instruction.source_address + 4u + state.r[instruction.src_reg];
             state.pr = instruction.source_address + 4u;
             pending = PendingTransfer{target, std::nullopt};
             return Result<void>::success();

@@ -103,7 +103,11 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::cmp_gt_reg: out.op = Sh4IrOp::compare_signed_gt; break;
         case Sh4Op::cmp_pz: out.op = Sh4IrOp::compare_pz; break;
         case Sh4Op::cmp_pl: out.op = Sh4IrOp::compare_pl; break;
+        case Sh4Op::cmp_str_reg: out.op = Sh4IrOp::compare_string_bytes; break;
         case Sh4Op::dt: out.op = Sh4IrOp::decrement_and_test; break;
+        case Sh4Op::div0s: out.op = Sh4IrOp::divide_init_signed; break;
+        case Sh4Op::div0u: out.op = Sh4IrOp::divide_init_unsigned; break;
+        case Sh4Op::div1: out.op = Sh4IrOp::divide_step; break;
         case Sh4Op::tst_reg: out.op = Sh4IrOp::test_bits_reg; break;
         case Sh4Op::and_reg: out.op = Sh4IrOp::bit_and_reg; break;
         case Sh4Op::xor_reg: out.op = Sh4IrOp::bit_xor_reg; break;
@@ -112,6 +116,10 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::and_imm: out.op = Sh4IrOp::bit_and_imm; break;
         case Sh4Op::xor_imm: out.op = Sh4IrOp::bit_xor_imm; break;
         case Sh4Op::or_imm: out.op = Sh4IrOp::bit_or_imm; break;
+        case Sh4Op::tst_b_imm_gbr: out.op = Sh4IrOp::test_gbr_byte_imm; break;
+        case Sh4Op::and_b_imm_gbr: out.op = Sh4IrOp::and_gbr_byte_imm; break;
+        case Sh4Op::xor_b_imm_gbr: out.op = Sh4IrOp::xor_gbr_byte_imm; break;
+        case Sh4Op::or_b_imm_gbr: out.op = Sh4IrOp::or_gbr_byte_imm; break;
         case Sh4Op::not_reg: out.op = Sh4IrOp::bit_not; break;
         case Sh4Op::neg_reg: out.op = Sh4IrOp::negate; break;
         case Sh4Op::shll: out.op = Sh4IrOp::shift_left_one; break;
@@ -127,6 +135,9 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::shlr8: out.op = Sh4IrOp::shift_right_logical_const; out.imm = 8; break;
         case Sh4Op::shll16: out.op = Sh4IrOp::shift_left_const; out.imm = 16; break;
         case Sh4Op::shlr16: out.op = Sh4IrOp::shift_right_logical_const; out.imm = 16; break;
+        case Sh4Op::shal: out.op = Sh4IrOp::shift_left_one; break;
+        case Sh4Op::shad: out.op = Sh4IrOp::shift_arithmetic_dynamic; break;
+        case Sh4Op::shld: out.op = Sh4IrOp::shift_logical_dynamic; break;
         case Sh4Op::fldi0: out.op = Sh4IrOp::set_fr_zero; break;
         case Sh4Op::fldi1: out.op = Sh4IrOp::set_fr_one; break;
         case Sh4Op::flds: out.op = Sh4IrOp::copy_fr_to_fpul; break;
@@ -174,8 +185,16 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
             out.op = Sh4IrOp::jump_reg;
             out.src_reg = input.rn;
             break;
+        case Sh4Op::braf:
+            out.op = Sh4IrOp::branch_reg_relative;
+            out.src_reg = input.rn;
+            break;
         case Sh4Op::jsr_reg:
             out.op = Sh4IrOp::call_reg;
+            out.src_reg = input.rn;
+            break;
+        case Sh4Op::bsrf:
+            out.op = Sh4IrOp::call_reg_relative;
             out.src_reg = input.rn;
             break;
         case Sh4Op::rts: out.op = Sh4IrOp::return_pr; break;

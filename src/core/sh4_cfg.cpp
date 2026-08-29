@@ -101,7 +101,7 @@ Result<Sh4ControlFlowGraph> build_sh4_cfg(const std::vector<std::uint8_t>& bytes
         if (is_conditional(i)) {
             const auto fallthrough = i.address + (i.has_delay_slot ? 4u : 2u);
             if (contains_address(fallthrough, base_address, bytes.size())) leaders.insert(fallthrough);
-        } else if (is_direct_call(i) || i.op == Sh4Op::jsr_reg) {
+        } else if (is_direct_call(i) || i.op == Sh4Op::jsr_reg || i.op == Sh4Op::bsrf) {
             const auto fallthrough = i.address + 4u;
             if (contains_address(fallthrough, base_address, bytes.size())) leaders.insert(fallthrough);
         }
@@ -191,7 +191,7 @@ Result<Sh4ControlFlowGraph> build_sh4_cfg(const std::vector<std::uint8_t>& bytes
                 break;
             }
 
-            if (i.op == Sh4Op::jsr_reg) {
+            if (i.op == Sh4Op::jsr_reg || i.op == Sh4Op::bsrf) {
                 const auto delay = append_delay_slot(decoded, index, block, cfg.unsupported_sites);
                 if (!delay) return Result<Sh4ControlFlowGraph>::failure(delay.error, delay.detail);
                 block.exit = Sh4BlockExit::indirect_call;
@@ -201,7 +201,7 @@ Result<Sh4ControlFlowGraph> build_sh4_cfg(const std::vector<std::uint8_t>& bytes
                 break;
             }
 
-            if (i.op == Sh4Op::jmp_reg) {
+            if (i.op == Sh4Op::jmp_reg || i.op == Sh4Op::braf) {
                 const auto delay = append_delay_slot(decoded, index, block, cfg.unsupported_sites);
                 if (!delay) return Result<Sh4ControlFlowGraph>::failure(delay.error, delay.detail);
                 block.exit = Sh4BlockExit::indirect_jump;
