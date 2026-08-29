@@ -73,6 +73,13 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::mulu_w: out.op = Sh4IrOp::multiply_unsigned_word; break;
         case Sh4Op::dmuls_l: out.op = Sh4IrOp::multiply_signed_long; break;
         case Sh4Op::dmulu_l: out.op = Sh4IrOp::multiply_unsigned_long; break;
+        case Sh4Op::exts_b: out.op = Sh4IrOp::sign_extend_byte; break;
+        case Sh4Op::exts_w: out.op = Sh4IrOp::sign_extend_word; break;
+        case Sh4Op::extu_b: out.op = Sh4IrOp::zero_extend_byte; break;
+        case Sh4Op::extu_w: out.op = Sh4IrOp::zero_extend_word; break;
+        case Sh4Op::swap_b: out.op = Sh4IrOp::swap_low_bytes; break;
+        case Sh4Op::swap_w: out.op = Sh4IrOp::swap_words; break;
+        case Sh4Op::xtrct: out.op = Sh4IrOp::extract_middle; break;
         case Sh4Op::add_reg: out.op = Sh4IrOp::add_reg; break;
         case Sh4Op::sub_reg: out.op = Sh4IrOp::sub_reg; break;
         case Sh4Op::cmp_eq_reg: out.op = Sh4IrOp::compare_eq; break;

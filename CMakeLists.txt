@@ -88,3 +88,6 @@ add_test(NAME jojo_sh4_pr_mac_register_transfer_tests COMMAND jojo_sh4_pr_mac_re
 add_executable(jojo_sh4_multiply_tests tests/test_sh4_multiply.cpp)
 target_link_libraries(jojo_sh4_multiply_tests PRIVATE jojo_core)
 add_test(NAME jojo_sh4_multiply_tests COMMAND jojo_sh4_multiply_tests)
+add_executable(jojo_sh4_data_manipulation_tests tests/test_sh4_data_manipulation.cpp)
+target_link_libraries(jojo_sh4_data_manipulation_tests PRIVATE jojo_core)
+add_test(NAME jojo_sh4_data_manipulation_tests COMMAND jojo_sh4_data_manipulation_tests)
