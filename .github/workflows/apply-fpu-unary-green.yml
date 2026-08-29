@@ -1,0 +1,29 @@
+name: Apply unary FPU GREEN patch
+
+on:
+  push:
+    branches:
+      - feature/sh4-fpu-unary
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply staged patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f tools/fpu-unary-green.patch
+          git apply --check tools/fpu-unary-green.patch
+          git apply tools/fpu-unary-green.patch
+          rm tools/fpu-unary-green.patch
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: implement SH-4 unary FPU operations"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
