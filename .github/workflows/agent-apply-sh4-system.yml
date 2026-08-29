@@ -24,7 +24,7 @@ jobs:
           from pathlib import Path
           p = Path('.agent/apply_sh4_system.py')
           text = p.read_text(encoding='utf-8')
-          one_off = [
+          patches = [
               (
                   '"#include <string>\\n#include <vector>\\n",\n    "#include <string>\\n#include <utility>\\n#include <vector>\\n",',
                   '"#include <span>\\n#include <string>\\n",\n    "#include <span>\\n#include <string>\\n#include <utility>\\n",',
@@ -38,30 +38,58 @@ jobs:
                   '"    state.sr |= kSrBl | kSrRb | kSrMd;\\n",',
               ),
           ]
-          for old, new in one_off:
+          for old, new in patches:
               if text.count(old) != 1:
                   raise SystemExit(f'expected one stale applicator anchor: {old[:80]}')
               text = text.replace(old, new, 1)
-
-          grouped = [
+          p.write_text(text, encoding='utf-8')
+          PY
+      - name: Normalize grouped executor switch anchors
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/core/sh4_reference_executor.cpp')
+          text = p.read_text(encoding='utf-8')
+          groups = [
               (
-                  '"        case Sh4IrOp::set_mach_from_reg: {\\n"',
-                  '"        case Sh4IrOp::set_mach_from_reg:\\n        case Sh4IrOp::set_macl_from_reg:\\n        case Sh4IrOp::set_pr_from_reg: {\\n"',
+                  '        case Sh4IrOp::set_mach_from_reg:\n        case Sh4IrOp::set_macl_from_reg:\n        case Sh4IrOp::set_pr_from_reg: {\n',
+                  '        case Sh4IrOp::set_mach_from_reg: {\n',
               ),
               (
-                  '"        case Sh4IrOp::multiply_unsigned_long: {\\n"',
-                  '"        case Sh4IrOp::multiply_low32:\\n        case Sh4IrOp::multiply_signed_word:\\n        case Sh4IrOp::multiply_unsigned_word:\\n        case Sh4IrOp::multiply_signed_long:\\n        case Sh4IrOp::multiply_unsigned_long: {\\n"',
+                  '        case Sh4IrOp::multiply_low32:\n        case Sh4IrOp::multiply_signed_word:\n        case Sh4IrOp::multiply_unsigned_word:\n        case Sh4IrOp::multiply_signed_long:\n        case Sh4IrOp::multiply_unsigned_long: {\n',
+                  '        case Sh4IrOp::multiply_unsigned_long: {\n',
               ),
           ]
-          for old, new in grouped:
-              count = text.count(old)
-              if count != 2:
-                  raise SystemExit(f'expected two grouped applicator anchors, found {count}: {old}')
-              text = text.replace(old, new)
+          for old, new in groups:
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one grouped source anchor: {old[:80]}')
+              text = text.replace(old, new, 1)
           p.write_text(text, encoding='utf-8')
           PY
       - name: Apply SH-4 system/control implementation
         run: python3 .agent/apply_sh4_system.py
+      - name: Restore grouped executor switch cases
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/core/sh4_reference_executor.cpp')
+          text = p.read_text(encoding='utf-8')
+          groups = [
+              (
+                  '        case Sh4IrOp::set_mach_from_reg: {\n',
+                  '        case Sh4IrOp::set_mach_from_reg:\n        case Sh4IrOp::set_macl_from_reg:\n        case Sh4IrOp::set_pr_from_reg: {\n',
+              ),
+              (
+                  '        case Sh4IrOp::multiply_unsigned_long: {\n',
+                  '        case Sh4IrOp::multiply_low32:\n        case Sh4IrOp::multiply_signed_word:\n        case Sh4IrOp::multiply_unsigned_word:\n        case Sh4IrOp::multiply_signed_long:\n        case Sh4IrOp::multiply_unsigned_long: {\n',
+              ),
+          ]
+          for old, new in groups:
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one post-apply switch anchor, found {text.count(old)}: {old}')
+              text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8')
+          PY
       - name: Commit implementation and remove applicator
         run: |
           rm .agent/apply_sh4_system.py .github/workflows/agent-apply-sh4-system.yml
