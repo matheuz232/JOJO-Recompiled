@@ -20,6 +20,24 @@ static void append_word(jojo::DreamcastBootProgram& program, std::uint16_t word)
     program.bytes.push_back(static_cast<std::uint8_t>(word >> 8u));
 }
 
+class RecordingMmioDevice final : public jojo::DreamcastMmioDevice {
+public:
+    jojo::Result<std::uint8_t> read8(std::uint32_t address) override {
+        last_read = address;
+        return jojo::Result<std::uint8_t>::success(0x5Au);
+    }
+
+    jojo::Result<void> write8(std::uint32_t address, std::uint8_t value) override {
+        last_write = address;
+        last_value = value;
+        return jojo::Result<void>::success();
+    }
+
+    std::uint32_t last_read{};
+    std::uint32_t last_write{};
+    std::uint8_t last_value{};
+};
+
 static void test_classifies_documented_dreamcast_regions() {
     using jojo::DreamcastBusRegion;
     CHECK(jojo::classify_dreamcast_bus_region(0x8C000100u) == DreamcastBusRegion::main_ram);
@@ -50,6 +68,24 @@ static void test_bus_records_first_unmapped_access() {
     CHECK(fault->width_bytes == 1u);
 }
 
+static void test_bus_routes_registered_mmio_region_without_faking_behavior() {
+    auto memory = blank_memory();
+    jojo::DreamcastReferenceBus bus(memory);
+    RecordingMmioDevice device;
+    bus.attach_device(jojo::DreamcastBusRegion::system_asic, device);
+
+    const auto value = bus.read8(0xA05F6900u);
+    CHECK(value);
+    if (value) CHECK(value.value == 0x5Au);
+    CHECK(device.last_read == 0xA05F6900u);
+
+    const auto stored = bus.write8(0xA05F6901u, 0xC3u);
+    CHECK(stored);
+    CHECK(device.last_write == 0xA05F6901u);
+    CHECK(device.last_value == 0xC3u);
+    CHECK(!bus.last_fault().has_value());
+}
+
 static void test_boot_runner_surfaces_unmapped_hardware_stop() {
     jojo::DreamcastBootProgram program{};
     append_word(program, 0x2122u); // MOV.L R2,@R1
@@ -72,6 +108,7 @@ static void test_boot_runner_surfaces_unmapped_hardware_stop() {
 int main() {
     test_classifies_documented_dreamcast_regions();
     test_bus_records_first_unmapped_access();
+    test_bus_routes_registered_mmio_region_without_faking_behavior();
     test_boot_runner_surfaces_unmapped_hardware_stop();
     if (failures) {
         std::cerr << failures << " Dreamcast bus-diagnostics assertion(s) failed\n";
