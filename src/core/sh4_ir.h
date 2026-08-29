@@ -104,6 +104,8 @@ enum class Sh4IrOp {
     shift_right_arithmetic_one,
     shift_left_const,
     shift_right_logical_const,
+    set_fr_zero,
+    set_fr_one,
     branch_direct,
     branch_if_t,
     branch_if_not_t,
