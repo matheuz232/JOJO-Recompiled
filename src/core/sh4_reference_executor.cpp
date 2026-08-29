@@ -346,6 +346,56 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             return Result<void>::success();
         }
 
+        case Sh4IrOp::set_mach_from_reg:
+        case Sh4IrOp::set_macl_from_reg:
+        case Sh4IrOp::set_pr_from_reg: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            if (instruction.op == Sh4IrOp::set_mach_from_reg) state.mach = state.r[instruction.src_reg];
+            else if (instruction.op == Sh4IrOp::set_macl_from_reg) state.macl = state.r[instruction.src_reg];
+            else state.pr = state.r[instruction.src_reg];
+            return Result<void>::success();
+        }
+        case Sh4IrOp::copy_mach_to_reg:
+        case Sh4IrOp::copy_macl_to_reg:
+        case Sh4IrOp::copy_pr_to_reg: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            if (instruction.op == Sh4IrOp::copy_mach_to_reg) state.r[instruction.dst_reg] = state.mach;
+            else if (instruction.op == Sh4IrOp::copy_macl_to_reg) state.r[instruction.dst_reg] = state.macl;
+            else state.r[instruction.dst_reg] = state.pr;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::load_mach_postinc32:
+        case Sh4IrOp::load_macl_postinc32:
+        case Sh4IrOp::load_pr_postinc32: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto address = state.r[instruction.src_reg];
+            auto value = read_u32(memory, address);
+            if (!value) return Result<void>::failure(value.error, value.detail);
+            if (instruction.op == Sh4IrOp::load_mach_postinc32) state.mach = value.value;
+            else if (instruction.op == Sh4IrOp::load_macl_postinc32) state.macl = value.value;
+            else state.pr = value.value;
+            state.r[instruction.src_reg] += 4u;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::store_mach_predec32:
+        case Sh4IrOp::store_macl_predec32:
+        case Sh4IrOp::store_pr_predec32: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            const auto address = state.r[instruction.dst_reg] - 4u;
+            std::uint32_t value{};
+            if (instruction.op == Sh4IrOp::store_mach_predec32) value = state.mach;
+            else if (instruction.op == Sh4IrOp::store_macl_predec32) value = state.macl;
+            else value = state.pr;
+            auto stored = write_u32(memory, address, value);
+            if (!stored) return stored;
+            state.r[instruction.dst_reg] = address;
+            return Result<void>::success();
+        }
+
         case Sh4IrOp::add_reg: {
             auto dst = require_register(instruction.dst_reg);
             if (!dst) return dst;
