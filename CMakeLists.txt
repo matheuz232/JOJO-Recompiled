@@ -24,6 +24,7 @@ add_library(jojo_core STATIC
   src/core/dreamcast_analysis.cpp
   src/core/dreamcast_memory.cpp
   src/core/dreamcast_bus.cpp
+  src/core/dreamcast_system_asic.cpp
   src/core/dreamcast_boot_runner.cpp
   src/core/sh4_decoder.cpp
   src/core/sh4_opcode_census.cpp
