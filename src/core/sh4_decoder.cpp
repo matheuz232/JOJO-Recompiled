@@ -356,11 +356,17 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
 
     const auto shift_code = static_cast<std::uint16_t>(raw & 0xF0FFu);
     if (shift_code == 0x4000u || shift_code == 0x4001u || shift_code == 0x4021u ||
-        shift_code == 0x4008u || shift_code == 0x4009u || shift_code == 0x4018u ||
-        shift_code == 0x4019u || shift_code == 0x4028u || shift_code == 0x4029u) {
+        shift_code == 0x4004u || shift_code == 0x4005u || shift_code == 0x4024u ||
+        shift_code == 0x4025u || shift_code == 0x4008u || shift_code == 0x4009u ||
+        shift_code == 0x4018u || shift_code == 0x4019u || shift_code == 0x4028u ||
+        shift_code == 0x4029u) {
         if (shift_code == 0x4000u) i.op = Sh4Op::shll;
         if (shift_code == 0x4001u) i.op = Sh4Op::shlr;
         if (shift_code == 0x4021u) i.op = Sh4Op::shar;
+        if (shift_code == 0x4004u) i.op = Sh4Op::rotl;
+        if (shift_code == 0x4005u) i.op = Sh4Op::rotr;
+        if (shift_code == 0x4024u) i.op = Sh4Op::rotcl;
+        if (shift_code == 0x4025u) i.op = Sh4Op::rotcr;
         if (shift_code == 0x4008u) i.op = Sh4Op::shll2;
         if (shift_code == 0x4009u) i.op = Sh4Op::shlr2;
         if (shift_code == 0x4018u) i.op = Sh4Op::shll8;

@@ -117,6 +117,10 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::shll: out.op = Sh4IrOp::shift_left_one; break;
         case Sh4Op::shlr: out.op = Sh4IrOp::shift_right_logical_one; break;
         case Sh4Op::shar: out.op = Sh4IrOp::shift_right_arithmetic_one; break;
+        case Sh4Op::rotl: out.op = Sh4IrOp::rotate_left_one; break;
+        case Sh4Op::rotr: out.op = Sh4IrOp::rotate_right_one; break;
+        case Sh4Op::rotcl: out.op = Sh4IrOp::rotate_left_through_t; break;
+        case Sh4Op::rotcr: out.op = Sh4IrOp::rotate_right_through_t; break;
         case Sh4Op::shll2: out.op = Sh4IrOp::shift_left_const; out.imm = 2; break;
         case Sh4Op::shlr2: out.op = Sh4IrOp::shift_right_logical_const; out.imm = 2; break;
         case Sh4Op::shll8: out.op = Sh4IrOp::shift_left_const; out.imm = 8; break;
