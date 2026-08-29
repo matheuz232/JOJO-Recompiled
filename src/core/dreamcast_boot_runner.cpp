@@ -1,6 +1,7 @@
 #include "core/dreamcast_boot_runner.h"
 
 #include "core/dreamcast_bus.h"
+#include "core/dreamcast_system_asic.h"
 #include "core/sh4_cfg.h"
 #include "core/sh4_ir.h"
 
@@ -50,6 +51,9 @@ Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
     }
 
     DreamcastReferenceBus bus(result.memory);
+    DreamcastSystemAsic system_asic;
+    bus.attach_device(DreamcastBusRegion::system_asic, system_asic);
+
     auto run = execute_sh4_ir_reference(ir.value,
                                         result.state,
                                         bus,
