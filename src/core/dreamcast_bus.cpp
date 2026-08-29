@@ -92,7 +92,9 @@ Result<std::uint8_t> DreamcastReferenceBus::read8(std::uint32_t address) {
     }
 
     if (auto* device = device_for(region); device != nullptr) {
-        return device->read8(address);
+        auto value = device->read8(address);
+        if (!value) record_fault(address, DreamcastBusAccess::read);
+        return value;
     }
 
     record_fault(address, DreamcastBusAccess::read);
@@ -117,7 +119,9 @@ Result<void> DreamcastReferenceBus::write8(std::uint32_t address, std::uint8_t v
     }
 
     if (auto* device = device_for(region); device != nullptr) {
-        return device->write8(address, value);
+        auto stored = device->write8(address, value);
+        if (!stored) record_fault(address, DreamcastBusAccess::write);
+        return stored;
     }
 
     record_fault(address, DreamcastBusAccess::write);
