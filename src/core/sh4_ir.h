@@ -118,6 +118,7 @@ enum class Sh4IrOp {
     copy_fpul_to_fr,
     convert_fpul_to_float,
     truncate_float_to_fpul,
+    copy_fpu_registers,
     toggle_fpscr_fr,
     toggle_fpscr_sz,
     branch_direct,

@@ -152,3 +152,6 @@ add_test(NAME jojo_sh4_fpu_mode_switch_tests COMMAND jojo_sh4_fpu_mode_switch_te
 add_executable(jojo_sh4_float_ftrc_tests tests/test_sh4_float_ftrc.cpp)
 target_link_libraries(jojo_sh4_float_ftrc_tests PRIVATE jojo_core)
 add_test(NAME jojo_sh4_float_ftrc_tests COMMAND jojo_sh4_float_ftrc_tests)
+add_executable(jojo_sh4_fmov_register_tests tests/test_sh4_fmov_registers.cpp)
+target_link_libraries(jojo_sh4_fmov_register_tests PRIVATE jojo_core)
+add_test(NAME jojo_sh4_fmov_register_tests COMMAND jojo_sh4_fmov_register_tests)
