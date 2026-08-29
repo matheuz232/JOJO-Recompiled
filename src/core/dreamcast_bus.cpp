@@ -52,6 +52,19 @@ DreamcastBusRegion classify_dreamcast_bus_region(std::uint32_t address) noexcept
     return DreamcastBusRegion::unknown;
 }
 
+void DreamcastReferenceBus::attach_device(DreamcastBusRegion region,
+                                          DreamcastMmioDevice& device) noexcept {
+    devices_[static_cast<std::size_t>(region)] = &device;
+}
+
+void DreamcastReferenceBus::detach_device(DreamcastBusRegion region) noexcept {
+    devices_[static_cast<std::size_t>(region)] = nullptr;
+}
+
+DreamcastMmioDevice* DreamcastReferenceBus::device_for(DreamcastBusRegion region) const noexcept {
+    return devices_[static_cast<std::size_t>(region)];
+}
+
 void DreamcastReferenceBus::record_fault(std::uint32_t address,
                                          DreamcastBusAccess access) noexcept {
     if (last_fault_.has_value()) return;
@@ -71,9 +84,21 @@ Result<std::uint8_t> DreamcastReferenceBus::read8(std::uint32_t address) {
             "Dreamcast reference bus has no memory backing");
     }
 
-    auto value = read_dreamcast_u8(*memory_, address);
-    if (!value) record_fault(address, DreamcastBusAccess::read);
-    return value;
+    const auto region = classify_dreamcast_bus_region(address);
+    if (region == DreamcastBusRegion::main_ram) {
+        auto value = read_dreamcast_u8(*memory_, address);
+        if (!value) record_fault(address, DreamcastBusAccess::read);
+        return value;
+    }
+
+    if (auto* device = device_for(region); device != nullptr) {
+        return device->read8(address);
+    }
+
+    record_fault(address, DreamcastBusAccess::read);
+    return Result<std::uint8_t>::failure(
+        ErrorCode::invalid_argument,
+        "Dreamcast bus region has no attached device");
 }
 
 Result<void> DreamcastReferenceBus::write8(std::uint32_t address, std::uint8_t value) {
@@ -84,9 +109,21 @@ Result<void> DreamcastReferenceBus::write8(std::uint32_t address, std::uint8_t v
             "Dreamcast reference bus has no memory backing");
     }
 
-    auto stored = write_dreamcast_u8(*memory_, address, value);
-    if (!stored) record_fault(address, DreamcastBusAccess::write);
-    return stored;
+    const auto region = classify_dreamcast_bus_region(address);
+    if (region == DreamcastBusRegion::main_ram) {
+        auto stored = write_dreamcast_u8(*memory_, address, value);
+        if (!stored) record_fault(address, DreamcastBusAccess::write);
+        return stored;
+    }
+
+    if (auto* device = device_for(region); device != nullptr) {
+        return device->write8(address, value);
+    }
+
+    record_fault(address, DreamcastBusAccess::write);
+    return Result<void>::failure(
+        ErrorCode::invalid_argument,
+        "Dreamcast bus region has no attached device");
 }
 
 }
