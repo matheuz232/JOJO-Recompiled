@@ -13,6 +13,17 @@
 
 namespace jojo {
 
+enum class Sh4ReferenceSystemEvent {
+    none,
+    ldtlb,
+    movca_l,
+    ocbi,
+    ocbp,
+    ocbwb,
+    pref,
+    sleep,
+};
+
 struct Sh4ReferenceState {
     std::array<std::uint32_t, 16> r{};
     std::array<std::uint32_t, 8> r_bank{};
@@ -136,17 +147,6 @@ enum class Sh4ReferenceStopReason {
     left_program,
     end_of_stream,
     block_limit,
-    sleep,
-};
-
-enum class Sh4ReferenceSystemEvent {
-    none,
-    ldtlb,
-    movca_l,
-    ocbi,
-    ocbp,
-    ocbwb,
-    pref,
     sleep,
 };
 
