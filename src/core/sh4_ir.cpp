@@ -45,6 +45,12 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::movb_load_indexed: out.op = Sh4IrOp::load_indexed8_signed; break;
         case Sh4Op::movw_load_indexed: out.op = Sh4IrOp::load_indexed16_signed; break;
         case Sh4Op::movl_load_indexed: out.op = Sh4IrOp::load_indexed32; break;
+        case Sh4Op::movb_store_gbr_disp: out.op = Sh4IrOp::store_gbr_disp8; out.imm = input.displacement; break;
+        case Sh4Op::movw_store_gbr_disp: out.op = Sh4IrOp::store_gbr_disp16; out.imm = input.displacement; break;
+        case Sh4Op::movl_store_gbr_disp: out.op = Sh4IrOp::store_gbr_disp32; out.imm = input.displacement; break;
+        case Sh4Op::movb_load_gbr_disp: out.op = Sh4IrOp::load_gbr_disp8_signed; out.imm = input.displacement; break;
+        case Sh4Op::movw_load_gbr_disp: out.op = Sh4IrOp::load_gbr_disp16_signed; out.imm = input.displacement; break;
+        case Sh4Op::movl_load_gbr_disp: out.op = Sh4IrOp::load_gbr_disp32; out.imm = input.displacement; break;
         case Sh4Op::add_reg: out.op = Sh4IrOp::add_reg; break;
         case Sh4Op::sub_reg: out.op = Sh4IrOp::sub_reg; break;
         case Sh4Op::cmp_eq_reg: out.op = Sh4IrOp::compare_eq; break;
