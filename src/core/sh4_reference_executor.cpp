@@ -1113,6 +1113,13 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             state.t = instruction.op == Sh4IrOp::compare_pz ? value >= 0 : value > 0;
             return Result<void>::success();
         }
+        case Sh4IrOp::decrement_and_test: {
+            auto reg = require_register(instruction.dst_reg);
+            if (!reg) return reg;
+            --state.r[instruction.dst_reg];
+            state.t = state.r[instruction.dst_reg] == 0u;
+            return Result<void>::success();
+        }
         case Sh4IrOp::test_bits_reg:
         case Sh4IrOp::bit_and_reg:
         case Sh4IrOp::bit_xor_reg:
