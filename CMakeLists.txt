@@ -137,3 +137,6 @@ add_test(NAME jojo_dreamcast_pvr2_vblank_tests COMMAND jojo_dreamcast_pvr2_vblan
 add_executable(jojo_sh4_fpu_constant_tests tests/test_sh4_fpu_constants.cpp)
 target_link_libraries(jojo_sh4_fpu_constant_tests PRIVATE jojo_core)
 add_test(NAME jojo_sh4_fpu_constant_tests COMMAND jojo_sh4_fpu_constant_tests)
+add_executable(jojo_sh4_fpul_transfer_tests tests/test_sh4_fpul_transfers.cpp)
+target_link_libraries(jojo_sh4_fpul_transfer_tests PRIVATE jojo_core)
+add_test(NAME jojo_sh4_fpul_transfer_tests COMMAND jojo_sh4_fpul_transfer_tests)
