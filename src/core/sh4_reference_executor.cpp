@@ -29,6 +29,7 @@ constexpr std::uint32_t kFpscrPrBit = 0x00080000u;
 constexpr std::uint32_t kFpscrDnBit = 0x00040000u;
 constexpr std::uint32_t kFpscrRmMask = 0x00000003u;
 constexpr std::uint32_t kFpscrCauseMask = 0x0003F000u;
+constexpr std::uint32_t kFpscrCauseE = 0x00020000u;
 constexpr std::uint32_t kFpscrCauseV = 0x00010000u;
 constexpr std::uint32_t kFpscrCauseZ = 0x00008000u;
 constexpr std::uint32_t kFpscrCauseO = 0x00004000u;
@@ -456,7 +457,12 @@ double round_double(long double exact, std::uint32_t rounding_mode) noexcept {
 Fpu32Eval eval_single_binary(Sh4IrOp op,
                              const Sh4ReferenceState& state,
                              std::uint32_t lhs_bits,
-                             std::uint32_t rhs_bits) noexcept {
+                             std::uint32_t rhs_bits,
+                             bool allow_denormal_inputs = false) noexcept {
+    if (!allow_denormal_inputs && (state.fpscr & kFpscrDnBit) == 0u &&
+        (is_single_subnormal(lhs_bits) || is_single_subnormal(rhs_bits))) {
+        return {lhs_bits, kFpscrCauseE};
+    }
     const auto lhs = normalize_single(state, lhs_bits);
     const auto rhs = normalize_single(state, rhs_bits);
     std::uint32_t cause{};
@@ -506,7 +512,12 @@ Fpu32Eval eval_single_binary(Sh4IrOp op,
 Fpu64Eval eval_double_binary(Sh4IrOp op,
                              const Sh4ReferenceState& state,
                              std::uint64_t lhs_bits,
-                             std::uint64_t rhs_bits) noexcept {
+                             std::uint64_t rhs_bits,
+                             bool allow_denormal_inputs = false) noexcept {
+    if (!allow_denormal_inputs && (state.fpscr & kFpscrDnBit) == 0u &&
+        (is_double_subnormal(lhs_bits) || is_double_subnormal(rhs_bits))) {
+        return {lhs_bits, kFpscrCauseE};
+    }
     const auto lhs = normalize_double(state, lhs_bits);
     const auto rhs = normalize_double(state, rhs_bits);
     std::uint32_t cause{};
@@ -545,7 +556,15 @@ Fpu64Eval eval_double_binary(Sh4IrOp op,
 }
 
 bool is_fpu_ir_op(Sh4IrOp op) noexcept {
-    return op >= Sh4IrOp::set_fr_zero && op <= Sh4IrOp::toggle_fpscr_sz;
+    return (op >= Sh4IrOp::set_fr_zero && op <= Sh4IrOp::toggle_fpscr_sz) ||
+           op == Sh4IrOp::set_fpul_from_reg ||
+           op == Sh4IrOp::copy_fpul_to_reg ||
+           op == Sh4IrOp::load_fpul_postinc32 ||
+           op == Sh4IrOp::store_fpul_predec32 ||
+           op == Sh4IrOp::set_fpscr_from_reg ||
+           op == Sh4IrOp::copy_fpscr_to_reg ||
+           op == Sh4IrOp::load_fpscr_postinc32 ||
+           op == Sh4IrOp::store_fpscr_predec32;
 }
 
 struct PendingTransfer {
@@ -572,11 +591,12 @@ bool apply_fpu_cause(const Sh4IrInstruction& instruction,
                      Sh4ReferenceState& state,
                      std::optional<PendingTransfer>& pending,
                      std::uint32_t cause) {
-    cause &= (kFpscrCauseV | kFpscrCauseZ | kFpscrCauseO | kFpscrCauseU | kFpscrCauseI);
+    cause &= (kFpscrCauseE | kFpscrCauseV | kFpscrCauseZ | kFpscrCauseO | kFpscrCauseU | kFpscrCauseI);
     state.fpscr = (state.fpscr & ~kFpscrCauseMask) | cause;
-    state.fpscr |= (cause >> 10u) & kFpscrFlagMask;
-    const auto enabled = (cause >> 5u) & kFpscrEnableMask;
-    if ((state.fpscr & enabled) != 0u) {
+    const auto sticky = cause & (kFpscrCauseV | kFpscrCauseZ | kFpscrCauseO | kFpscrCauseU | kFpscrCauseI);
+    state.fpscr |= (sticky >> 10u) & kFpscrFlagMask;
+    const auto enabled = (sticky >> 5u) & kFpscrEnableMask;
+    if ((cause & kFpscrCauseE) != 0u || (state.fpscr & enabled) != 0u) {
         enter_general_exception(instruction, state, pending, 0x120u);
         return false;
     }
@@ -723,21 +743,18 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             auto reg = require_register(instruction.dst_reg);
             if (!reg) return reg;
             state.fr[instruction.dst_reg] = instruction.op == Sh4IrOp::set_fr_zero ? 0u : 0x3F800000u;
-            state.fpscr &= ~kFpscrCauseMask;
             return Result<void>::success();
         }
         case Sh4IrOp::copy_fr_to_fpul: {
             auto src = require_register(instruction.src_reg);
             if (!src) return src;
             state.fpul = state.fr[instruction.src_reg];
-            state.fpscr &= ~kFpscrCauseMask;
             return Result<void>::success();
         }
         case Sh4IrOp::copy_fpul_to_fr: {
             auto dst = require_register(instruction.dst_reg);
             if (!dst) return dst;
             state.fr[instruction.dst_reg] = state.fpul;
-            state.fpscr &= ~kFpscrCauseMask;
             return Result<void>::success();
         }
         case Sh4IrOp::convert_fpul_to_float: {
@@ -791,7 +808,6 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             }
             if (instruction.op == Sh4IrOp::negate_single_float) state.fr[instruction.dst_reg] ^= 0x80000000u;
             else state.fr[instruction.dst_reg] &= 0x7FFFFFFFu;
-            state.fpscr &= ~kFpscrCauseMask;
             return Result<void>::success();
         }
         case Sh4IrOp::sqrt_single_float: {
@@ -800,7 +816,12 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             std::uint32_t cause{};
             if ((state.fpscr & kFpscrPrBit) != 0u) {
                 if (!require_fpu_pair(instruction, state, pending, instruction.dst_reg)) return Result<void>::success();
-                const auto value = normalize_double(state, read_dr_bits(state, instruction.dst_reg));
+                const auto operand_bits = read_dr_bits(state, instruction.dst_reg);
+                if ((state.fpscr & kFpscrDnBit) == 0u && is_double_subnormal(operand_bits)) {
+                    apply_fpu_cause(instruction, state, pending, kFpscrCauseE);
+                    return Result<void>::success();
+                }
+                const auto value = normalize_double(state, operand_bits);
                 double result{};
                 if (std::isnan(value) || (value < 0.0 && value != 0.0)) {
                     cause = kFpscrCauseV;
@@ -813,7 +834,12 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
                 if (!apply_fpu_cause(instruction, state, pending, cause)) return Result<void>::success();
                 write_dr(state, instruction.dst_reg, std::bit_cast<std::uint64_t>(result));
             } else {
-                const auto value = normalize_single(state, state.fr[instruction.dst_reg]);
+                const auto operand_bits = state.fr[instruction.dst_reg];
+                if ((state.fpscr & kFpscrDnBit) == 0u && is_single_subnormal(operand_bits)) {
+                    apply_fpu_cause(instruction, state, pending, kFpscrCauseE);
+                    return Result<void>::success();
+                }
+                const auto value = normalize_single(state, operand_bits);
                 float result{};
                 if (std::isnan(value) || (value < 0.0f && value != 0.0f)) {
                     cause = kFpscrCauseV;
@@ -835,6 +861,13 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             if (!src) return src;
             if ((state.fpscr & kFpscrPrBit) != 0u) {
                 enter_general_exception(instruction, state, pending, instruction.in_delay_slot ? 0x1A0u : 0x180u);
+                return Result<void>::success();
+            }
+            if ((state.fpscr & kFpscrDnBit) == 0u &&
+                (is_single_subnormal(state.fr[0]) ||
+                 is_single_subnormal(state.fr[instruction.src_reg]) ||
+                 is_single_subnormal(state.fr[instruction.dst_reg]))) {
+                apply_fpu_cause(instruction, state, pending, kFpscrCauseE);
                 return Result<void>::success();
             }
             const auto a = normalize_single(state, state.fr[0]);
@@ -895,13 +928,27 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             if ((state.fpscr & kFpscrPrBit) != 0u) {
                 if (!require_fpu_pair(instruction, state, pending, instruction.dst_reg) ||
                     !require_fpu_pair(instruction, state, pending, instruction.src_reg)) return Result<void>::success();
-                const auto lhs = normalize_double(state, read_dr_bits(state, instruction.dst_reg));
-                const auto rhs = normalize_double(state, read_dr_bits(state, instruction.src_reg));
+                const auto lhs_bits = read_dr_bits(state, instruction.dst_reg);
+                const auto rhs_bits = read_dr_bits(state, instruction.src_reg);
+                if ((state.fpscr & kFpscrDnBit) == 0u &&
+                    (is_double_subnormal(lhs_bits) || is_double_subnormal(rhs_bits))) {
+                    apply_fpu_cause(instruction, state, pending, kFpscrCauseE);
+                    return Result<void>::success();
+                }
+                const auto lhs = normalize_double(state, lhs_bits);
+                const auto rhs = normalize_double(state, rhs_bits);
                 if (std::isnan(lhs) || std::isnan(rhs)) cause = kFpscrCauseV;
                 else value = instruction.op == Sh4IrOp::compare_single_float_eq ? lhs == rhs : lhs > rhs;
             } else {
-                const auto lhs = normalize_single(state, state.fr[instruction.dst_reg]);
-                const auto rhs = normalize_single(state, state.fr[instruction.src_reg]);
+                const auto lhs_bits = state.fr[instruction.dst_reg];
+                const auto rhs_bits = state.fr[instruction.src_reg];
+                if ((state.fpscr & kFpscrDnBit) == 0u &&
+                    (is_single_subnormal(lhs_bits) || is_single_subnormal(rhs_bits))) {
+                    apply_fpu_cause(instruction, state, pending, kFpscrCauseE);
+                    return Result<void>::success();
+                }
+                const auto lhs = normalize_single(state, lhs_bits);
+                const auto rhs = normalize_single(state, rhs_bits);
                 if (std::isnan(lhs) || std::isnan(rhs)) cause = kFpscrCauseV;
                 else value = instruction.op == Sh4IrOp::compare_single_float_eq ? lhs == rhs : lhs > rhs;
             }
@@ -912,8 +959,13 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
         case Sh4IrOp::convert_single_to_double: {
             auto dst = require_register(instruction.dst_reg);
             if (!dst) return dst;
-            if ((state.fpscr & kFpscrPrBit) == 0u || !require_fpu_pair(instruction, state, pending, instruction.dst_reg)) {
-                if ((state.fpscr & kFpscrPrBit) == 0u) enter_general_exception(instruction, state, pending, instruction.in_delay_slot ? 0x1A0u : 0x180u);
+            if ((state.fpscr & kFpscrPrBit) == 0u || (state.fpscr & kFpscrSzBit) != 0u) {
+                enter_general_exception(instruction, state, pending, instruction.in_delay_slot ? 0x1A0u : 0x180u);
+                return Result<void>::success();
+            }
+            if (!require_fpu_pair(instruction, state, pending, instruction.dst_reg)) return Result<void>::success();
+            if ((state.fpscr & kFpscrDnBit) == 0u && is_single_subnormal(state.fpul)) {
+                apply_fpu_cause(instruction, state, pending, kFpscrCauseE);
                 return Result<void>::success();
             }
             const auto value = normalize_single(state, state.fpul);
@@ -926,11 +978,17 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
         case Sh4IrOp::convert_double_to_single: {
             auto src = require_register(instruction.src_reg);
             if (!src) return src;
-            if ((state.fpscr & kFpscrPrBit) == 0u || !require_fpu_pair(instruction, state, pending, instruction.src_reg)) {
-                if ((state.fpscr & kFpscrPrBit) == 0u) enter_general_exception(instruction, state, pending, instruction.in_delay_slot ? 0x1A0u : 0x180u);
+            if ((state.fpscr & kFpscrPrBit) == 0u || (state.fpscr & kFpscrSzBit) != 0u) {
+                enter_general_exception(instruction, state, pending, instruction.in_delay_slot ? 0x1A0u : 0x180u);
                 return Result<void>::success();
             }
-            const auto value = normalize_double(state, read_dr_bits(state, instruction.src_reg));
+            if (!require_fpu_pair(instruction, state, pending, instruction.src_reg)) return Result<void>::success();
+            const auto operand_bits = read_dr_bits(state, instruction.src_reg);
+            if ((state.fpscr & kFpscrDnBit) == 0u && is_double_subnormal(operand_bits)) {
+                apply_fpu_cause(instruction, state, pending, kFpscrCauseE);
+                return Result<void>::success();
+            }
+            const auto value = normalize_double(state, operand_bits);
             std::uint32_t cause{};
             float result{};
             if (std::isnan(value)) {
@@ -958,13 +1016,14 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             for (std::uint8_t index = 0; index < 4u; ++index) {
                 const auto mul = eval_single_binary(Sh4IrOp::multiply_single_float, state,
                                                     state.fr[instruction.dst_reg + index],
-                                                    state.fr[instruction.src_reg + index]);
+                                                    state.fr[instruction.src_reg + index], true);
                 cause |= mul.cause;
                 const auto add = eval_single_binary(Sh4IrOp::add_single_float, state,
-                                                    std::bit_cast<std::uint32_t>(accumulator), mul.bits);
+                                                    std::bit_cast<std::uint32_t>(accumulator), mul.bits, true);
                 cause |= add.cause;
                 accumulator = std::bit_cast<float>(add.bits);
             }
+            cause |= kFpscrCauseI;
             if (!apply_fpu_cause(instruction, state, pending, cause)) return Result<void>::success();
             state.fr[instruction.dst_reg + 3u] = std::bit_cast<std::uint32_t>(accumulator);
             return Result<void>::success();
@@ -982,14 +1041,15 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
                 std::uint32_t acc = std::bit_cast<std::uint32_t>(0.0f);
                 for (std::uint8_t col = 0; col < 4u; ++col) {
                     const auto mul = eval_single_binary(Sh4IrOp::multiply_single_float, state,
-                                                        state.xf[col * 4u + row], source[col]);
+                                                        state.xf[col * 4u + row], source[col], true);
                     cause |= mul.cause;
-                    const auto add = eval_single_binary(Sh4IrOp::add_single_float, state, acc, mul.bits);
+                    const auto add = eval_single_binary(Sh4IrOp::add_single_float, state, acc, mul.bits, true);
                     cause |= add.cause;
                     acc = add.bits;
                 }
                 output[row] = acc;
             }
+            cause |= kFpscrCauseI;
             if (!apply_fpu_cause(instruction, state, pending, cause)) return Result<void>::success();
             for (std::uint8_t i = 0; i < 4u; ++i) state.fr[instruction.dst_reg + i] = output[i];
             return Result<void>::success();
@@ -1012,7 +1072,6 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
                 sine = static_cast<float>(std::sin(angle));
                 cosine = static_cast<float>(std::cos(angle));
             }
-            state.fpscr &= ~kFpscrCauseMask;
             state.fr[instruction.dst_reg] = std::bit_cast<std::uint32_t>(sine);
             state.fr[instruction.dst_reg + 1u] = std::bit_cast<std::uint32_t>(cosine);
             return Result<void>::success();
@@ -1046,7 +1105,6 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             if (!dst) return dst;
             auto src = require_register(instruction.src_reg);
             if (!src) return src;
-            state.fpscr &= ~kFpscrCauseMask;
             if ((state.fpscr & kFpscrSzBit) == 0u) {
                 state.fr[instruction.dst_reg] = state.fr[instruction.src_reg];
                 return Result<void>::success();
@@ -1062,19 +1120,16 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             return Result<void>::success();
         }
         case Sh4IrOp::store_fpu_memory: {
-            state.fpscr &= ~kFpscrCauseMask;
             auto address_reg = require_register(instruction.dst_reg);
             if (!address_reg) return address_reg;
             return store_fpu_memory(state, memory, state.r[instruction.dst_reg], instruction.src_reg);
         }
         case Sh4IrOp::load_fpu_memory: {
-            state.fpscr &= ~kFpscrCauseMask;
             auto address_reg = require_register(instruction.src_reg);
             if (!address_reg) return address_reg;
             return load_fpu_memory(state, memory, state.r[instruction.src_reg], instruction.dst_reg);
         }
         case Sh4IrOp::load_fpu_postincrement: {
-            state.fpscr &= ~kFpscrCauseMask;
             auto address_reg = require_register(instruction.src_reg);
             if (!address_reg) return address_reg;
             const auto address = state.r[instruction.src_reg];
@@ -1084,7 +1139,6 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             return Result<void>::success();
         }
         case Sh4IrOp::store_fpu_predecrement: {
-            state.fpscr &= ~kFpscrCauseMask;
             auto address_reg = require_register(instruction.dst_reg);
             if (!address_reg) return address_reg;
             const auto address = state.r[instruction.dst_reg] - fpu_memory_width(state);
@@ -1094,25 +1148,21 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             return Result<void>::success();
         }
         case Sh4IrOp::load_fpu_indexed: {
-            state.fpscr &= ~kFpscrCauseMask;
             auto address_reg = require_register(instruction.src_reg);
             if (!address_reg) return address_reg;
             const auto address = state.r[0] + state.r[instruction.src_reg];
             return load_fpu_memory(state, memory, address, instruction.dst_reg);
         }
         case Sh4IrOp::store_fpu_indexed: {
-            state.fpscr &= ~kFpscrCauseMask;
             auto address_reg = require_register(instruction.dst_reg);
             if (!address_reg) return address_reg;
             const auto address = state.r[0] + state.r[instruction.dst_reg];
             return store_fpu_memory(state, memory, address, instruction.src_reg);
         }
         case Sh4IrOp::toggle_fpscr_fr:
-            state.fpscr &= ~kFpscrCauseMask;
             write_fpscr(state, state.fpscr ^ kFpscrFrBit);
             return Result<void>::success();
         case Sh4IrOp::toggle_fpscr_sz:
-            state.fpscr &= ~kFpscrCauseMask;
             write_fpscr(state, state.fpscr ^ kFpscrSzBit);
             return Result<void>::success();
         case Sh4IrOp::add_imm: {
