@@ -32,6 +32,18 @@ static bool execute_words(const std::vector<std::uint16_t>& words,
     return static_cast<bool>(run);
 }
 
+static void put16(std::vector<std::uint8_t>& memory, std::size_t offset, std::uint16_t value) {
+    memory[offset] = static_cast<std::uint8_t>(value);
+    memory[offset + 1] = static_cast<std::uint8_t>(value >> 8u);
+}
+
+static void put32(std::vector<std::uint8_t>& memory, std::size_t offset, std::uint32_t value) {
+    memory[offset] = static_cast<std::uint8_t>(value);
+    memory[offset + 1] = static_cast<std::uint8_t>(value >> 8u);
+    memory[offset + 2] = static_cast<std::uint8_t>(value >> 16u);
+    memory[offset + 3] = static_cast<std::uint8_t>(value >> 24u);
+}
+
 static void test_decoder_patterns() {
     using jojo::Sh4Op;
 
@@ -81,15 +93,9 @@ static void test_register_forms_round_trip_special_registers() {
 
 static void test_memory_forms_load_and_store_little_endian() {
     std::vector<std::uint8_t> memory(64, 0);
-    const auto put32 = [&](std::size_t offset, std::uint32_t value) {
-        memory[offset] = static_cast<std::uint8_t>(value);
-        memory[offset + 1] = static_cast<std::uint8_t>(value >> 8u);
-        memory[offset + 2] = static_cast<std::uint8_t>(value >> 16u);
-        memory[offset + 3] = static_cast<std::uint8_t>(value >> 24u);
-    };
-    put32(0, 0x11223344u);
-    put32(4, 0x55667788u);
-    put32(8, 0x99AABBCCu);
+    put32(memory, 0, 0x11223344u);
+    put32(memory, 4, 0x55667788u);
+    put32(memory, 8, 0x99AABBCCu);
 
     jojo::Sh4ReferenceState state{};
     state.r[1] = 0x9000u;
@@ -123,6 +129,61 @@ static void test_memory_forms_load_and_store_little_endian() {
     CHECK(memory[44] == 0xCCu && memory[45] == 0xBBu && memory[46] == 0xAAu && memory[47] == 0x99u);
 }
 
+static void test_mac_l_accumulates_signed_64_and_saturates_to_48_bits() {
+    std::vector<std::uint8_t> memory(32, 0);
+    put32(memory, 0, 0xFFFFFFFEu); // -2
+    put32(memory, 4, 3u);
+
+    jojo::Sh4ReferenceState state{};
+    state.r[2] = 0xA000u;
+    state.r[1] = 0xA004u;
+    state.mach = 0u;
+    state.macl = 10u;
+    state.pr = 0xDEAD3000u;
+    CHECK(execute_words({0x012Fu, 0x000Bu, 0x0009u}, state, {0xA000u, memory}, 0x8C013000u));
+    CHECK(state.mach == 0u && state.macl == 4u);
+    CHECK(state.r[2] == 0xA004u && state.r[1] == 0xA008u);
+
+    put32(memory, 0, 2u);
+    put32(memory, 4, 2u);
+    state.r[2] = 0xA000u;
+    state.r[1] = 0xA004u;
+    state.mach = 0x00007FFFu;
+    state.macl = 0xFFFFFFFEu;
+    state.sr = 0x00000002u; // S=1 saturation mode
+    state.pr = 0xDEAD3000u;
+    CHECK(execute_words({0x012Fu, 0x000Bu, 0x0009u}, state, {0xA000u, memory}, 0x8C013000u));
+    CHECK(state.mach == 0x00007FFFu && state.macl == 0xFFFFFFFFu);
+}
+
+static void test_mac_w_accumulates_signed_64_and_saturates_mac_l() {
+    std::vector<std::uint8_t> memory(16, 0);
+    put16(memory, 0, static_cast<std::uint16_t>(0xFFFEu)); // -2
+    put16(memory, 2, 3u);
+
+    jojo::Sh4ReferenceState state{};
+    state.r[2] = 0xB000u;
+    state.r[1] = 0xB002u;
+    state.mach = 0u;
+    state.macl = 10u;
+    state.pr = 0xDEAD4000u;
+    CHECK(execute_words({0x412Fu, 0x000Bu, 0x0009u}, state, {0xB000u, memory}, 0x8C014000u));
+    CHECK(state.mach == 0u && state.macl == 4u);
+    CHECK(state.r[2] == 0xB002u && state.r[1] == 0xB004u);
+
+    put16(memory, 0, 2u);
+    put16(memory, 2, 2u);
+    state.r[2] = 0xB000u;
+    state.r[1] = 0xB002u;
+    state.mach = 0x12345678u;
+    state.macl = 0x7FFFFFFEu;
+    state.sr = 0x00000002u; // S=1
+    state.pr = 0xDEAD4000u;
+    CHECK(execute_words({0x412Fu, 0x000Bu, 0x0009u}, state, {0xB000u, memory}, 0x8C014000u));
+    CHECK(state.macl == 0x7FFFFFFFu);
+    CHECK(state.mach == 1u);
+}
+
 static void test_failed_memory_transfer_does_not_partially_update_state() {
     std::vector<std::uint8_t> memory(4, 0);
     jojo::Sh4ReferenceState state{};
@@ -152,6 +213,8 @@ int main() {
     test_decoder_patterns();
     test_register_forms_round_trip_special_registers();
     test_memory_forms_load_and_store_little_endian();
+    test_mac_l_accumulates_signed_64_and_saturates_to_48_bits();
+    test_mac_w_accumulates_signed_64_and_saturates_mac_l();
     test_failed_memory_transfer_does_not_partially_update_state();
     if (failures) {
         std::cerr << failures << " SH-4 PR/MAC transfer assertion(s) failed\n";
