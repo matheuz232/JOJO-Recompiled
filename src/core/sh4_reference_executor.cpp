@@ -185,6 +185,15 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             state.r[instruction.dst_reg] = static_cast<std::uint32_t>(instruction.imm);
             return Result<void>::success();
         }
+        case Sh4IrOp::set_fr_zero:
+        case Sh4IrOp::set_fr_one: {
+            auto reg = require_register(instruction.dst_reg);
+            if (!reg) return reg;
+            state.fr[instruction.dst_reg] = instruction.op == Sh4IrOp::set_fr_zero
+                ? 0x00000000u
+                : 0x3F800000u;
+            return Result<void>::success();
+        }
         case Sh4IrOp::add_imm: {
             auto reg = require_register(instruction.dst_reg);
             if (!reg) return reg;
