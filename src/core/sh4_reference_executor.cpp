@@ -1160,19 +1160,36 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
         }
         case Sh4IrOp::shift_left_one:
         case Sh4IrOp::shift_right_logical_one:
-        case Sh4IrOp::shift_right_arithmetic_one: {
+        case Sh4IrOp::shift_right_arithmetic_one:
+        case Sh4IrOp::rotate_left_one:
+        case Sh4IrOp::rotate_right_one:
+        case Sh4IrOp::rotate_left_through_t:
+        case Sh4IrOp::rotate_right_through_t: {
             auto reg = require_register(instruction.dst_reg);
             if (!reg) return reg;
             const auto value = state.r[instruction.dst_reg];
+            const bool old_t = state.t;
             if (instruction.op == Sh4IrOp::shift_left_one) {
                 state.t = (value & 0x80000000u) != 0u;
                 state.r[instruction.dst_reg] = value << 1u;
             } else if (instruction.op == Sh4IrOp::shift_right_logical_one) {
                 state.t = (value & 1u) != 0u;
                 state.r[instruction.dst_reg] = value >> 1u;
-            } else {
+            } else if (instruction.op == Sh4IrOp::shift_right_arithmetic_one) {
                 state.t = (value & 1u) != 0u;
                 state.r[instruction.dst_reg] = (value >> 1u) | (value & 0x80000000u);
+            } else if (instruction.op == Sh4IrOp::rotate_left_one) {
+                state.t = (value & 0x80000000u) != 0u;
+                state.r[instruction.dst_reg] = (value << 1u) | (value >> 31u);
+            } else if (instruction.op == Sh4IrOp::rotate_right_one) {
+                state.t = (value & 1u) != 0u;
+                state.r[instruction.dst_reg] = (value >> 1u) | (value << 31u);
+            } else if (instruction.op == Sh4IrOp::rotate_left_through_t) {
+                state.t = (value & 0x80000000u) != 0u;
+                state.r[instruction.dst_reg] = (value << 1u) | (old_t ? 1u : 0u);
+            } else {
+                state.t = (value & 1u) != 0u;
+                state.r[instruction.dst_reg] = (value >> 1u) | (old_t ? 0x80000000u : 0u);
             }
             return Result<void>::success();
         }
