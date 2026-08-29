@@ -81,7 +81,12 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::swap_w: out.op = Sh4IrOp::swap_words; break;
         case Sh4Op::xtrct: out.op = Sh4IrOp::extract_middle; break;
         case Sh4Op::add_reg: out.op = Sh4IrOp::add_reg; break;
+        case Sh4Op::addc_reg: out.op = Sh4IrOp::add_with_carry; break;
+        case Sh4Op::addv_reg: out.op = Sh4IrOp::add_with_overflow; break;
         case Sh4Op::sub_reg: out.op = Sh4IrOp::sub_reg; break;
+        case Sh4Op::subc_reg: out.op = Sh4IrOp::sub_with_borrow; break;
+        case Sh4Op::subv_reg: out.op = Sh4IrOp::sub_with_overflow; break;
+        case Sh4Op::negc_reg: out.op = Sh4IrOp::negate_with_borrow; break;
         case Sh4Op::cmp_eq_reg: out.op = Sh4IrOp::compare_eq; break;
         case Sh4Op::cmp_eq_imm: out.op = Sh4IrOp::compare_eq_imm; break;
         case Sh4Op::cmp_hs_reg: out.op = Sh4IrOp::compare_unsigned_ge; break;
