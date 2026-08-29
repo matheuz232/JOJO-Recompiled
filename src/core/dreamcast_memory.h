@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/dreamcast_boot.h"
+#include "core/dreamcast_analysis.h"
 #include "core/result.h"
 
 #include <cstddef>
@@ -10,6 +10,7 @@
 namespace jojo {
 
 inline constexpr std::size_t kDreamcastMainRamSize = 16u * 1024u * 1024u;
+inline constexpr std::uint32_t kDreamcastMainRamAreaSpan = 64u * 1024u * 1024u;
 inline constexpr std::uint32_t kDreamcastMainRamPhysicalBase = 0x0C000000u;
 inline constexpr std::uint32_t kDreamcastMainRamCachedBase = 0x8C000000u;
 inline constexpr std::uint32_t kDreamcastMainRamUncachedBase = 0xAC000000u;
@@ -22,9 +23,17 @@ struct DreamcastExecutableMemory {
     std::size_t program_size{};
 };
 
+struct DreamcastPreparedExecutable {
+    DreamcastBootAnalysis analysis;
+    DreamcastExecutableMemory memory;
+};
+
 [[nodiscard]] Result<DreamcastExecutableMemory> load_dreamcast_boot_memory(
     const DreamcastBootProgram& program,
     std::uint32_t load_address = kDreamcastBootLoadAddress);
+
+[[nodiscard]] Result<DreamcastPreparedExecutable> prepare_dreamcast_executable(
+    const DreamcastBootProgram& program);
 
 [[nodiscard]] Result<std::uint8_t> read_dreamcast_u8(
     const DreamcastExecutableMemory& memory,

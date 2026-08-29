@@ -40,6 +40,18 @@ static jojo::DreamcastExecutableMemory blank_memory() {
     return loaded ? loaded.value : jojo::DreamcastExecutableMemory{};
 }
 
+static void test_bus_classifies_all_area3_main_ram_mirrors() {
+    using jojo::DreamcastBusRegion;
+    CHECK(jojo::classify_dreamcast_bus_region(0x0C000000u) == DreamcastBusRegion::main_ram);
+    CHECK(jojo::classify_dreamcast_bus_region(0x0D000000u) == DreamcastBusRegion::main_ram);
+    CHECK(jojo::classify_dreamcast_bus_region(0x0E000000u) == DreamcastBusRegion::main_ram);
+    CHECK(jojo::classify_dreamcast_bus_region(0x0F000000u) == DreamcastBusRegion::main_ram);
+    CHECK(jojo::classify_dreamcast_bus_region(0x8D000000u) == DreamcastBusRegion::main_ram);
+    CHECK(jojo::classify_dreamcast_bus_region(0x8F000000u) == DreamcastBusRegion::main_ram);
+    CHECK(jojo::classify_dreamcast_bus_region(0xAD000000u) == DreamcastBusRegion::main_ram);
+    CHECK(jojo::classify_dreamcast_bus_region(0xAF000000u) == DreamcastBusRegion::main_ram);
+}
+
 static void test_executor_uses_dreamcast_ram_aliases_through_bus() {
     auto memory = blank_memory();
     jojo::DreamcastReferenceBus bus(memory);
@@ -57,6 +69,25 @@ static void test_executor_uses_dreamcast_ram_aliases_through_bus() {
     CHECK(cached && physical);
     if (cached) CHECK(cached.value == 0xA1B2C3D4u);
     if (physical) CHECK(physical.value == 0xA1B2C3D4u);
+}
+
+static void test_executor_uses_area3_mirror_through_bus() {
+    auto memory = blank_memory();
+    jojo::DreamcastReferenceBus bus(memory);
+    jojo::Sh4ReferenceState state{};
+    state.r[1] = 0x8F000400u;
+    state.r[2] = 0x13579BDFu;
+
+    const auto ir = make_program({0x2122u}); // MOV.L R2,@R1
+    const auto run = jojo::execute_sh4_ir_reference(ir, state, bus, 8u);
+    CHECK(run);
+    if (!run) return;
+
+    const auto canonical = jojo::read_dreamcast_u32(memory, 0x0C000400u);
+    const auto uncached_mirror = jojo::read_dreamcast_u32(memory, 0xAF000400u);
+    CHECK(canonical && uncached_mirror);
+    if (canonical) CHECK(canonical.value == 0x13579BDFu);
+    if (uncached_mirror) CHECK(uncached_mirror.value == 0x13579BDFu);
 }
 
 static void test_executor_can_load_through_a_different_alias() {
@@ -104,7 +135,9 @@ static void test_boot_harness_uses_dreamcast_bus_aliases() {
 }
 
 int main() {
+    test_bus_classifies_all_area3_main_ram_mirrors();
     test_executor_uses_dreamcast_ram_aliases_through_bus();
+    test_executor_uses_area3_mirror_through_bus();
     test_executor_can_load_through_a_different_alias();
     test_unmapped_bus_access_fails_explicitly();
     test_boot_harness_uses_dreamcast_bus_aliases();
