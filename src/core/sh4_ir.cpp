@@ -114,6 +114,8 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::shlr8: out.op = Sh4IrOp::shift_right_logical_const; out.imm = 8; break;
         case Sh4Op::shll16: out.op = Sh4IrOp::shift_left_const; out.imm = 16; break;
         case Sh4Op::shlr16: out.op = Sh4IrOp::shift_right_logical_const; out.imm = 16; break;
+        case Sh4Op::fldi0: out.op = Sh4IrOp::set_fr_zero; break;
+        case Sh4Op::fldi1: out.op = Sh4IrOp::set_fr_one; break;
         case Sh4Op::bra:
             out.op = Sh4IrOp::branch_direct;
             if (const auto target = sh4_direct_target(input)) out.target = *target;
