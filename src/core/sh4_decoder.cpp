@@ -157,6 +157,27 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         return i;
     }
 
+    if (high_byte == 0xC000u || high_byte == 0xC100u || high_byte == 0xC200u ||
+        high_byte == 0xC400u || high_byte == 0xC500u || high_byte == 0xC600u) {
+        const auto disp = static_cast<std::int32_t>(raw & 0x00FFu);
+        if (high_byte == 0xC000u) {
+            i.op = Sh4Op::movb_store_gbr_disp; i.displacement = disp;
+        } else if (high_byte == 0xC100u) {
+            i.op = Sh4Op::movw_store_gbr_disp; i.displacement = disp * 2;
+        } else if (high_byte == 0xC200u) {
+            i.op = Sh4Op::movl_store_gbr_disp; i.displacement = disp * 4;
+        } else if (high_byte == 0xC400u) {
+            i.op = Sh4Op::movb_load_gbr_disp; i.displacement = disp;
+        } else if (high_byte == 0xC500u) {
+            i.op = Sh4Op::movw_load_gbr_disp; i.displacement = disp * 2;
+        } else {
+            i.op = Sh4Op::movl_load_gbr_disp; i.displacement = disp * 4;
+        }
+        i.rn = 0;
+        i.rm = 0;
+        return i;
+    }
+
     if ((raw & 0xF00Fu) == 0x300Cu) {
         i.op = Sh4Op::add_reg;
         i.rn = n_field(raw);
