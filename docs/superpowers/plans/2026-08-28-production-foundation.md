@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** **Complete (100%)** — audited against the production roadmap on 2026-08-29.
+
 **Goal:** Ship a single Windows executable foundation with real conversion progress, modern first-run flow, expanded graphics settings model, and CI.
 
 **Architecture:** Portable conversion/settings logic lives in `jojo_core`; the Windows application owns only native UI, filesystem-location discovery and device presentation. Conversion reports stage events through a callback so the UI never fakes progress and future recompiler phases can slot into the same pipeline.
@@ -20,6 +22,14 @@
 - Display mode persists Windowed/Fullscreen/Borderless.
 - Portable core tests must pass on Linux and Windows.
 
+## Completion evidence
+
+- `tests/test_main.cpp` covers MSAA 8x, display mode/UI-scale persistence, real monotonic conversion progress, source-independent installation, explicit unknown-revision rejection, and ISO/BIN/CUE/GDI conversion fixtures.
+- `src/app_win32/main.cpp` implements the themed first-run-only preparation UI, worker-thread conversion, `%LOCALAPPDATA%\\JOJO Recompiled\\game`, persistent `game/logs/conversion.log`, and explicit backend-pending messaging.
+- `CMakeLists.txt` defines one non-test Windows shipping target with output name `JOJO-Recompiled.exe`.
+- `.github/workflows/build.yml` runs Linux and Windows/MSVC build/tests and uploads only `build/Release/JOJO-Recompiled.exe` as the application artifact.
+- Main CI run #472 completed successfully on both Linux and Windows/MSVC before this checklist was closed.
+
 ---
 
 ### Task 1: Expand settings model
@@ -28,10 +38,10 @@
 
 **Produces:** `Msaa::x8`, `DisplayMode`, `UiScale`, `HudSafeArea` and round-trip persistence.
 
-- [ ] Add failing tests for MSAA 8x, display mode and UI-scale round trip.
-- [ ] Run tests and verify failure.
-- [ ] Implement enums, validation and serialization/parsing.
-- [ ] Run the full test suite.
+- [x] Add failing tests for MSAA 8x, display mode and UI-scale round trip.
+- [x] Run tests and verify failure.
+- [x] Implement enums, validation and serialization/parsing.
+- [x] Run the full test suite.
 
 ### Task 2: Add conversion progress contract
 
@@ -39,10 +49,10 @@
 
 **Produces:** `ConversionStage`, `ConversionProgress`, `ConversionProgressCallback`, progress-aware `convert_image`.
 
-- [ ] Add a failing test that captures progress and checks monotonic 0..100 stage events.
-- [ ] Verify the test fails because the callback API does not exist.
-- [ ] Implement progress emission around existing real conversion work.
-- [ ] Verify existing source-independent installation behavior remains green.
+- [x] Add a failing test that captures progress and checks monotonic 0..100 stage events.
+- [x] Verify the test fails because the callback API does not exist.
+- [x] Implement progress emission around existing real conversion work.
+- [x] Verify existing source-independent installation behavior remains green.
 
 ### Task 3: Single-shipping-executable build
 
@@ -50,10 +60,10 @@
 
 **Produces:** Windows target with output name `JOJO-Recompiled.exe`; converter/runtime CLIs removed from shipping targets.
 
-- [ ] Add build-structure regression checks in the portable tests/documentation script.
-- [ ] Move/replace the old launcher UI with the first-run application shell.
-- [ ] Ensure only one non-test Windows executable is defined.
-- [ ] Build the portable core/tests locally.
+- [x] Add build-structure regression checks in the portable tests/documentation script.
+- [x] Move/replace the old launcher UI with the first-run application shell.
+- [x] Ensure only one non-test Windows executable is defined.
+- [x] Build the portable core/tests locally and in CI.
 
 ### Task 4: Windows first-run progress UI
 
@@ -61,10 +71,10 @@
 
 **Produces:** themed first-run screen, source picker, worker-thread conversion, progress bar and log display.
 
-- [ ] Implement custom drawing and Unicode text.
-- [ ] Run conversion on a worker thread and post progress to the main window.
-- [ ] Persist log entries under the game data directory.
-- [ ] Surface backend-pending state accurately after conversion.
+- [x] Implement custom drawing and Unicode text.
+- [x] Run conversion on a worker thread and post progress to the main window.
+- [x] Persist log entries under the game data directory.
+- [x] Surface backend-pending state accurately after conversion.
 
 ### Task 5: CI
 
@@ -72,7 +82,7 @@
 
 **Produces:** Windows and Linux build/test jobs.
 
-- [ ] Add Windows Release configure/build/CTest job.
-- [ ] Add Linux portable-core configure/build/CTest job.
-- [ ] Update build docs for the single executable.
-- [ ] Push feature branch and verify GitHub Actions results before merge.
+- [x] Add Windows Release configure/build/CTest job.
+- [x] Add Linux portable-core configure/build/CTest job.
+- [x] Update build docs for the single executable.
+- [x] Push feature branch and verify GitHub Actions results before merge.
