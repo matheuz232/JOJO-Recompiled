@@ -2,6 +2,7 @@
 
 #include "core/dreamcast_bus.h"
 #include "core/dreamcast_interrupts.h"
+#include "core/dreamcast_pvr2.h"
 #include "core/dreamcast_system_asic.h"
 #include "core/sh4_cfg.h"
 #include "core/sh4_ir.h"
@@ -53,7 +54,9 @@ Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
 
     DreamcastReferenceBus bus(result.memory);
     DreamcastSystemAsic system_asic;
+    DreamcastPvr2 pvr2(system_asic);
     bus.attach_device(DreamcastBusRegion::system_asic, system_asic);
+    bus.attach_device(DreamcastBusRegion::pvr_registers, pvr2);
     const auto irq_boundary_hook = make_dreamcast_system_irq_boundary_hook(system_asic);
 
     auto run = execute_sh4_ir_reference(ir.value,

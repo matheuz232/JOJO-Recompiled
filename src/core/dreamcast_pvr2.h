@@ -34,6 +34,8 @@ private:
     DreamcastPvr2ScanTiming scan_timing_{};
     std::uint32_t scanline_{};
     std::uint32_t cycles_into_scanline_{};
+    std::uint32_t spg_vblank_int_{};
+    std::uint32_t spg_load_{};
 };
 
 }
