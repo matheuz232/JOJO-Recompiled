@@ -215,6 +215,23 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         return i;
     }
 
+    const auto data_code = static_cast<std::uint16_t>(raw & 0xF00Fu);
+    if (data_code == 0x600Eu || data_code == 0x600Fu ||
+        data_code == 0x600Cu || data_code == 0x600Du ||
+        data_code == 0x6008u || data_code == 0x6009u ||
+        data_code == 0x200Du) {
+        if (data_code == 0x600Eu) i.op = Sh4Op::exts_b;
+        else if (data_code == 0x600Fu) i.op = Sh4Op::exts_w;
+        else if (data_code == 0x600Cu) i.op = Sh4Op::extu_b;
+        else if (data_code == 0x600Du) i.op = Sh4Op::extu_w;
+        else if (data_code == 0x6008u) i.op = Sh4Op::swap_b;
+        else if (data_code == 0x6009u) i.op = Sh4Op::swap_w;
+        else i.op = Sh4Op::xtrct;
+        i.rn = n_field(raw);
+        i.rm = m_field(raw);
+        return i;
+    }
+
     if ((raw & 0xF00Fu) == 0x300Cu) {
         i.op = Sh4Op::add_reg;
         i.rn = n_field(raw);
