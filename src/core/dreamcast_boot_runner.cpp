@@ -55,6 +55,11 @@ Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
                                         bus,
                                         max_blocks);
     if (!run) {
+        if (bus.last_fault().has_value()) {
+            result.stop_reason = DreamcastBootStopReason::unmapped_bus_access;
+            result.bus_fault = bus.last_fault();
+            return Result<DreamcastBootRunResult>::success(std::move(result));
+        }
         return Result<DreamcastBootRunResult>::failure(run.error, run.detail);
     }
 
