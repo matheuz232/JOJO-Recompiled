@@ -1,7 +1,7 @@
 #include "core/dreamcast_memory.h"
 
 #include <algorithm>
-#include <limits>
+#include <utility>
 
 namespace jojo {
 namespace {
@@ -21,13 +21,17 @@ Result<std::size_t> main_ram_offset(std::uint32_t address,
     };
     for (const auto base : bases) {
         if (address < base) continue;
-        const auto offset64 = static_cast<std::uint64_t>(address) - base;
-        if (offset64 >= kDreamcastMainRamSize) continue;
-        if (width > kDreamcastMainRamSize - static_cast<std::size_t>(offset64)) {
-            return Result<std::size_t>::failure(ErrorCode::invalid_argument,
-                                                "Dreamcast main RAM access crosses the mapped range");
+        const auto area_offset = static_cast<std::uint64_t>(address) - base;
+        if (area_offset >= kDreamcastMainRamAreaSpan) continue;
+
+        const auto ram_offset = static_cast<std::size_t>(
+            area_offset % static_cast<std::uint64_t>(kDreamcastMainRamSize));
+        if (width > kDreamcastMainRamSize - ram_offset) {
+            return Result<std::size_t>::failure(
+                ErrorCode::invalid_argument,
+                "Dreamcast main RAM access crosses a 16 MiB mirror boundary");
         }
-        return Result<std::size_t>::success(static_cast<std::size_t>(offset64));
+        return Result<std::size_t>::success(ram_offset);
     }
 
     return Result<std::size_t>::failure(ErrorCode::invalid_argument,
@@ -57,6 +61,24 @@ Result<DreamcastExecutableMemory> load_dreamcast_boot_memory(
     memory.entry_pc = load_address;
     memory.program_size = program.bytes.size();
     return Result<DreamcastExecutableMemory>::success(std::move(memory));
+}
+
+Result<DreamcastPreparedExecutable> prepare_dreamcast_executable(
+    const DreamcastBootProgram& program) {
+    auto analysis = analyze_dreamcast_boot_program(program);
+    if (!analysis) {
+        return Result<DreamcastPreparedExecutable>::failure(analysis.error, analysis.detail);
+    }
+
+    auto memory = load_dreamcast_boot_memory(program, analysis.value.load_address);
+    if (!memory) {
+        return Result<DreamcastPreparedExecutable>::failure(memory.error, memory.detail);
+    }
+
+    DreamcastPreparedExecutable prepared{};
+    prepared.analysis = std::move(analysis.value);
+    prepared.memory = std::move(memory.value);
+    return Result<DreamcastPreparedExecutable>::success(std::move(prepared));
 }
 
 Result<std::uint8_t> read_dreamcast_u8(const DreamcastExecutableMemory& memory,
