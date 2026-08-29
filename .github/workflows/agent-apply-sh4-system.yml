@@ -6,6 +6,7 @@ on:
       - feature/sh4-cpu-system-completion
     paths:
       - .agent/apply_sh4_system.py
+      - .github/workflows/agent-apply-sh4-system.yml
 
 permissions:
   contents: write
@@ -17,6 +18,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Repair applicator anchor for current reference-state header
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.agent/apply_sh4_system.py')
+          text = p.read_text(encoding='utf-8')
+          old = '"#include <string>\\n#include <vector>\\n",\n    "#include <string>\\n#include <utility>\\n#include <vector>\\n",'
+          new = '"#include <span>\\n#include <string>\\n",\n    "#include <span>\\n#include <string>\\n#include <utility>\\n",'
+          if old not in text:
+              raise SystemExit('expected stale include anchor not found in applicator')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Apply SH-4 system/control implementation
         run: python3 .agent/apply_sh4_system.py
       - name: Commit implementation and remove applicator
