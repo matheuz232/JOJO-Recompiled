@@ -66,19 +66,19 @@ static void test_reports_decoder_coverage_and_cfg() {
 
 static void test_histogram_is_count_then_opcode_sorted() {
     auto program = make_program("GD-ROM1/1");
-    append_word(program.bytes, 0xFFFE);
+    append_word(program.bytes, 0x0000);
     append_word(program.bytes, 0xFFFF);
-    append_word(program.bytes, 0xFFFE);
+    append_word(program.bytes, 0x0000);
     append_word(program.bytes, 0xFFFD);
     append_word(program.bytes, 0xFFFF);
-    append_word(program.bytes, 0xFFFE);
+    append_word(program.bytes, 0x0000);
 
     const auto result = jojo::analyze_dreamcast_boot_program(program);
     CHECK(result);
     if (!result) return;
     CHECK(result.value.unsupported_histogram.size() == 3);
     if (result.value.unsupported_histogram.size() == 3) {
-        CHECK(result.value.unsupported_histogram[0].raw_opcode == 0xFFFEu);
+        CHECK(result.value.unsupported_histogram[0].raw_opcode == 0x0000u);
         CHECK(result.value.unsupported_histogram[0].count == 3);
         CHECK(result.value.unsupported_histogram[0].sample_addresses.size() == 3u);
         CHECK(result.value.unsupported_histogram[0].sample_addresses[0] == 0x8C010000u);
