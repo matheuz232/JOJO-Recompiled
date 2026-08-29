@@ -314,6 +314,37 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             state.r[0] = value.value;
             return Result<void>::success();
         }
+        case Sh4IrOp::set_gbr_from_reg: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            state.gbr = state.r[instruction.src_reg];
+            return Result<void>::success();
+        }
+        case Sh4IrOp::copy_gbr_to_reg: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            state.r[instruction.dst_reg] = state.gbr;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::load_gbr_postinc32: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto address = state.r[instruction.src_reg];
+            auto value = read_u32(memory, address);
+            if (!value) return Result<void>::failure(value.error, value.detail);
+            state.gbr = value.value;
+            state.r[instruction.src_reg] += 4u;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::store_gbr_predec32: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            const auto address = state.r[instruction.dst_reg] - 4u;
+            auto stored = write_u32(memory, address, state.gbr);
+            if (!stored) return stored;
+            state.r[instruction.dst_reg] = address;
+            return Result<void>::success();
+        }
 
         case Sh4IrOp::add_reg: {
             auto dst = require_register(instruction.dst_reg);
