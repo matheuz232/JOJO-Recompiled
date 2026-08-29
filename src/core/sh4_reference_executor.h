@@ -14,6 +14,8 @@ struct Sh4ReferenceState {
     std::uint32_t pc{};
     std::uint32_t pr{};
     std::uint32_t gbr{};
+    std::uint32_t mach{};
+    std::uint32_t macl{};
     bool t{};
 };
 
