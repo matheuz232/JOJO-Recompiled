@@ -1072,6 +1072,7 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
                 sine = static_cast<float>(std::sin(angle));
                 cosine = static_cast<float>(std::cos(angle));
             }
+            if (!apply_fpu_cause(instruction, state, pending, kFpscrCauseI)) return Result<void>::success();
             state.fr[instruction.dst_reg] = std::bit_cast<std::uint32_t>(sine);
             state.fr[instruction.dst_reg + 1u] = std::bit_cast<std::uint32_t>(cosine);
             return Result<void>::success();
@@ -1083,7 +1084,12 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
                 enter_general_exception(instruction, state, pending, instruction.in_delay_slot ? 0x1A0u : 0x180u);
                 return Result<void>::success();
             }
-            const auto value = normalize_single(state, state.fr[instruction.dst_reg]);
+            const auto operand_bits = state.fr[instruction.dst_reg];
+            if ((state.fpscr & kFpscrDnBit) == 0u && is_single_subnormal(operand_bits)) {
+                apply_fpu_cause(instruction, state, pending, kFpscrCauseE);
+                return Result<void>::success();
+            }
+            const auto value = normalize_single(state, operand_bits);
             std::uint32_t cause{};
             float result{};
             if (std::isnan(value) || value < 0.0f) {
