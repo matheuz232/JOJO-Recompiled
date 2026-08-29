@@ -121,6 +121,7 @@ enum class Sh4IrOp {
     negate_single_float,
     absolute_single_float,
     sqrt_single_float,
+    multiply_add_single_float,
     add_single_float,
     subtract_single_float,
     multiply_single_float,

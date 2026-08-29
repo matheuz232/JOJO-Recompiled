@@ -131,6 +131,7 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::fneg: out.op = Sh4IrOp::negate_single_float; break;
         case Sh4Op::fabs: out.op = Sh4IrOp::absolute_single_float; break;
         case Sh4Op::fsqrt: out.op = Sh4IrOp::sqrt_single_float; break;
+        case Sh4Op::fmac: out.op = Sh4IrOp::multiply_add_single_float; break;
         case Sh4Op::fadd: out.op = Sh4IrOp::add_single_float; break;
         case Sh4Op::fsub: out.op = Sh4IrOp::subtract_single_float; break;
         case Sh4Op::fmul: out.op = Sh4IrOp::multiply_single_float; break;
