@@ -122,6 +122,8 @@ enum class Sh4Op {
     fldi1,
     flds,
     fsts,
+    float_fpul,
+    ftrc,
     fmov_reg,
     frchg,
     fschg,

@@ -1,7 +1,9 @@
 #include "core/sh4_reference_executor.h"
 
 #include <bit>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <utility>
 
@@ -23,6 +25,7 @@ std::int32_t as_signed(std::uint32_t value) noexcept {
 constexpr std::uint32_t kFpscrWritableMask = 0x003FFFFFu;
 constexpr std::uint32_t kFpscrFrBit = 0x00200000u;
 constexpr std::uint32_t kFpscrSzBit = 0x00100000u;
+constexpr std::uint32_t kFpscrPrBit = 0x00080000u;
 
 void write_fpscr(Sh4ReferenceState& state, std::uint32_t value) noexcept {
     const auto masked = value & kFpscrWritableMask;
@@ -217,6 +220,40 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             auto dst = require_register(instruction.dst_reg);
             if (!dst) return dst;
             state.fr[instruction.dst_reg] = state.fpul;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::convert_fpul_to_float: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            if ((state.fpscr & kFpscrPrBit) != 0u) {
+                return Result<void>::failure(ErrorCode::unsupported_format,
+                                             "reference FLOAT double-precision mode is not implemented");
+            }
+            const auto integer = std::bit_cast<std::int32_t>(state.fpul);
+            state.fr[instruction.dst_reg] =
+                std::bit_cast<std::uint32_t>(static_cast<float>(integer));
+            return Result<void>::success();
+        }
+        case Sh4IrOp::truncate_float_to_fpul: {
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            if ((state.fpscr & kFpscrPrBit) != 0u) {
+                return Result<void>::failure(ErrorCode::unsupported_format,
+                                             "reference FTRC double-precision mode is not implemented");
+            }
+            const auto value = std::bit_cast<float>(state.fr[instruction.src_reg]);
+            const auto truncated = std::trunc(value);
+            constexpr auto min_value =
+                static_cast<double>(std::numeric_limits<std::int32_t>::min());
+            constexpr auto max_value =
+                static_cast<double>(std::numeric_limits<std::int32_t>::max());
+            if (!std::isfinite(value) || static_cast<double>(truncated) < min_value ||
+                static_cast<double>(truncated) > max_value) {
+                return Result<void>::failure(ErrorCode::unsupported_format,
+                                             "reference FTRC exceptional conversion is not implemented");
+            }
+            state.fpul =
+                std::bit_cast<std::uint32_t>(static_cast<std::int32_t>(truncated));
             return Result<void>::success();
         }
         case Sh4IrOp::copy_fpu_registers: {
