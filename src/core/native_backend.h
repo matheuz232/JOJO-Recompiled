@@ -35,6 +35,7 @@ struct NativeCompiledOp {
 struct NativeCompiledBlock {
     std::uint32_t start_address{};
     std::vector<NativeCompiledOp> ops;
+    std::vector<std::uint8_t> native_code;
     Sh4IrExit exit{Sh4IrExit::end_of_stream};
     std::optional<std::uint32_t> branch_target;
     std::optional<std::uint32_t> fallthrough_target;
@@ -62,6 +63,7 @@ struct NativeFrameStep {
     std::size_t blocks_executed{};
     std::size_t operations_executed{};
     bool used_reference_fallback{};
+    bool native_code_executed{};
     bool reached_end{};
 };
 
@@ -71,6 +73,7 @@ struct NativeBackendCacheInfo {
     std::string program_hash;
     std::size_t block_count{};
     std::size_t operation_count{};
+    std::size_t native_code_bytes{};
     std::filesystem::path manifest_path;
     std::filesystem::path plan_path;
 };
