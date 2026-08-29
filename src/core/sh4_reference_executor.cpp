@@ -485,12 +485,73 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             state.r[instruction.dst_reg] += state.r[instruction.src_reg];
             return Result<void>::success();
         }
+        case Sh4IrOp::add_with_carry: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto carry_in = state.t ? 1u : 0u;
+            const auto sum = static_cast<std::uint64_t>(state.r[instruction.dst_reg]) +
+                             static_cast<std::uint64_t>(state.r[instruction.src_reg]) + carry_in;
+            state.r[instruction.dst_reg] = static_cast<std::uint32_t>(sum);
+            state.t = (sum >> 32u) != 0u;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::add_with_overflow: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto left = state.r[instruction.dst_reg];
+            const auto right = state.r[instruction.src_reg];
+            const auto result = left + right;
+            state.r[instruction.dst_reg] = result;
+            state.t = ((~(left ^ right) & (left ^ result)) & 0x80000000u) != 0u;
+            return Result<void>::success();
+        }
         case Sh4IrOp::sub_reg: {
             auto dst = require_register(instruction.dst_reg);
             if (!dst) return dst;
             auto src = require_register(instruction.src_reg);
             if (!src) return src;
             state.r[instruction.dst_reg] -= state.r[instruction.src_reg];
+            return Result<void>::success();
+        }
+        case Sh4IrOp::sub_with_borrow: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto left = state.r[instruction.dst_reg];
+            const auto right = state.r[instruction.src_reg];
+            const auto borrow_in = state.t ? 1u : 0u;
+            const auto subtrahend = static_cast<std::uint64_t>(right) + borrow_in;
+            state.r[instruction.dst_reg] = left - right - borrow_in;
+            state.t = static_cast<std::uint64_t>(left) < subtrahend;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::sub_with_overflow: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto left = state.r[instruction.dst_reg];
+            const auto right = state.r[instruction.src_reg];
+            const auto result = left - right;
+            state.r[instruction.dst_reg] = result;
+            state.t = (((left ^ right) & (left ^ result)) & 0x80000000u) != 0u;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::negate_with_borrow: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto right = state.r[instruction.src_reg];
+            const auto borrow_in = state.t ? 1u : 0u;
+            const auto subtrahend = static_cast<std::uint64_t>(right) + borrow_in;
+            state.r[instruction.dst_reg] = 0u - right - borrow_in;
+            state.t = subtrahend != 0u;
             return Result<void>::success();
         }
         case Sh4IrOp::compare_eq: {
