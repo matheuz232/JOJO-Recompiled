@@ -9,6 +9,7 @@ constexpr std::uint32_t kMaskBases[] = {
     0x005F6920u,
     0x005F6930u,
 };
+constexpr std::uint8_t kIrqLevels[] = {13u, 11u, 9u};
 
 Result<std::uint8_t> unsupported_read() {
     return Result<std::uint8_t>::failure(
@@ -82,6 +83,18 @@ Result<void> DreamcastSystemAsic::write8(std::uint32_t address, std::uint8_t val
         return Result<void>::success();
     }
     return unsupported_write();
+}
+
+std::optional<std::uint8_t> DreamcastSystemAsic::pending_irq_level() const noexcept {
+    for (std::size_t group = 0; group < 3; ++group) {
+        const auto mask_base = group * 3u;
+        for (std::size_t source = 0; source < 3; ++source) {
+            if ((status_[source] & masks_[mask_base + source]) != 0u) {
+                return kIrqLevels[group];
+            }
+        }
+    }
+    return std::nullopt;
 }
 
 }
