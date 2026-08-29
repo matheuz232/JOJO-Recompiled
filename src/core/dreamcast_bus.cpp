@@ -22,7 +22,7 @@ DreamcastBusRegion classify_dreamcast_bus_region(std::uint32_t address) noexcept
     }
 
     const auto physical = cache_agnostic_address(address);
-    if (in_range(physical, 0x0C000000u, 0x0CFFFFFFu)) {
+    if (in_range(physical, 0x0C000000u, 0x0FFFFFFFu)) {
         return DreamcastBusRegion::main_ram;
     }
     if (in_range(physical, 0x005F6800u, 0x005F69FFu)) {
