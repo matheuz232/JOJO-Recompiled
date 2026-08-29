@@ -67,6 +67,12 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::sts_mach_predec: out.op = Sh4IrOp::store_mach_predec32; break;
         case Sh4Op::sts_macl_predec: out.op = Sh4IrOp::store_macl_predec32; break;
         case Sh4Op::sts_pr_predec: out.op = Sh4IrOp::store_pr_predec32; break;
+        case Sh4Op::clrmac: out.op = Sh4IrOp::clear_mac; break;
+        case Sh4Op::mul_l: out.op = Sh4IrOp::multiply_low32; break;
+        case Sh4Op::muls_w: out.op = Sh4IrOp::multiply_signed_word; break;
+        case Sh4Op::mulu_w: out.op = Sh4IrOp::multiply_unsigned_word; break;
+        case Sh4Op::dmuls_l: out.op = Sh4IrOp::multiply_signed_long; break;
+        case Sh4Op::dmulu_l: out.op = Sh4IrOp::multiply_unsigned_long; break;
         case Sh4Op::add_reg: out.op = Sh4IrOp::add_reg; break;
         case Sh4Op::sub_reg: out.op = Sh4IrOp::sub_reg; break;
         case Sh4Op::cmp_eq_reg: out.op = Sh4IrOp::compare_eq; break;
