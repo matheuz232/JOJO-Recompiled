@@ -69,6 +69,23 @@ static void test_preserves_initial_cpu_state_and_ram_side_effects() {
     if (stored) CHECK(stored.value == 0xA1B2C3D4u);
 }
 
+static void test_boot_harness_routes_system_asic_interrupt_mask_access() {
+    jojo::DreamcastBootProgram program{};
+    append_word(program, 0x2122u); // MOV.L R2,@R1
+
+    jojo::Sh4ReferenceState initial{};
+    initial.r[1] = 0xA05F6910u; // cached alias of SB_IML2NRM
+    initial.r[2] = 0x00001000u;
+
+    const auto run = jojo::run_dreamcast_boot_reference(program, initial, 32u);
+    CHECK(run);
+    if (!run) return;
+
+    CHECK(run.value.stop_reason == jojo::DreamcastBootStopReason::end_of_program);
+    CHECK(!run.value.bus_fault.has_value());
+    CHECK(run.value.operations_executed == 1u);
+}
+
 static void test_block_limit_is_reported_without_claiming_successful_boot() {
     jojo::DreamcastBootProgram program{};
     append_word(program, 0xAFFEu); // BRA -4 -> branches to itself
@@ -86,6 +103,7 @@ int main() {
     test_executes_loaded_boot_program_from_main_ram();
     test_reports_first_reachable_unsupported_opcode();
     test_preserves_initial_cpu_state_and_ram_side_effects();
+    test_boot_harness_routes_system_asic_interrupt_mask_access();
     test_block_limit_is_reported_without_claiming_successful_boot();
     if (failures) {
         std::cerr << failures << " Dreamcast boot-runner assertion(s) failed\n";

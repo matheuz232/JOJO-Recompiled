@@ -24,6 +24,7 @@ add_library(jojo_core STATIC
   src/core/dreamcast_analysis.cpp
   src/core/dreamcast_memory.cpp
   src/core/dreamcast_bus.cpp
+  src/core/dreamcast_system_asic.cpp
   src/core/dreamcast_boot_runner.cpp
   src/core/sh4_decoder.cpp
   src/core/sh4_opcode_census.cpp
@@ -114,3 +115,6 @@ add_test(NAME jojo_sh4_memory_bus_tests COMMAND jojo_sh4_memory_bus_tests)
 add_executable(jojo_dreamcast_bus_diagnostics_tests tests/test_dreamcast_bus_diagnostics.cpp)
 target_link_libraries(jojo_dreamcast_bus_diagnostics_tests PRIVATE jojo_core)
 add_test(NAME jojo_dreamcast_bus_diagnostics_tests COMMAND jojo_dreamcast_bus_diagnostics_tests)
+add_executable(jojo_dreamcast_system_asic_tests tests/test_dreamcast_system_asic.cpp)
+target_link_libraries(jojo_dreamcast_system_asic_tests PRIVATE jojo_core)
+add_test(NAME jojo_dreamcast_system_asic_tests COMMAND jojo_dreamcast_system_asic_tests)
