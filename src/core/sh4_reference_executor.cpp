@@ -440,6 +440,43 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             return Result<void>::success();
         }
 
+        case Sh4IrOp::sign_extend_byte:
+        case Sh4IrOp::sign_extend_word:
+        case Sh4IrOp::zero_extend_byte:
+        case Sh4IrOp::zero_extend_word:
+        case Sh4IrOp::swap_low_bytes:
+        case Sh4IrOp::swap_words:
+        case Sh4IrOp::extract_middle: {
+            auto dst = require_register(instruction.dst_reg);
+            if (!dst) return dst;
+            auto src = require_register(instruction.src_reg);
+            if (!src) return src;
+            const auto original_dst = state.r[instruction.dst_reg];
+            const auto original_src = state.r[instruction.src_reg];
+            std::uint32_t result{};
+            if (instruction.op == Sh4IrOp::sign_extend_byte) {
+                const auto value = std::bit_cast<std::int8_t>(static_cast<std::uint8_t>(original_src & 0xFFu));
+                result = static_cast<std::uint32_t>(static_cast<std::int32_t>(value));
+            } else if (instruction.op == Sh4IrOp::sign_extend_word) {
+                const auto value = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(original_src & 0xFFFFu));
+                result = static_cast<std::uint32_t>(static_cast<std::int32_t>(value));
+            } else if (instruction.op == Sh4IrOp::zero_extend_byte) {
+                result = original_src & 0xFFu;
+            } else if (instruction.op == Sh4IrOp::zero_extend_word) {
+                result = original_src & 0xFFFFu;
+            } else if (instruction.op == Sh4IrOp::swap_low_bytes) {
+                result = (original_src & 0xFFFF0000u) |
+                         ((original_src & 0x000000FFu) << 8u) |
+                         ((original_src & 0x0000FF00u) >> 8u);
+            } else if (instruction.op == Sh4IrOp::swap_words) {
+                result = (original_src << 16u) | (original_src >> 16u);
+            } else {
+                result = (original_src << 16u) | (original_dst >> 16u);
+            }
+            state.r[instruction.dst_reg] = result;
+            return Result<void>::success();
+        }
+
         case Sh4IrOp::add_reg: {
             auto dst = require_register(instruction.dst_reg);
             if (!dst) return dst;
