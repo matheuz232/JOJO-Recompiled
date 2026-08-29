@@ -400,6 +400,20 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         i.rm = m_field(raw);
         return i;
     }
+    if ((raw & 0xF000u) == 0xF000u) {
+        const auto memory_form = static_cast<std::uint16_t>(raw & 0x000Fu);
+        if (memory_form == 0x6u) i.op = Sh4Op::fmov_load_indexed;
+        if (memory_form == 0x7u) i.op = Sh4Op::fmov_store_indexed;
+        if (memory_form == 0x8u) i.op = Sh4Op::fmov_load;
+        if (memory_form == 0x9u) i.op = Sh4Op::fmov_load_postinc;
+        if (memory_form == 0xAu) i.op = Sh4Op::fmov_store;
+        if (memory_form == 0xBu) i.op = Sh4Op::fmov_store_predec;
+        if (i.op != Sh4Op::unsupported) {
+            i.rn = n_field(raw);
+            i.rm = m_field(raw);
+            return i;
+        }
+    }
     if (raw == 0xFBFDu) {
         i.op = Sh4Op::frchg;
         return i;

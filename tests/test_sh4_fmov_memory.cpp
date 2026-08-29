@@ -41,12 +41,12 @@ static bool execute_words(const std::vector<std::uint16_t>& words,
 
 static void test_decoder_recognizes_memory_forms() {
     using jojo::Sh4Op;
-    CHECK(jojo::decode_sh4(0xF31Au, 0).op != Sh4Op::unsupported); // FMOV.S FR1,@R3
-    CHECK(jojo::decode_sh4(0xF248u, 0).op != Sh4Op::unsupported); // FMOV.S @R4,FR2
-    CHECK(jojo::decode_sh4(0xF659u, 0).op != Sh4Op::unsupported); // FMOV.S @R5+,FR6
-    CHECK(jojo::decode_sh4(0xF87Bu, 0).op != Sh4Op::unsupported); // FMOV.S FR7,@-R8
-    CHECK(jojo::decode_sh4(0xFA96u, 0).op != Sh4Op::unsupported); // FMOV.S @(R0,R9),FR10
-    CHECK(jojo::decode_sh4(0xFCB7u, 0).op != Sh4Op::unsupported); // FMOV.S FR11,@(R0,R12)
+    CHECK(jojo::decode_sh4(0xF31Au, 0).op == Sh4Op::fmov_store); // FMOV.S FR1,@R3
+    CHECK(jojo::decode_sh4(0xF248u, 0).op == Sh4Op::fmov_load); // FMOV.S @R4,FR2
+    CHECK(jojo::decode_sh4(0xF659u, 0).op == Sh4Op::fmov_load_postinc); // FMOV.S @R5+,FR6
+    CHECK(jojo::decode_sh4(0xF87Bu, 0).op == Sh4Op::fmov_store_predec); // FMOV.S FR7,@-R8
+    CHECK(jojo::decode_sh4(0xFA96u, 0).op == Sh4Op::fmov_load_indexed); // FMOV.S @(R0,R9),FR10
+    CHECK(jojo::decode_sh4(0xFCB7u, 0).op == Sh4Op::fmov_store_indexed); // FMOV.S FR11,@(R0,R12)
 }
 
 static void test_direct_load_and_store_preserve_bits() {
@@ -153,12 +153,40 @@ static void test_sz_pair_transfer_uses_xd_bank_and_little_endian_word_order() {
     CHECK(memory[22] == 0x66u && memory[23] == 0x55u);
 }
 
+static void test_failed_pair_load_keeps_registers_and_address_unchanged() {
+    std::vector<std::uint8_t> memory{0x44u, 0x33u, 0x22u, 0x11u};
+    std::vector<std::uint8_t> code;
+    append_word(code, 0xF3FDu); // FSCHG -> SZ=1
+    append_word(code, 0xF749u); // FMOV @R4+,XD6, second word is out of range
+
+    const auto cfg = jojo::build_sh4_cfg(code, 0x8C044000u, 0x8C044000u);
+    CHECK(cfg);
+    if (!cfg) return;
+    const auto ir = jojo::lift_sh4_cfg(cfg.value);
+    CHECK(ir);
+    if (!ir) return;
+
+    jojo::Sh4ReferenceState state{};
+    state.r[4] = 0xD000u;
+    state.xf[6] = 0xAAAAAAAAu;
+    state.xf[7] = 0xBBBBBBBBu;
+    const auto run = jojo::execute_sh4_ir_reference(
+        ir.value, state, jojo::Sh4ReferenceMemoryView{0xD000u, memory}, 8u);
+
+    CHECK(!run);
+    if (!run) CHECK(run.error == jojo::ErrorCode::invalid_argument);
+    CHECK(state.r[4] == 0xD000u);
+    CHECK(state.xf[6] == 0xAAAAAAAAu);
+    CHECK(state.xf[7] == 0xBBBBBBBBu);
+}
+
 int main() {
     test_decoder_recognizes_memory_forms();
     test_direct_load_and_store_preserve_bits();
     test_postincrement_and_predecrement();
     test_indexed_load_and_store();
     test_sz_pair_transfer_uses_xd_bank_and_little_endian_word_order();
+    test_failed_pair_load_keeps_registers_and_address_unchanged();
     if (failures) {
         std::cerr << failures << " SH-4 FMOV memory assertion(s) failed\n";
         return 1;

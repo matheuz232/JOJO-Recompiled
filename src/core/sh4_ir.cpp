@@ -129,6 +129,12 @@ Result<Sh4IrInstruction> lift_instruction(const Sh4Instruction& input,
         case Sh4Op::float_fpul: out.op = Sh4IrOp::convert_fpul_to_float; break;
         case Sh4Op::ftrc: out.op = Sh4IrOp::truncate_float_to_fpul; break;
         case Sh4Op::fmov_reg: out.op = Sh4IrOp::copy_fpu_registers; break;
+        case Sh4Op::fmov_store: out.op = Sh4IrOp::store_fpu_memory; break;
+        case Sh4Op::fmov_load: out.op = Sh4IrOp::load_fpu_memory; break;
+        case Sh4Op::fmov_load_postinc: out.op = Sh4IrOp::load_fpu_postincrement; break;
+        case Sh4Op::fmov_store_predec: out.op = Sh4IrOp::store_fpu_predecrement; break;
+        case Sh4Op::fmov_load_indexed: out.op = Sh4IrOp::load_fpu_indexed; break;
+        case Sh4Op::fmov_store_indexed: out.op = Sh4IrOp::store_fpu_indexed; break;
         case Sh4Op::frchg: out.op = Sh4IrOp::toggle_fpscr_fr; break;
         case Sh4Op::fschg: out.op = Sh4IrOp::toggle_fpscr_sz; break;
         case Sh4Op::bra:

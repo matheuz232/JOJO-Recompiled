@@ -110,6 +110,58 @@ Result<void> write_u32(Sh4ReferenceMemoryView memory,
     return Result<void>::success();
 }
 
+std::uint32_t fpu_memory_width(const Sh4ReferenceState& state) noexcept {
+    return (state.fpscr & kFpscrSzBit) != 0u ? 8u : 4u;
+}
+
+Result<void> load_fpu_memory(Sh4ReferenceState& state,
+                             Sh4ReferenceMemoryView memory,
+                             std::uint32_t address,
+                             std::uint8_t selector) {
+    auto reg = require_register(selector);
+    if (!reg) return reg;
+
+    auto first = read_u32(memory, address);
+    if (!first) return Result<void>::failure(first.error, first.detail);
+    if ((state.fpscr & kFpscrSzBit) == 0u) {
+        state.fr[selector] = first.value;
+        return Result<void>::success();
+    }
+    if (address > std::numeric_limits<std::uint32_t>::max() - 4u) {
+        return Result<void>::failure(ErrorCode::invalid_argument,
+                                     "reference 64-bit FPU load wraps the address space");
+    }
+
+    auto second = read_u32(memory, address + 4u);
+    if (!second) return Result<void>::failure(second.error, second.detail);
+    auto& bank = (selector & 1u) != 0u ? state.xf : state.fr;
+    const auto base = static_cast<std::uint8_t>(selector & 0x0Eu);
+    bank[base] = second.value;
+    bank[base + 1u] = first.value;
+    return Result<void>::success();
+}
+
+Result<void> store_fpu_memory(const Sh4ReferenceState& state,
+                              Sh4ReferenceMemoryView memory,
+                              std::uint32_t address,
+                              std::uint8_t selector) {
+    auto reg = require_register(selector);
+    if (!reg) return reg;
+    if ((state.fpscr & kFpscrSzBit) == 0u) {
+        return write_u32(memory, address, state.fr[selector]);
+    }
+    if (address > std::numeric_limits<std::uint32_t>::max() - 4u) {
+        return Result<void>::failure(ErrorCode::invalid_argument,
+                                     "reference 64-bit FPU store wraps the address space");
+    }
+
+    const auto& bank = (selector & 1u) != 0u ? state.xf : state.fr;
+    const auto base = static_cast<std::uint8_t>(selector & 0x0Eu);
+    auto first = write_u32(memory, address, bank[base + 1u]);
+    if (!first) return first;
+    return write_u32(memory, address + 4u, bank[base]);
+}
+
 bool is_load8(Sh4IrOp op) noexcept {
     return op == Sh4IrOp::load_mem8_signed || op == Sh4IrOp::load_postinc8_signed ||
            op == Sh4IrOp::load_disp8_signed || op == Sh4IrOp::load_indexed8_signed ||
@@ -275,6 +327,48 @@ Result<void> execute_op(const Sh4IrInstruction& instruction,
             destination_bank[destination_base] = first;
             destination_bank[destination_base + 1u] = second;
             return Result<void>::success();
+        }
+        case Sh4IrOp::store_fpu_memory: {
+            auto address_reg = require_register(instruction.dst_reg);
+            if (!address_reg) return address_reg;
+            return store_fpu_memory(state, memory, state.r[instruction.dst_reg],
+                                    instruction.src_reg);
+        }
+        case Sh4IrOp::load_fpu_memory: {
+            auto address_reg = require_register(instruction.src_reg);
+            if (!address_reg) return address_reg;
+            return load_fpu_memory(state, memory, state.r[instruction.src_reg],
+                                   instruction.dst_reg);
+        }
+        case Sh4IrOp::load_fpu_postincrement: {
+            auto address_reg = require_register(instruction.src_reg);
+            if (!address_reg) return address_reg;
+            const auto address = state.r[instruction.src_reg];
+            auto loaded = load_fpu_memory(state, memory, address, instruction.dst_reg);
+            if (!loaded) return loaded;
+            state.r[instruction.src_reg] += fpu_memory_width(state);
+            return Result<void>::success();
+        }
+        case Sh4IrOp::store_fpu_predecrement: {
+            auto address_reg = require_register(instruction.dst_reg);
+            if (!address_reg) return address_reg;
+            const auto address = state.r[instruction.dst_reg] - fpu_memory_width(state);
+            auto stored = store_fpu_memory(state, memory, address, instruction.src_reg);
+            if (!stored) return stored;
+            state.r[instruction.dst_reg] = address;
+            return Result<void>::success();
+        }
+        case Sh4IrOp::load_fpu_indexed: {
+            auto address_reg = require_register(instruction.src_reg);
+            if (!address_reg) return address_reg;
+            const auto address = state.r[0] + state.r[instruction.src_reg];
+            return load_fpu_memory(state, memory, address, instruction.dst_reg);
+        }
+        case Sh4IrOp::store_fpu_indexed: {
+            auto address_reg = require_register(instruction.dst_reg);
+            if (!address_reg) return address_reg;
+            const auto address = state.r[0] + state.r[instruction.dst_reg];
+            return store_fpu_memory(state, memory, address, instruction.src_reg);
         }
         case Sh4IrOp::toggle_fpscr_fr:
             write_fpscr(state, state.fpscr ^ kFpscrFrBit);
