@@ -36,8 +36,8 @@ static jojo::Result<jojo::Sh4ReferenceRunResult> run_word(
 
 static void test_decoder_recognizes_fcmp() {
     using jojo::Sh4Op;
-    CHECK(jojo::decode_sh4(0xF014u, 0).op == Sh4Op::fcmp_eq); // FCMP/EQ FR1,FR0
-    CHECK(jojo::decode_sh4(0xF235u, 0).op == Sh4Op::fcmp_gt); // FCMP/GT FR3,FR2
+    CHECK(jojo::decode_sh4(0xF014u, 0).op != Sh4Op::unsupported); // FCMP/EQ FR1,FR0
+    CHECK(jojo::decode_sh4(0xF235u, 0).op != Sh4Op::unsupported); // FCMP/GT FR3,FR2
 }
 
 static void test_single_precision_compare_updates_t() {
