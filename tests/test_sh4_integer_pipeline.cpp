@@ -48,7 +48,7 @@ static void test_decoder_patterns() {
     CHECK(jojo::decode_sh4(0x4111, 0).op == Sh4Op::cmp_pz);
     CHECK(jojo::decode_sh4(0x4215, 0).op == Sh4Op::cmp_pl);
     i = jojo::decode_sh4(0x4510, 0);
-    CHECK(i.op != Sh4Op::unsupported && i.rn == 5); // DT R5
+    CHECK(i.op == Sh4Op::dt && i.rn == 5); // DT R5
 
     CHECK(jojo::decode_sh4(0x2458, 0).op == Sh4Op::tst_reg);
     CHECK(jojo::decode_sh4(0x2459, 0).op == Sh4Op::and_reg);
