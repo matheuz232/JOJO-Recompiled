@@ -59,6 +59,10 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         i.op = Sh4Op::sett;
         return i;
     }
+    if (raw == 0x0019u) {
+        i.op = Sh4Op::div0u;
+        return i;
+    }
     if ((raw & 0xF0FFu) == 0x0029u) {
         i.op = Sh4Op::movt;
         i.rn = n_field(raw);
@@ -272,6 +276,24 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         i.rm = m_field(raw);
         return i;
     }
+    if ((raw & 0xF00Fu) == 0x200Cu) {
+        i.op = Sh4Op::cmp_str_reg;
+        i.rn = n_field(raw);
+        i.rm = m_field(raw);
+        return i;
+    }
+    if ((raw & 0xF00Fu) == 0x2007u) {
+        i.op = Sh4Op::div0s;
+        i.rn = n_field(raw);
+        i.rm = m_field(raw);
+        return i;
+    }
+    if ((raw & 0xF00Fu) == 0x3004u) {
+        i.op = Sh4Op::div1;
+        i.rn = n_field(raw);
+        i.rm = m_field(raw);
+        return i;
+    }
     if ((raw & 0xFF00u) == 0x8800u) {
         i.op = Sh4Op::cmp_eq_imm;
         i.rn = 0;
@@ -341,6 +363,15 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         i.immediate = static_cast<std::int32_t>(raw & 0x00FFu);
         return i;
     }
+    if ((raw & 0xFF00u) >= 0xCC00u && (raw & 0xFF00u) <= 0xCF00u) {
+        const auto high = static_cast<std::uint16_t>(raw & 0xFF00u);
+        if (high == 0xCC00u) i.op = Sh4Op::tst_b_imm_gbr;
+        if (high == 0xCD00u) i.op = Sh4Op::and_b_imm_gbr;
+        if (high == 0xCE00u) i.op = Sh4Op::xor_b_imm_gbr;
+        if (high == 0xCF00u) i.op = Sh4Op::or_b_imm_gbr;
+        i.immediate = static_cast<std::int32_t>(raw & 0x00FFu);
+        return i;
+    }
     if ((raw & 0xF00Fu) == 0x6007u) {
         i.op = Sh4Op::not_reg;
         i.rn = n_field(raw);
@@ -355,13 +386,14 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
     }
 
     const auto shift_code = static_cast<std::uint16_t>(raw & 0xF0FFu);
-    if (shift_code == 0x4000u || shift_code == 0x4001u || shift_code == 0x4021u ||
+    if (shift_code == 0x4000u || shift_code == 0x4001u || shift_code == 0x4020u || shift_code == 0x4021u ||
         shift_code == 0x4004u || shift_code == 0x4005u || shift_code == 0x4024u ||
         shift_code == 0x4025u || shift_code == 0x4008u || shift_code == 0x4009u ||
         shift_code == 0x4018u || shift_code == 0x4019u || shift_code == 0x4028u ||
         shift_code == 0x4029u) {
         if (shift_code == 0x4000u) i.op = Sh4Op::shll;
         if (shift_code == 0x4001u) i.op = Sh4Op::shlr;
+        if (shift_code == 0x4020u) i.op = Sh4Op::shal;
         if (shift_code == 0x4021u) i.op = Sh4Op::shar;
         if (shift_code == 0x4004u) i.op = Sh4Op::rotl;
         if (shift_code == 0x4005u) i.op = Sh4Op::rotr;
@@ -374,6 +406,14 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         if (shift_code == 0x4028u) i.op = Sh4Op::shll16;
         if (shift_code == 0x4029u) i.op = Sh4Op::shlr16;
         i.rn = n_field(raw);
+        return i;
+    }
+
+    const auto dynamic_shift_code = static_cast<std::uint16_t>(raw & 0xF00Fu);
+    if (dynamic_shift_code == 0x400Cu || dynamic_shift_code == 0x400Du) {
+        i.op = dynamic_shift_code == 0x400Cu ? Sh4Op::shad : Sh4Op::shld;
+        i.rn = n_field(raw);
+        i.rm = m_field(raw);
         return i;
     }
 
@@ -493,6 +533,21 @@ Sh4Instruction decode_sh4(std::uint16_t raw, std::uint32_t address) noexcept {
         return i;
     }
 
+    if ((raw & 0xF0FFu) == 0x0023u) {
+        i.op = Sh4Op::braf;
+        i.rn = n_field(raw);
+        i.is_branch = true;
+        i.has_delay_slot = true;
+        return i;
+    }
+    if ((raw & 0xF0FFu) == 0x0003u) {
+        i.op = Sh4Op::bsrf;
+        i.rn = n_field(raw);
+        i.is_branch = true;
+        i.has_delay_slot = true;
+        i.writes_pr = true;
+        return i;
+    }
     if ((raw & 0xF0FFu) == 0x402Bu) {
         i.op = Sh4Op::jmp_reg;
         i.rn = n_field(raw);

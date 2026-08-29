@@ -245,6 +245,54 @@ static void test_shift_semantics_and_t_bit() {
     CHECK(state.t);
 }
 
+static void test_cmpstr_division_dynamic_shifts_and_relative_branches() {
+    constexpr std::uint32_t sr_q = 0x00000100u;
+    constexpr std::uint32_t sr_m = 0x00000200u;
+
+    {
+        jojo::Sh4ReferenceState state{};
+        state.r[1] = 0x11223344u; state.r[2] = 0x9922AA88u; state.pr = 0xDEAD3000u;
+        CHECK(execute_words({0x212Cu, 0x000Bu, 0x0009u}, state, 0x8C013000u));
+        CHECK(state.t);
+    }
+    {
+        jojo::Sh4ReferenceState state{};
+        state.r[1] = 0x80000000u; state.r[2] = 1u; state.pr = 0xDEAD3100u;
+        CHECK(execute_words({0x2127u, 0x000Bu, 0x0009u}, state, 0x8C013100u));
+        CHECK((state.sr & sr_q) != 0u && (state.sr & sr_m) == 0u && state.t);
+        state.pr = 0xDEAD3100u;
+        CHECK(execute_words({0x0019u, 0x000Bu, 0x0009u}, state, 0x8C013100u));
+        CHECK((state.sr & (sr_q | sr_m)) == 0u && !state.t);
+    }
+    {
+        jojo::Sh4ReferenceState state{};
+        state.r[1] = 5u; state.r[2] = 2u; state.t = false; state.pr = 0xDEAD3200u;
+        CHECK(execute_words({0x3124u, 0x000Bu, 0x0009u}, state, 0x8C013200u));
+        CHECK(state.r[1] == 8u && (state.sr & (sr_q | sr_m)) == 0u && state.t);
+    }
+    {
+        jojo::Sh4ReferenceState state{};
+        state.r[1] = 0x80000001u; state.r[2] = 0xFFFFFFFFu; state.pr = 0xDEAD3300u;
+        CHECK(execute_words({0x412Cu, 0x000Bu, 0x0009u}, state, 0x8C013300u));
+        CHECK(state.r[1] == 0xC0000000u);
+        state.r[1] = 0x80000001u; state.pr = 0xDEAD3300u;
+        CHECK(execute_words({0x412Du, 0x000Bu, 0x0009u}, state, 0x8C013300u));
+        CHECK(state.r[1] == 0x40000000u);
+        state.r[1] = 0x80000001u; state.pr = 0xDEAD3300u;
+        CHECK(execute_words({0x4120u, 0x000Bu, 0x0009u}, state, 0x8C013300u));
+        CHECK(state.r[1] == 2u && state.t);
+    }
+    {
+        jojo::Sh4ReferenceState state{};
+        state.r[3] = 0x100u;
+        CHECK(execute_words({0x0323u, 0x0009u}, state, 0x8C013400u));
+        CHECK(state.pc == 0x8C013504u);
+        state.r[4] = 0x200u;
+        CHECK(execute_words({0x0403u, 0x0009u}, state, 0x8C013500u));
+        CHECK(state.pr == 0x8C013504u && state.pc == 0x8C013704u);
+    }
+}
+
 int main() {
     test_decoder_patterns();
     test_logic_t_and_unary_execution();
@@ -252,6 +300,7 @@ int main() {
     test_dt_decrements_and_sets_t_only_on_zero();
     test_rotate_semantics_and_t_bit();
     test_shift_semantics_and_t_bit();
+    test_cmpstr_division_dynamic_shifts_and_relative_branches();
     if (failures) {
         std::cerr << failures << " expanded SH-4 integer assertion(s) failed\n";
         return 1;
