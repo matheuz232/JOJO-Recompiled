@@ -68,12 +68,17 @@ if(WIN32)
   target_compile_definitions(jojo_win32_input_host PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
   target_link_libraries(jojo_win32_input_host PUBLIC jojo_core setupapi hid user32)
 
+  add_library(jojo_win32_network_host STATIC
+    src/platform/windows/udp_transport_win32.cpp)
+  target_compile_definitions(jojo_win32_network_host PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+  target_link_libraries(jojo_win32_network_host PUBLIC jojo_core ws2_32)
+
   add_executable(jojo_recompiled WIN32
     src/app_win32/main.cpp
     src/app_win32/presentation_host.cpp)
   set_target_properties(jojo_recompiled PROPERTIES OUTPUT_NAME "JOJO-Recompiled")
   target_compile_definitions(jojo_recompiled PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
-  target_link_libraries(jojo_recompiled PRIVATE jojo_core jojo_win32_input_host shell32 ole32 uuid d3d11 dxgi)
+  target_link_libraries(jojo_recompiled PRIVATE jojo_core jojo_win32_input_host jojo_win32_network_host shell32 ole32 uuid d3d11 dxgi)
 
   add_executable(jojo_win32_presentation_tests
     tests/test_win32_presentation.cpp
@@ -86,6 +91,11 @@ if(WIN32)
   target_compile_definitions(jojo_win32_input_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
   target_link_libraries(jojo_win32_input_tests PRIVATE jojo_win32_input_host)
   add_test(NAME jojo_win32_input_tests COMMAND jojo_win32_input_tests)
+
+  add_executable(jojo_win32_udp_transport_tests tests/test_win32_udp_transport.cpp)
+  target_compile_definitions(jojo_win32_udp_transport_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+  target_link_libraries(jojo_win32_udp_transport_tests PRIVATE jojo_win32_network_host)
+  add_test(NAME jojo_win32_udp_transport_tests COMMAND jojo_win32_udp_transport_tests)
 endif()
 
 add_executable(jojo_tests tests/test_main.cpp)
