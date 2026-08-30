@@ -196,6 +196,37 @@ static void test_sw_reports_memory_fault_without_advancing_pipeline() {
     CHECK(state.next_pc == 0x80010010u);
 }
 
+static void test_sh_uses_signed_offset_truncates_and_writes_halfword() {
+    jojo::PsxBus bus{};
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x8003c66cu);
+    state.gpr[2] = 0x80001004u;
+    state.gpr[3] = 0x123489abu;
+    CHECK(jojo::psx_bus_write_u32(bus, 0x80001000u, 0xdeadbeefu) == jojo::PsxBusAccessReason::ok);
+
+    const auto result = jojo::step_psx_r3000a(state, encode_i(0x29, 2, 3, 0xfffeu), bus);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    const auto stored = jojo::psx_bus_read_u32(bus, 0x80001000u);
+    CHECK(stored.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(stored.value == 0x89abbeefu);
+    CHECK(state.pc == 0x8003c670u);
+}
+
+static void test_sh_rejects_odd_address_without_advancing_pipeline() {
+    jojo::PsxBus bus{};
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x8003c66cu);
+    state.gpr[2] = 0x80001001u;
+    state.gpr[3] = 0x00001234u;
+    CHECK(jojo::psx_bus_write_u32(bus, 0x80001000u, 0xaabbccddu) == jojo::PsxBusAccessReason::ok);
+
+    const auto result = jojo::step_psx_r3000a(state, encode_i(0x29, 2, 3, 0u), bus);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::memory_fault);
+    CHECK(jojo::psx_bus_read_u32(bus, 0x80001000u).value == 0xaabbccddu);
+    CHECK(state.pc == 0x8003c66cu);
+    CHECK(state.next_pc == 0x8003c670u);
+}
+
 static void test_lhu_reads_unsigned_halfword_with_load_delay() {
     jojo::PsxBus bus{};
     jojo::PsxR3000aState state{};
@@ -296,6 +327,8 @@ int main() {
     test_ram_access_rejects_unaligned_and_unmapped_addresses();
     test_sw_uses_signed_offset_and_writes_through_bus();
     test_sw_reports_memory_fault_without_advancing_pipeline();
+    test_sh_uses_signed_offset_truncates_and_writes_halfword();
+    test_sh_rejects_odd_address_without_advancing_pipeline();
     test_lhu_reads_unsigned_halfword_with_load_delay();
     test_lhu_rejects_odd_address_without_advancing_pipeline();
     test_lw_uses_signed_offset_and_defers_register_update();
