@@ -235,6 +235,60 @@ static void test_division_results_and_psx_edge_behavior() {
     CHECK(state.hi == 0u);
 }
 
+static void test_signed_unsigned_subword_loads_and_byte_store() {
+    jojo::PsxBus bus{};
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010500u);
+    state.gpr[2] = 0x80001000u;
+    state.gpr[3] = 0x11111111u;
+    CHECK(jojo::psx_bus_write_u32(bus, 0x80001000u, 0x8001ff80u) ==
+          jojo::PsxBusAccessReason::ok);
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x20, 2, 3, 0u), bus).reason ==
+          jojo::PsxR3000aStepReason::ok); // LB
+    CHECK(state.gpr[3] == 0x11111111u);
+    CHECK(jojo::step_psx_r3000a(state, 0u, bus).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[3] == 0xffffff80u);
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x24, 2, 4, 0u), bus).reason ==
+          jojo::PsxR3000aStepReason::ok); // LBU
+    CHECK(jojo::step_psx_r3000a(state, 0u, bus).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[4] == 0x00000080u);
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x21, 2, 5, 2u), bus).reason ==
+          jojo::PsxR3000aStepReason::ok); // LH
+    CHECK(jojo::step_psx_r3000a(state, 0u, bus).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[5] == 0xffff8001u);
+
+    state.gpr[6] = 0x123456abu;
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x28, 2, 6, 1u), bus).reason ==
+          jojo::PsxR3000aStepReason::ok); // SB
+    CHECK(jojo::psx_bus_read_u32(bus, 0x80001000u).value == 0x8001ab80u);
+
+    jojo::reset_psx_r3000a(state, 0x80010600u);
+    state.gpr[2] = 0x80001001u;
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x21, 2, 3, 0u), bus).reason ==
+          jojo::PsxR3000aStepReason::memory_fault);
+    CHECK(state.pc == 0x80010600u);
+}
+
+static void test_scratchpad_storage_and_segment_aliases() {
+    jojo::PsxBus bus{};
+    CHECK(bus.scratchpad.size() == 1024u);
+    CHECK(jojo::psx_bus_write_u32(bus, 0x1f8003fcu, 0x11223344u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_read_u32(bus, 0x9f8003fcu).value == 0x11223344u);
+    CHECK(jojo::psx_bus_read_u32(bus, 0xbf8003fcu).value == 0x11223344u);
+
+    CHECK(jojo::psx_bus_write_u8(bus, 0x1f8003ffu, 0xa5u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_read_u8(bus, 0x9f8003ffu).value == 0xa5u);
+    CHECK(jojo::psx_bus_write_u8(bus, 0x1f800400u, 0u) ==
+          jojo::PsxBusAccessReason::unmapped);
+    CHECK(jojo::psx_bus_read_u8(bus, 0x1f800400u).reason ==
+          jojo::PsxBusAccessReason::unmapped);
+}
+
 static void test_jr_preserves_delay_slot_then_uses_register_target() {
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x80035a34u);
@@ -536,6 +590,8 @@ int main() {
     test_immediate_logical_and_comparison_operations();
     test_hi_lo_moves_and_multiply_results();
     test_division_results_and_psx_edge_behavior();
+    test_signed_unsigned_subword_loads_and_byte_store();
+    test_scratchpad_storage_and_segment_aliases();
     test_jr_preserves_delay_slot_then_uses_register_target();
     test_jalr_links_and_preserves_delay_slot();
     test_jalr_reads_target_before_writing_same_register_link();
