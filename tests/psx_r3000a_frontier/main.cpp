@@ -1,4 +1,5 @@
 #include "core/psx_r3000a.h"
+#include "core/psx_runtime.h"
 #include <cstdint>
 #include <iostream>
 
@@ -102,11 +103,34 @@ static void test_j_preserves_delay_slot_and_uses_pc_high_nibble() {
     CHECK(cpu.next_pc == 0xa0000004u);
 }
 
+static void test_gpu_gp0_mmio_port_accepts_command_words() {
+    jojo::PsxBus bus{};
+    CHECK(jojo::psx_bus_write_u32(bus, 0x1f801810u, 0xe1000400u) ==
+          jojo::PsxBusAccessReason::ok);
+}
+
+static void test_bios_a0_gpu_cw_returns_after_sending_gp0_command() {
+    jojo::PsxRuntime runtime{};
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000a0u);
+    runtime.cpu.gpr[4] = 0xe1000400u;
+    runtime.cpu.gpr[9] = 0x49u;
+    runtime.cpu.gpr[31] = 0x8003ca10u;
+    runtime.cpu.gpr[2] = 0xffffffffu;
+
+    const auto result = jojo::step_psx_runtime(runtime);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 0u);
+    CHECK(runtime.cpu.pc == 0x8003ca10u);
+    CHECK(runtime.cpu.next_pc == 0x8003ca14u);
+}
+
 int main() {
     test_ori_zero_extends_immediate_and_advances();
     test_andi_zero_extends_immediate_and_advances();
     test_sllv_uses_low_five_shift_bits_and_advances();
     test_j_preserves_delay_slot_and_uses_pc_high_nibble();
+    test_gpu_gp0_mmio_port_accepts_command_words();
+    test_bios_a0_gpu_cw_returns_after_sending_gp0_command();
     if (failures) return 1;
     std::cout << "R3000A commercial frontier assertions passed\n";
     return 0;
