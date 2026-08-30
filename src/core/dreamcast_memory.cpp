@@ -100,8 +100,10 @@ Result<std::uint16_t> read_dreamcast_u16(const DreamcastExecutableMemory& memory
         return Result<std::uint16_t>::failure(ErrorCode::invalid_installation,
                                               "Dreamcast main RAM backing storage has an invalid size");
     }
-    const auto value = static_cast<std::uint16_t>(memory.main_ram[offset.value]) |
-                       static_cast<std::uint16_t>(memory.main_ram[offset.value + 1u]) << 8u;
+    const auto low = static_cast<std::uint16_t>(memory.main_ram[offset.value]);
+    const auto high = static_cast<std::uint16_t>(memory.main_ram[offset.value + 1u]);
+    const auto value = static_cast<std::uint16_t>(
+        low | static_cast<std::uint16_t>(high << 8u));
     return Result<std::uint16_t>::success(value);
 }
 
