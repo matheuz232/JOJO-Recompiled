@@ -37,6 +37,7 @@ struct PsxBus {
     static constexpr std::uint32_t dma_control_address = 0x1f8010f0u;
     static constexpr std::uint32_t timer1_current_address = 0x1f801110u;
     static constexpr std::uint32_t timer1_mode_address = 0x1f801114u;
+    static constexpr std::uint32_t gpu_gp0_address = 0x1f801810u;
     static constexpr std::uint16_t interrupt_status_valid_bits = 0x07ffu;
     static constexpr std::uint16_t interrupt_mask_valid_bits = 0x07ffu;
     static constexpr std::uint16_t timer_mode_valid_bits = 0x1fffu;
@@ -48,6 +49,7 @@ struct PsxBus {
     std::uint32_t dma_control{};
     std::uint16_t timer1_current{};
     std::uint16_t timer1_mode{};
+    std::uint32_t gpu_gp0_write_latch{};
 };
 
 [[nodiscard]] inline bool psx_bus_virtual_to_physical(std::uint32_t address,
@@ -273,6 +275,10 @@ struct PsxBus {
     }
     if (address == PsxBus::timer1_mode_address) {
         return psx_bus_write_u16(bus, address, static_cast<std::uint16_t>(value));
+    }
+    if (address == PsxBus::gpu_gp0_address) {
+        bus.gpu_gp0_write_latch = value;
+        return PsxBusAccessReason::ok;
     }
 
     std::size_t scratchpad_offset = 0;
