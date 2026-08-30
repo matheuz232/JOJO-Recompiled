@@ -22,7 +22,27 @@ const char* step_reason_name(jojo::PsxR3000aStepReason reason) noexcept {
     return "unknown";
 }
 
+bool is_bios_vector(std::uint32_t pc) noexcept {
+    return pc == 0x000000a0u || pc == 0x000000b0u || pc == 0x000000c0u;
+}
+
+void print_bios_context(const jojo::PsxRuntime& runtime, std::uint32_t pc) {
+    if (!is_bios_vector(pc)) return;
+
+    std::cout << std::hex << std::showbase;
+    std::cout << "bios_vector=" << pc << '\n';
+    std::cout << "bios_function=" << runtime.cpu.gpr[9] << '\n';
+    std::cout << "a0=" << runtime.cpu.gpr[4] << '\n';
+    std::cout << "a1=" << runtime.cpu.gpr[5] << '\n';
+    std::cout << "a2=" << runtime.cpu.gpr[6] << '\n';
+    std::cout << "a3=" << runtime.cpu.gpr[7] << '\n';
+    std::cout << "ra=" << runtime.cpu.gpr[31] << '\n';
+    std::cout << std::dec << std::noshowbase;
+}
+
 void print_instruction_context(const jojo::PsxRuntime& runtime, std::uint32_t pc) {
+    print_bios_context(runtime, pc);
+
     const auto fetched = jojo::psx_bus_read_u32(runtime.bus, pc);
     if (fetched.reason != jojo::PsxBusAccessReason::ok) {
         std::cout << "instruction_class=unavailable\n";
