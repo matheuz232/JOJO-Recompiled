@@ -35,13 +35,24 @@ struct GraphicsSettings {
     friend bool operator==(const GraphicsSettings&, const GraphicsSettings&) = default;
 };
 
+struct AudioSettings {
+    int master_volume{100};
+    int music_volume{100};
+    int effects_volume{100};
+    bool mute_when_unfocused{false};
+    friend bool operator==(const AudioSettings&, const AudioSettings&) = default;
+};
+
 struct AppSettings {
     std::string install_dir{};
     GraphicsSettings graphics{};
+    AudioSettings audio{};
     InputSettings input{};
 };
 
 [[nodiscard]] bool validate_graphics(const GraphicsSettings& settings) noexcept;
+[[nodiscard]] bool validate_audio(const AudioSettings& settings) noexcept;
+[[nodiscard]] bool validate_input(const InputSettings& settings) noexcept;
 [[nodiscard]] std::string to_string(AspectRatio value);
 [[nodiscard]] std::string to_string(DisplayMode value);
 [[nodiscard]] std::string to_string(HudSafeArea value);
