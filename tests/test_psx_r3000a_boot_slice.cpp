@@ -91,6 +91,74 @@ static void test_srl_zero_fills_high_bits() {
     CHECK(state.pc == 0x8001006cu);
 }
 
+static void test_arithmetic_and_variable_shifts_use_r3000a_rules() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010070u);
+    state.gpr[2] = 0x80000003u;
+
+    CHECK(jojo::step_psx_r3000a(state, encode_r(0, 2, 3, 1, 0x03)).reason ==
+          jojo::PsxR3000aStepReason::ok); // SRA
+    CHECK(state.gpr[3] == 0xc0000001u);
+
+    state.gpr[4] = 0x21u;
+    state.gpr[5] = 0x80000001u;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(4, 5, 6, 0, 0x06)).reason ==
+          jojo::PsxR3000aStepReason::ok); // SRLV
+    CHECK(state.gpr[6] == 0x40000000u);
+
+    state.gpr[4] = 4u;
+    state.gpr[5] = 0x80000000u;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(4, 5, 7, 0, 0x07)).reason ==
+          jojo::PsxR3000aStepReason::ok); // SRAV
+    CHECK(state.gpr[7] == 0xf8000000u);
+}
+
+static void test_register_logical_and_signed_comparison_operations() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010100u);
+    state.gpr[2] = 0xf0f000ffu;
+    state.gpr[3] = 0x0ff00f0fu;
+
+    CHECK(jojo::step_psx_r3000a(state, encode_r(2, 3, 4, 0, 0x24)).reason ==
+          jojo::PsxR3000aStepReason::ok); // AND
+    CHECK(state.gpr[4] == 0x00f0000fu);
+    CHECK(jojo::step_psx_r3000a(state, encode_r(2, 3, 5, 0, 0x26)).reason ==
+          jojo::PsxR3000aStepReason::ok); // XOR
+    CHECK(state.gpr[5] == 0xff000ff0u);
+    CHECK(jojo::step_psx_r3000a(state, encode_r(2, 3, 6, 0, 0x27)).reason ==
+          jojo::PsxR3000aStepReason::ok); // NOR
+    CHECK(state.gpr[6] == 0x000ff000u);
+
+    state.gpr[7] = 0xffffffffu;
+    state.gpr[8] = 1u;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(7, 8, 9, 0, 0x2a)).reason ==
+          jojo::PsxR3000aStepReason::ok); // SLT
+    CHECK(state.gpr[9] == 1u);
+    CHECK(jojo::step_psx_r3000a(state, encode_r(8, 7, 10, 0, 0x2a)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[10] == 0u);
+}
+
+static void test_immediate_logical_and_comparison_operations() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010200u);
+    state.gpr[2] = 0xffff0000u;
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x0e, 2, 3, 0x00ffu)).reason ==
+          jojo::PsxR3000aStepReason::ok); // XORI
+    CHECK(state.gpr[3] == 0xffff00ffu);
+
+    state.gpr[4] = 0xffffffffu;
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x0a, 4, 5, 0u)).reason ==
+          jojo::PsxR3000aStepReason::ok); // SLTI -1, 0
+    CHECK(state.gpr[5] == 1u);
+
+    state.gpr[6] = 0xfffffffeu;
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x0b, 6, 7, 0xffffu)).reason ==
+          jojo::PsxR3000aStepReason::ok); // SLTIU fffffffe, ffffffff
+    CHECK(state.gpr[7] == 1u);
+}
+
 static void test_jr_preserves_delay_slot_then_uses_register_target() {
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x80035a34u);
@@ -318,6 +386,9 @@ int main() {
     test_sltu_uses_unsigned_comparison();
     test_or_combines_register_bits();
     test_srl_zero_fills_high_bits();
+    test_arithmetic_and_variable_shifts_use_r3000a_rules();
+    test_register_logical_and_signed_comparison_operations();
+    test_immediate_logical_and_comparison_operations();
     test_jr_preserves_delay_slot_then_uses_register_target();
     test_jalr_links_and_preserves_delay_slot();
     test_jalr_reads_target_before_writing_same_register_link();
