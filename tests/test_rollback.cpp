@@ -44,6 +44,11 @@ public:
         if (state.size() != 8) {
             return jojo::Result<void>::failure(jojo::ErrorCode::invalid_argument, "test state must contain eight bytes");
         }
+        if (fail_next_load) {
+            fail_next_load = false;
+            value = -777777;
+            return jojo::Result<void>::failure(jojo::ErrorCode::io_error, "injected restore failure after mutation");
+        }
         value = decode_i64(state);
         return jojo::Result<void>::success();
     }
@@ -64,6 +69,7 @@ public:
     std::int64_t value{};
     int emitted_side_effects{};
     std::vector<bool> side_effect_flags;
+    bool fail_next_load{};
 };
 
 void test_rng_is_repeatable_and_state_restorable() {
@@ -151,6 +157,27 @@ void test_too_old_correction_is_rejected_without_mutation() {
     CHECK(correction.error == jojo::ErrorCode::invalid_argument);
     CHECK(simulation.value == before);
     CHECK(session.current_frame() == before_frame);
+}
+
+void test_failed_snapshot_restore_is_transactional() {
+    TestSimulation simulation{};
+    jojo::RollbackSession session(simulation, 8);
+    CHECK(session.advance(input(1)));
+    CHECK(session.advance(input(2)));
+    const auto before = simulation.value;
+    const auto before_frame = session.current_frame();
+    const auto before_hash = session.state_hash(1);
+    CHECK(before_hash);
+
+    simulation.fail_next_load = true;
+    const auto correction = session.submit_remote_input(0, input(9));
+    CHECK(!correction);
+    CHECK(correction.error == jojo::ErrorCode::io_error);
+    CHECK(simulation.value == before);
+    CHECK(session.current_frame() == before_frame);
+    const auto after_hash = session.state_hash(1);
+    CHECK(after_hash);
+    if (before_hash && after_hash) CHECK(before_hash.value == after_hash.value);
 }
 
 void test_state_hashes_detect_desync() {
@@ -302,6 +329,7 @@ int main() {
     test_prediction_and_late_input_rollback_match_authoritative_run();
     test_multiple_frame_rollback_replays_without_side_effects();
     test_too_old_correction_is_rejected_without_mutation();
+    test_failed_snapshot_restore_is_transactional();
     test_state_hashes_detect_desync();
     test_packet_serialization_is_deterministic_and_round_trips();
     test_packet_validation_rejects_malformed_data();
