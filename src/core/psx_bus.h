@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -16,6 +17,11 @@ struct PsxBusReadU16Result {
     std::uint16_t value{};
 };
 
+struct PsxBusReadU8Result {
+    PsxBusAccessReason reason{PsxBusAccessReason::ok};
+    std::uint8_t value{};
+};
+
 struct PsxBusReadU32Result {
     PsxBusAccessReason reason{PsxBusAccessReason::ok};
     std::uint32_t value{};
@@ -24,6 +30,8 @@ struct PsxBusReadU32Result {
 struct PsxBus {
     static constexpr std::size_t main_ram_size = 2u * 1024u * 1024u;
     static constexpr std::uint32_t default_ram_mirror_window = 8u * 1024u * 1024u;
+    static constexpr std::uint32_t scratchpad_address = 0x1f800000u;
+    static constexpr std::size_t scratchpad_size = 1024u;
     static constexpr std::uint32_t interrupt_status_address = 0x1f801070u;
     static constexpr std::uint32_t interrupt_mask_address = 0x1f801074u;
     static constexpr std::uint32_t dma_control_address = 0x1f8010f0u;
@@ -34,6 +42,7 @@ struct PsxBus {
     static constexpr std::uint16_t timer_mode_valid_bits = 0x1fffu;
 
     std::vector<std::uint8_t> ram = std::vector<std::uint8_t>(main_ram_size, 0u);
+    std::array<std::uint8_t, scratchpad_size> scratchpad{};
     std::uint16_t interrupt_status{};
     std::uint16_t interrupt_mask{};
     std::uint32_t dma_control{};
@@ -90,8 +99,44 @@ struct PsxBus {
     return PsxBusAccessReason::ok;
 }
 
+[[nodiscard]] inline PsxBusAccessReason psx_bus_scratchpad_offset(
+    std::uint32_t address, std::size_t width, std::size_t& offset) noexcept {
+    std::uint32_t physical = 0;
+    if (!psx_bus_virtual_to_physical(address, physical) ||
+        physical < PsxBus::scratchpad_address) {
+        return PsxBusAccessReason::unmapped;
+    }
+
+    const auto relative = physical - PsxBus::scratchpad_address;
+    if (relative >= PsxBus::scratchpad_size ||
+        width > PsxBus::scratchpad_size - static_cast<std::size_t>(relative)) {
+        return PsxBusAccessReason::unmapped;
+    }
+    offset = static_cast<std::size_t>(relative);
+    return PsxBusAccessReason::ok;
+}
+
+[[nodiscard]] inline PsxBusReadU8Result psx_bus_read_u8(const PsxBus& bus,
+                                                         std::uint32_t address) noexcept {
+    std::uint32_t physical = 0;
+    if (!psx_bus_virtual_to_physical(address, physical)) {
+        return {PsxBusAccessReason::unmapped, 0u};
+    }
+    if (physical < PsxBus::default_ram_mirror_window) {
+        const auto offset = static_cast<std::size_t>(physical & (PsxBus::main_ram_size - 1u));
+        return {PsxBusAccessReason::ok, bus.ram[offset]};
+    }
+
+    std::size_t offset = 0;
+    if (psx_bus_scratchpad_offset(address, 1u, offset) == PsxBusAccessReason::ok) {
+        return {PsxBusAccessReason::ok, bus.scratchpad[offset]};
+    }
+    return {PsxBusAccessReason::unmapped, 0u};
+}
+
 [[nodiscard]] inline PsxBusReadU16Result psx_bus_read_u16(const PsxBus& bus,
                                                            std::uint32_t address) noexcept {
+    if ((address & 1u) != 0u) return {PsxBusAccessReason::misaligned, 0u};
     if (address == PsxBus::interrupt_status_address) {
         return {PsxBusAccessReason::ok,
                 static_cast<std::uint16_t>(bus.interrupt_status & PsxBus::interrupt_status_valid_bits)};
@@ -108,6 +153,16 @@ struct PsxBus {
                 static_cast<std::uint16_t>(bus.timer1_mode & PsxBus::timer_mode_valid_bits)};
     }
 
+    std::size_t scratchpad_offset = 0;
+    if (psx_bus_scratchpad_offset(address, 2u, scratchpad_offset) ==
+        PsxBusAccessReason::ok) {
+        const auto value = static_cast<std::uint16_t>(
+            static_cast<std::uint16_t>(bus.scratchpad[scratchpad_offset + 0u]) |
+            static_cast<std::uint16_t>(
+                static_cast<std::uint16_t>(bus.scratchpad[scratchpad_offset + 1u]) << 8u));
+        return {PsxBusAccessReason::ok, value};
+    }
+
     std::size_t offset = 0;
     const auto reason = psx_bus_ram_offset_u16(address, offset);
     if (reason != PsxBusAccessReason::ok) return {reason, 0u};
@@ -120,8 +175,19 @@ struct PsxBus {
 
 [[nodiscard]] inline PsxBusReadU32Result psx_bus_read_u32(const PsxBus& bus,
                                                            std::uint32_t address) noexcept {
+    if ((address & 3u) != 0u) return {PsxBusAccessReason::misaligned, 0u};
     if (address == PsxBus::dma_control_address) {
         return {PsxBusAccessReason::ok, bus.dma_control};
+    }
+
+    std::size_t scratchpad_offset = 0;
+    if (psx_bus_scratchpad_offset(address, 4u, scratchpad_offset) ==
+        PsxBusAccessReason::ok) {
+        const auto value = static_cast<std::uint32_t>(bus.scratchpad[scratchpad_offset + 0u]) |
+                           (static_cast<std::uint32_t>(bus.scratchpad[scratchpad_offset + 1u]) << 8u) |
+                           (static_cast<std::uint32_t>(bus.scratchpad[scratchpad_offset + 2u]) << 16u) |
+                           (static_cast<std::uint32_t>(bus.scratchpad[scratchpad_offset + 3u]) << 24u);
+        return {PsxBusAccessReason::ok, value};
     }
 
     std::size_t offset = 0;
@@ -135,9 +201,31 @@ struct PsxBus {
     return {PsxBusAccessReason::ok, value};
 }
 
+[[nodiscard]] inline PsxBusAccessReason psx_bus_write_u8(PsxBus& bus,
+                                                          std::uint32_t address,
+                                                          std::uint8_t value) noexcept {
+    std::uint32_t physical = 0;
+    if (!psx_bus_virtual_to_physical(address, physical)) {
+        return PsxBusAccessReason::unmapped;
+    }
+    if (physical < PsxBus::default_ram_mirror_window) {
+        const auto offset = static_cast<std::size_t>(physical & (PsxBus::main_ram_size - 1u));
+        bus.ram[offset] = value;
+        return PsxBusAccessReason::ok;
+    }
+
+    std::size_t offset = 0;
+    if (psx_bus_scratchpad_offset(address, 1u, offset) == PsxBusAccessReason::ok) {
+        bus.scratchpad[offset] = value;
+        return PsxBusAccessReason::ok;
+    }
+    return PsxBusAccessReason::unmapped;
+}
+
 [[nodiscard]] inline PsxBusAccessReason psx_bus_write_u16(PsxBus& bus,
                                                            std::uint32_t address,
                                                            std::uint16_t value) noexcept {
+    if ((address & 1u) != 0u) return PsxBusAccessReason::misaligned;
     if (address == PsxBus::interrupt_status_address) {
         const auto write_bits = static_cast<std::uint16_t>(value & PsxBus::interrupt_status_valid_bits);
         bus.interrupt_status = static_cast<std::uint16_t>(
@@ -158,6 +246,14 @@ struct PsxBus {
         return PsxBusAccessReason::ok;
     }
 
+    std::size_t scratchpad_offset = 0;
+    if (psx_bus_scratchpad_offset(address, 2u, scratchpad_offset) ==
+        PsxBusAccessReason::ok) {
+        bus.scratchpad[scratchpad_offset + 0u] = static_cast<std::uint8_t>(value);
+        bus.scratchpad[scratchpad_offset + 1u] = static_cast<std::uint8_t>(value >> 8u);
+        return PsxBusAccessReason::ok;
+    }
+
     std::size_t offset = 0;
     const auto reason = psx_bus_ram_offset_u16(address, offset);
     if (reason != PsxBusAccessReason::ok) return reason;
@@ -170,12 +266,23 @@ struct PsxBus {
 [[nodiscard]] inline PsxBusAccessReason psx_bus_write_u32(PsxBus& bus,
                                                            std::uint32_t address,
                                                            std::uint32_t value) noexcept {
+    if ((address & 3u) != 0u) return PsxBusAccessReason::misaligned;
     if (address == PsxBus::dma_control_address) {
         bus.dma_control = value;
         return PsxBusAccessReason::ok;
     }
     if (address == PsxBus::timer1_mode_address) {
         return psx_bus_write_u16(bus, address, static_cast<std::uint16_t>(value));
+    }
+
+    std::size_t scratchpad_offset = 0;
+    if (psx_bus_scratchpad_offset(address, 4u, scratchpad_offset) ==
+        PsxBusAccessReason::ok) {
+        bus.scratchpad[scratchpad_offset + 0u] = static_cast<std::uint8_t>(value);
+        bus.scratchpad[scratchpad_offset + 1u] = static_cast<std::uint8_t>(value >> 8u);
+        bus.scratchpad[scratchpad_offset + 2u] = static_cast<std::uint8_t>(value >> 16u);
+        bus.scratchpad[scratchpad_offset + 3u] = static_cast<std::uint8_t>(value >> 24u);
+        return PsxBusAccessReason::ok;
     }
 
     std::size_t offset = 0;
