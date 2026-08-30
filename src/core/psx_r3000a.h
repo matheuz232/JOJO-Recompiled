@@ -125,6 +125,64 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             supported = true;
             break;
         }
+        case 0x10u: // MFHI
+            write_gpr(rd, state.hi);
+            supported = true;
+            break;
+        case 0x11u: // MTHI
+            state.hi = state.gpr[rs];
+            supported = true;
+            break;
+        case 0x12u: // MFLO
+            write_gpr(rd, state.lo);
+            supported = true;
+            break;
+        case 0x13u: // MTLO
+            state.lo = state.gpr[rs];
+            supported = true;
+            break;
+        case 0x18u: { // MULT
+            const auto product = signed_value(state.gpr[rs]) * signed_value(state.gpr[rt]);
+            const auto bits = static_cast<std::uint64_t>(product);
+            state.lo = static_cast<std::uint32_t>(bits);
+            state.hi = static_cast<std::uint32_t>(bits >> 32u);
+            supported = true;
+            break;
+        }
+        case 0x19u: { // MULTU
+            const auto product = static_cast<std::uint64_t>(state.gpr[rs]) *
+                                 static_cast<std::uint64_t>(state.gpr[rt]);
+            state.lo = static_cast<std::uint32_t>(product);
+            state.hi = static_cast<std::uint32_t>(product >> 32u);
+            supported = true;
+            break;
+        }
+        case 0x1au: { // DIV
+            const auto dividend = signed_value(state.gpr[rs]);
+            const auto divisor = signed_value(state.gpr[rt]);
+            if (divisor == 0) {
+                state.lo = dividend < 0 ? 1u : 0xffffffffu;
+                state.hi = state.gpr[rs];
+            } else if (dividend == -0x80000000ll && divisor == -1) {
+                state.lo = 0x80000000u;
+                state.hi = 0u;
+            } else {
+                state.lo = static_cast<std::uint32_t>(dividend / divisor);
+                state.hi = static_cast<std::uint32_t>(dividend % divisor);
+            }
+            supported = true;
+            break;
+        }
+        case 0x1bu: // DIVU
+            if (state.gpr[rt] == 0u) {
+                state.lo = 0xffffffffu;
+                state.hi = state.gpr[rs];
+            } else {
+                state.lo = state.gpr[rs] / state.gpr[rt];
+                state.hi = state.gpr[rs] % state.gpr[rt];
+            }
+            supported = true;
+            break;
         case 0x21u: // ADDU
             write_gpr(rd, state.gpr[rs] + state.gpr[rt]);
             supported = true;
