@@ -160,6 +160,33 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         default:
             break;
         }
+    } else if (op == 0x01u) { // REGIMM branches
+        bool take_branch = false;
+        switch (rt) {
+        case 0x00u: // BLTZ
+            take_branch = signed_value(state.gpr[rs]) < 0;
+            supported = true;
+            break;
+        case 0x01u: // BGEZ
+            take_branch = signed_value(state.gpr[rs]) >= 0;
+            supported = true;
+            break;
+        case 0x10u: // BLTZAL
+            take_branch = signed_value(state.gpr[rs]) < 0;
+            write_gpr(31u, instruction_pc + 8u);
+            supported = true;
+            break;
+        case 0x11u: // BGEZAL
+            take_branch = signed_value(state.gpr[rs]) >= 0;
+            write_gpr(31u, instruction_pc + 8u);
+            supported = true;
+            break;
+        default:
+            break;
+        }
+        if (supported && take_branch) {
+            following_pc = branch_target(static_cast<std::uint16_t>(instruction));
+        }
     } else if (op == 0x04u) { // BEQ
         if (state.gpr[rs] == state.gpr[rt]) {
             following_pc = branch_target(static_cast<std::uint16_t>(instruction));
@@ -167,6 +194,16 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         supported = true;
     } else if (op == 0x05u) { // BNE
         if (state.gpr[rs] != state.gpr[rt]) {
+            following_pc = branch_target(static_cast<std::uint16_t>(instruction));
+        }
+        supported = true;
+    } else if (op == 0x06u && rt == 0u) { // BLEZ
+        if (signed_value(state.gpr[rs]) <= 0) {
+            following_pc = branch_target(static_cast<std::uint16_t>(instruction));
+        }
+        supported = true;
+    } else if (op == 0x07u && rt == 0u) { // BGTZ
+        if (signed_value(state.gpr[rs]) > 0) {
             following_pc = branch_target(static_cast<std::uint16_t>(instruction));
         }
         supported = true;
