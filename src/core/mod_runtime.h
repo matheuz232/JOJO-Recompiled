@@ -71,6 +71,17 @@ struct ModSetHashes {
     std::string gameplay_hash;
 };
 
+enum class ModSessionMode {
+    offline,
+    ranked,
+    custom,
+};
+
+struct ModSessionPolicy {
+    ModSessionMode mode{ModSessionMode::offline};
+    std::string required_mod_set_hash;
+};
+
 [[nodiscard]] Result<ModManifest> parse_mod_manifest(
     std::string_view text,
     const std::filesystem::path& root);
@@ -81,5 +92,9 @@ struct ModSetHashes {
 [[nodiscard]] Result<ModOverlay> build_mod_overlay(const ResolvedModSet& mods);
 [[nodiscard]] Result<std::string> compute_mod_content_hash(const DiscoveredMod& mod);
 [[nodiscard]] Result<ModSetHashes> compute_mod_set_hashes(const ResolvedModSet& mods);
+[[nodiscard]] Result<void> validate_mod_session(
+    const ResolvedModSet& mods,
+    const ModSetHashes& hashes,
+    const ModSessionPolicy& policy);
 
 }
