@@ -112,6 +112,20 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             following_pc = branch_target(static_cast<std::uint16_t>(instruction));
         }
         supported = true;
+    } else if (op == 0x08u) { // ADDI (overflow trap deferred until COP0 exists)
+        const auto raw_immediate = static_cast<std::uint32_t>(instruction & 0xffffu);
+        const std::int64_t lhs = state.gpr[rs] <= 0x7fffffffu
+            ? static_cast<std::int64_t>(state.gpr[rs])
+            : static_cast<std::int64_t>(state.gpr[rs]) - 0x100000000ll;
+        const std::int64_t rhs = (raw_immediate & 0x8000u) == 0u
+            ? static_cast<std::int64_t>(raw_immediate)
+            : static_cast<std::int64_t>(raw_immediate) - 0x10000ll;
+        const std::int64_t sum = lhs + rhs;
+        if (sum < -0x80000000ll || sum > 0x7fffffffll) {
+            return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, instruction};
+        }
+        write_gpr(rt, static_cast<std::uint32_t>(sum));
+        supported = true;
     } else if (op == 0x09u) { // ADDIU
         const auto signed_immediate = static_cast<std::int32_t>(
             static_cast<std::int16_t>(instruction & 0xffffu));
