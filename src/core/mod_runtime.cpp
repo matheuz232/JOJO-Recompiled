@@ -179,10 +179,11 @@ Result<ModManifest> parse_mod_manifest(std::string_view text, const std::filesys
         if (entry_it == fields.end() || entry_it->second.empty()) {
             return Result<ModManifest>::failure(ErrorCode::invalid_argument, "native mod requires entry: " + manifest.id);
         }
-        manifest.entry = std::filesystem::path(entry_it->second).lexically_normal();
-        if (!safe_relative_path(manifest.entry)) {
+        const std::filesystem::path declared_entry(entry_it->second);
+        if (!safe_relative_path(declared_entry)) {
             return Result<ModManifest>::failure(ErrorCode::invalid_argument, "unsafe native mod entry path: " + entry_it->second);
         }
+        manifest.entry = declared_entry.lexically_normal();
     } else if (entry_it != fields.end()) {
         return Result<ModManifest>::failure(ErrorCode::invalid_argument, "data mod must not declare entry: " + manifest.id);
     }
@@ -235,8 +236,28 @@ Result<ModCatalog> discover_mods(const std::filesystem::path& mods_root) {
         }
         const auto manifest_path = it->path() / "mod.ini";
         if (!std::filesystem::exists(manifest_path, ec)) {
-            if (ec) return Result<ModCatalog>::failure(ErrorCode::io_error, "failed to inspect mod manifest: " + ec.message());
+            if (ec) {
+                return Result<ModCatalog>::failure(
+                    ErrorCode::io_error,
+                    "failed to inspect mod manifest: " + ec.message());
+            }
             continue;
+        }
+        const auto manifest_status = std::filesystem::symlink_status(manifest_path, ec);
+        if (ec) {
+            return Result<ModCatalog>::failure(
+                ErrorCode::io_error,
+                "failed to inspect mod manifest: " + ec.message());
+        }
+        if (std::filesystem::is_symlink(manifest_status)) {
+            return Result<ModCatalog>::failure(
+                ErrorCode::invalid_argument,
+                "symlinked mod manifest is not allowed: " + manifest_path.string());
+        }
+        if (!std::filesystem::is_regular_file(manifest_status)) {
+            return Result<ModCatalog>::failure(
+                ErrorCode::invalid_argument,
+                "mod manifest is not a regular file: " + manifest_path.string());
         }
         const auto text = read_text_file(manifest_path);
         if (!text) return Result<ModCatalog>::failure(text.error, text.detail);

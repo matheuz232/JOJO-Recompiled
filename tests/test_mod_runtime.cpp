@@ -107,6 +107,9 @@ int main() {
     CHECK(!parse_mod_manifest(
         "id=native.escape\nname=X\nversion=1.0.0\napi_version=1.0.0\nkind=native\ngameplay=0\nentry=../evil.dll\n", "mods/bad"));
     CHECK(!parse_mod_manifest(
+        "id=native.normalized-escape\nname=X\nversion=1.0.0\napi_version=1.0.0\nkind=native\ngameplay=0\nentry=bin/../evil.dll\n",
+        "mods/bad"));
+    CHECK(!parse_mod_manifest(
         "id=future.api\nname=X\nversion=1.0.0\napi_version=2.0.0\nkind=data\ngameplay=0\n", "mods/bad"));
     CHECK(!parse_mod_manifest(
         "id=future.minor\nname=X\nversion=1.0.0\napi_version=1.1.0\nkind=data\ngameplay=0\n", "mods/bad"));
@@ -119,6 +122,27 @@ int main() {
     const auto symlink_target_root = std::filesystem::temp_directory_path() / "jojo_mod_symlink_catalog_target";
     std::filesystem::remove_all(symlink_catalog_root, ec);
     std::filesystem::remove_all(symlink_target_root, ec);
+
+    const auto symlink_manifest_root = std::filesystem::temp_directory_path() / "jojo_mod_symlink_manifest_tests";
+    const auto symlink_manifest_target = std::filesystem::temp_directory_path() / "jojo_mod_symlink_manifest_target.ini";
+    std::filesystem::remove_all(symlink_manifest_root, ec);
+    std::filesystem::remove(symlink_manifest_target, ec);
+    std::filesystem::create_directories(symlink_manifest_root / "linked", ec);
+    write_text(symlink_manifest_target, data_manifest("linked.manifest"));
+    std::error_code manifest_symlink_ec;
+    std::filesystem::create_symlink(
+        symlink_manifest_target,
+        symlink_manifest_root / "linked" / "mod.ini",
+        manifest_symlink_ec);
+    if (!manifest_symlink_ec) {
+        const auto linked_manifest_catalog = discover_mods(symlink_manifest_root);
+        CHECK(!linked_manifest_catalog);
+        if (!linked_manifest_catalog) {
+            CHECK(linked_manifest_catalog.detail.find("symlink") != std::string::npos);
+        }
+    }
+    std::filesystem::remove_all(symlink_manifest_root, ec);
+    std::filesystem::remove(symlink_manifest_target, ec);
     std::filesystem::create_directories(symlink_catalog_root, ec);
     write_text(symlink_target_root / "mod.ini", data_manifest("linked.mod"));
     std::error_code catalog_symlink_ec;
