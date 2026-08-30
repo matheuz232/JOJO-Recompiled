@@ -105,6 +105,33 @@ static void test_jr_preserves_delay_slot_then_uses_register_target() {
     CHECK(state.pc == 0x000000a0u);
 }
 
+static void test_jalr_links_and_preserves_delay_slot() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x8003c4b8u);
+    state.gpr[10] = 0x80042000u;
+
+    const auto result = jojo::step_psx_r3000a(state, encode_r(10, 0, 31, 0, 0x09));
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[31] == 0x8003c4c0u);
+    CHECK(state.pc == 0x8003c4bcu);
+    CHECK(state.next_pc == 0x80042000u);
+
+    CHECK(jojo::step_psx_r3000a(state, 0u).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.pc == 0x80042000u);
+}
+
+static void test_jalr_reads_target_before_writing_same_register_link() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x00004000u);
+    state.gpr[5] = 0x80022220u;
+
+    const auto result = jojo::step_psx_r3000a(state, encode_r(5, 0, 5, 0, 0x09));
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[5] == 0x00004008u);
+    CHECK(state.pc == 0x00004004u);
+    CHECK(state.next_pc == 0x80022220u);
+}
+
 static void test_bne_taken_preserves_delay_slot() {
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x3000u);
@@ -229,6 +256,8 @@ int main() {
     test_or_combines_register_bits();
     test_srl_zero_fills_high_bits();
     test_jr_preserves_delay_slot_then_uses_register_target();
+    test_jalr_links_and_preserves_delay_slot();
+    test_jalr_reads_target_before_writing_same_register_link();
     test_bne_taken_preserves_delay_slot();
     test_main_ram_is_two_megabytes_and_zero_initialized();
     test_ram_kuseg_kseg0_kseg1_and_default_8mb_window_alias_storage();
