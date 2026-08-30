@@ -249,6 +249,10 @@ add_executable(jojo_online_tests tests/test_online.cpp)
 target_link_libraries(jojo_online_tests PRIVATE jojo_core)
 add_test(NAME jojo_online_tests COMMAND jojo_online_tests)
 
+add_executable(jojo_online_hardening_tests tests/test_online_hardening.cpp)
+target_link_libraries(jojo_online_hardening_tests PRIVATE jojo_core)
+add_test(NAME jojo_online_hardening_tests COMMAND jojo_online_hardening_tests)
+
 add_executable(jojo_mod_policy_tests tests/test_mod_policy.cpp)
 target_link_libraries(jojo_mod_policy_tests PRIVATE jojo_core)
 add_test(NAME jojo_mod_policy_tests COMMAND jojo_mod_policy_tests)
