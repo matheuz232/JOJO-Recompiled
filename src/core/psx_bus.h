@@ -1,7 +1,7 @@
 #pragma once
-#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace jojo {
 
@@ -19,7 +19,7 @@ struct PsxBusReadU32Result {
 struct PsxBus {
     static constexpr std::size_t main_ram_size = 2u * 1024u * 1024u;
     static constexpr std::uint32_t default_ram_mirror_window = 8u * 1024u * 1024u;
-    std::array<std::uint8_t, main_ram_size> ram{};
+    std::vector<std::uint8_t> ram = std::vector<std::uint8_t>(main_ram_size, 0u);
 };
 
 [[nodiscard]] inline bool psx_bus_virtual_to_physical(std::uint32_t address,
