@@ -217,6 +217,10 @@ add_executable(jojo_mod_runtime_tests tests/test_mod_runtime.cpp)
 target_link_libraries(jojo_mod_runtime_tests PRIVATE jojo_core)
 add_test(NAME jojo_mod_runtime_tests COMMAND jojo_mod_runtime_tests)
 
+add_executable(jojo_m5_settings_input_tests tests/test_m5_settings_input.cpp)
+target_link_libraries(jojo_m5_settings_input_tests PRIVATE jojo_core)
+add_test(NAME jojo_m5_settings_input_tests COMMAND jojo_m5_settings_input_tests)
+
 add_executable(jojo_mod_policy_tests tests/test_mod_policy.cpp)
 target_link_libraries(jojo_mod_policy_tests PRIVATE jojo_core)
 add_test(NAME jojo_mod_policy_tests COMMAND jojo_mod_policy_tests)
