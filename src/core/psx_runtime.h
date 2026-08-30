@@ -4,6 +4,7 @@
 #include "core/psx_r3000a.h"
 #include "core/psx_system_cnf.h"
 #include "core/result.h"
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -40,7 +41,7 @@ struct PsxRuntime {
                                      "PS-X EXE payload would wrap across mirrored main RAM");
     }
 
-    runtime.bus.ram.fill(0u);
+    std::fill(runtime.bus.ram.begin(), runtime.bus.ram.end(), 0u);
     for (std::size_t i = 0; i < payload_size; ++i) {
         runtime.bus.ram[static_cast<std::size_t>(physical_offset) + i] = file[header_size + i];
     }
