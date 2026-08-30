@@ -7,7 +7,7 @@
 
 namespace {
 int failures = 0;
-#define CHECK(expr) do { if (!(expr)) { std::cerr << __FILE__ << ':' << __LINE__ << " CHECK failed: " #expr "\n"; ++failures; } } while (0)
+#define CHECK(...) do { if (!(__VA_ARGS__)) { std::cerr << __FILE__ << ':' << __LINE__ << " CHECK failed: " #__VA_ARGS__ "\n"; ++failures; } } while (0)
 
 bool near(double a, double b, double eps = 0.001) {
     return std::fabs(a - b) <= eps;
