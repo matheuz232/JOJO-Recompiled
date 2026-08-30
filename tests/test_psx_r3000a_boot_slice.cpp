@@ -23,6 +23,15 @@ static std::uint32_t encode_i(std::uint8_t op, std::uint8_t rs, std::uint8_t rt,
            imm;
 }
 
+static std::uint32_t encode_cop0(std::uint8_t rs, std::uint8_t rt,
+                                 std::uint8_t rd, std::uint16_t low = 0u) {
+    return (0x10u << 26u) |
+           (static_cast<std::uint32_t>(rs) << 21u) |
+           (static_cast<std::uint32_t>(rt) << 16u) |
+           (static_cast<std::uint32_t>(rd) << 11u) |
+           low;
+}
+
 static void test_lui_and_addiu_build_boot_addresses() {
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x8001000cu);
@@ -142,6 +151,43 @@ static void test_cop0_interrupt_mask_eligibility() {
     CHECK(!jojo::psx_r3000a_interrupt_pending(state));
     state.cop0.status = 1u | (1u << 11u);
     CHECK(!jojo::psx_r3000a_interrupt_pending(state));
+}
+
+static void test_cop0_moves_load_delay_and_rfe_status_restore() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80014000u);
+    state.gpr[2] = 0x0000ff3fu;
+
+    CHECK(jojo::step_psx_r3000a(state, encode_cop0(0x04, 2, 12)).reason ==
+          jojo::PsxR3000aStepReason::ok); // MTC0 Status
+    CHECK(state.cop0.status == 0x0000ff3fu);
+
+    state.gpr[3] = 0x11111111u;
+    CHECK(jojo::step_psx_r3000a(state, encode_cop0(0x00, 3, 12)).reason ==
+          jojo::PsxR3000aStepReason::ok); // MFC0 Status
+    CHECK(state.gpr[3] == 0x11111111u);
+    CHECK(state.pending_load_value == 0x0000ff3fu);
+    CHECK(jojo::step_psx_r3000a(state, encode_r(3, 0, 4, 0, 0x21)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[4] == 0x11111111u);
+    CHECK(state.gpr[3] == 0x0000ff3fu);
+
+    state.cop0.cause = 1u << 10u;
+    state.gpr[2] = 0xffffffffu;
+    CHECK(jojo::step_psx_r3000a(state, encode_cop0(0x04, 2, 13)).reason ==
+          jojo::PsxR3000aStepReason::ok); // only software IP bits are writable
+    CHECK((state.cop0.cause & 0x00000700u) == 0x00000700u);
+
+    state.cop0.status = 0x0000003cu;
+    CHECK(jojo::step_psx_r3000a(state, 0x42000010u).reason ==
+          jojo::PsxR3000aStepReason::ok); // RFE
+    CHECK((state.cop0.status & 0x3fu) == 0x3fu);
+
+    state.gpr[5] = 0xaaaaaaaau;
+    CHECK(jojo::step_psx_r3000a(state, encode_cop0(0x00, 5, 15)).reason ==
+          jojo::PsxR3000aStepReason::ok); // MFC0 PRID
+    CHECK(jojo::step_psx_r3000a(state, 0u).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[5] == 2u);
 }
 
 static void test_or_combines_register_bits() {
@@ -767,6 +813,7 @@ int main() {
     test_signed_add_sub_results_and_overflow_stop();
     test_cop0_exception_entry_tracks_branch_delay_and_status_stack();
     test_cop0_interrupt_mask_eligibility();
+    test_cop0_moves_load_delay_and_rfe_status_restore();
     test_or_combines_register_bits();
     test_srl_zero_fills_high_bits();
     test_arithmetic_and_variable_shifts_use_r3000a_rules();
