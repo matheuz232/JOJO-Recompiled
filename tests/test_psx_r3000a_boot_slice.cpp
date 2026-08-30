@@ -45,6 +45,29 @@ static void test_addiu_sign_extends_immediate() {
     CHECK(state.gpr[5] == 0x0ffcu);
 }
 
+static void test_addi_sign_extends_and_advances() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x8001009cu);
+    state.gpr[4] = 0x00001000u;
+
+    const auto result = jojo::step_psx_r3000a(state, encode_i(0x08, 4, 4, 0xfffcu));
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[4] == 0x00000ffcu);
+    CHECK(state.pc == 0x800100a0u);
+}
+
+static void test_addi_overflow_stops_without_corrupting_state() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x8001009cu);
+    state.gpr[4] = 0x7fffffffu;
+
+    const auto result = jojo::step_psx_r3000a(state, encode_i(0x08, 4, 4, 1u));
+    CHECK(result.reason == jojo::PsxR3000aStepReason::unsupported_instruction);
+    CHECK(state.gpr[4] == 0x7fffffffu);
+    CHECK(state.pc == 0x8001009cu);
+    CHECK(state.next_pc == 0x800100a0u);
+}
+
 static void test_sltu_uses_unsigned_comparison() {
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x2000u);
@@ -221,6 +244,8 @@ static void test_lw_memory_fault_does_not_advance_or_modify_target() {
 int main() {
     test_lui_and_addiu_build_boot_addresses();
     test_addiu_sign_extends_immediate();
+    test_addi_sign_extends_and_advances();
+    test_addi_overflow_stops_without_corrupting_state();
     test_sltu_uses_unsigned_comparison();
     test_or_combines_register_bits();
     test_srl_zero_fills_high_bits();
