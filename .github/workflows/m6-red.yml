@@ -5,12 +5,16 @@ on:
     branches: [feature/m6-mod-runtime]
     paths:
       - 'tests/test_semver.cpp'
+      - 'src/core/semver.h'
+      - 'src/core/semver.cpp'
       - '.github/workflows/m6-red.yml'
 
 jobs:
-  semver-red:
+  semver-green:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Compile SemVer RED
-        run: c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc -c tests/test_semver.cpp -o /tmp/test_semver.o
+      - name: Build SemVer test
+        run: c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc tests/test_semver.cpp src/core/semver.cpp -o /tmp/test_semver
+      - name: Run SemVer test
+        run: /tmp/test_semver
