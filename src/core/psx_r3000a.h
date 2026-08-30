@@ -142,6 +142,9 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             static_cast<std::int16_t>(instruction & 0xffffu));
         write_gpr(rt, state.gpr[rs] + static_cast<std::uint32_t>(signed_immediate));
         supported = true;
+    } else if (op == 0x0du) { // ORI
+        write_gpr(rt, state.gpr[rs] | (instruction & 0xffffu));
+        supported = true;
     } else if (op == 0x0fu) { // LUI
         write_gpr(rt, (instruction & 0xffffu) << 16u);
         supported = true;
