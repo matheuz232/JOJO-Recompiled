@@ -1,12 +1,14 @@
 #ifdef _WIN32
 
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include "platform/windows/udp_transport_win32.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
 #include <array>
+#include <cstring>
 #include <limits>
 #include <string>
 #include <utility>
@@ -63,7 +65,7 @@ Result<ResolvedAddress> resolve_numeric_endpoint(
     }
 
     ResolvedAddress resolved{};
-    if (addresses->ai_addrlen > static_cast<int>(sizeof(resolved.storage))) {
+    if (addresses->ai_addrlen > sizeof(resolved.storage)) {
         freeaddrinfo(addresses);
         return Result<ResolvedAddress>::failure(
             ErrorCode::invalid_argument,
