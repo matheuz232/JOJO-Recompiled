@@ -153,18 +153,21 @@ Completion evidence is tracked in [`../superpowers/plans/2026-08-30-rollback-net
 
 M8 completion closes the reusable **rollback/networking core contract**. The wire layer is intentionally UDP-oriented and platform-socket independent so platform hosts can exchange datagrams without allowing networking APIs to own gameplay state. It does **not** claim public matchmaking, relay/NAT traversal, production socket threading, account services, encryption/key exchange or a commercial revision's full deterministic gameplay-state adapter. No implementation promises zero latency: physical RTT, jitter and packet loss remain external constraints.
 
-### M9 — Online product modes
+### M9 — Online product modes — Complete (100%)
 
-In-game Online menu:
+Completion evidence is tracked in [`../superpowers/plans/2026-08-30-online-product-modes.md`](../superpowers/plans/2026-08-30-online-product-modes.md) and [`../superpowers/plans/2026-08-30-online-product-modes-verification.md`](../superpowers/plans/2026-08-30-online-product-modes-verification.md).
 
-- Casual matchmaking;
-- Competitive/ranked matchmaking;
-- Direct 1v1 rooms/invites;
-- Custom matches with rules/mod policy;
-- profile/history/replays;
-- network settings and telemetry.
+- [x] Stable in-game Online product model for Casual, Ranked, Direct 1v1 and Custom match modes.
+- [x] Match rules plus rollback/input-delay/telemetry settings with deterministic validation boundaries.
+- [x] Ranked and custom/direct mod legality delegates to the existing M6 policy; gameplay-changing mods are rejected from Ranked and exact mod-set compatibility is supported.
+- [x] Backend-independent matchmaking orchestration plus validated Direct room descriptors and invite-code joining.
+- [x] Profile data and bounded match history with duplicate-ID/round validation and oldest-entry eviction.
+- [x] Versioned deterministic replay serialization for frame inputs, hashes and portable metadata only, with malformed/truncated/trailing-data rejection.
+- [x] Connection quality uses RTT, jitter, packet loss, prediction rate and rollback depth rather than ping alone.
+- [x] Every connection indicator exposes a non-color signal token plus text, with connected, reconnecting, disconnected and voluntary-left states kept distinct.
+- [x] Linux portable-core and Windows x64/MSVC build/test coverage, including Windows executable artifact upload.
 
-Every player connection exposes a compact signal icon plus text state. Quality is computed from RTT, jitter, packet loss and rollback behavior, not ping alone. Disconnect, reconnecting and voluntary leave are distinct states.
+M9 completion closes the reusable **Online product/orchestration contract**. Public account services, a production matchmaking fleet, relay/NAT traversal, encryption/key exchange, production socket threading and commercial-game Online UI rendering are intentionally outside this portable milestone and are not claimed as live.
 
 ## Architectural rules
 
