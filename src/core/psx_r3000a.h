@@ -69,6 +69,21 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         return instruction_pc + 4u + static_cast<std::uint32_t>(displacement);
     };
 
+    const auto signed_value = [](std::uint32_t value) noexcept -> std::int64_t {
+        return value <= 0x7fffffffu
+            ? static_cast<std::int64_t>(value)
+            : static_cast<std::int64_t>(value) - 0x100000000ll;
+    };
+
+    const auto arithmetic_shift_right = [](std::uint32_t value,
+                                            std::uint32_t shift) noexcept {
+        shift &= 0x1fu;
+        if (shift == 0u) return value;
+        const auto shifted = value >> shift;
+        if ((value & 0x80000000u) == 0u) return shifted;
+        return shifted | (~std::uint32_t{0} << (32u - shift));
+    };
+
     if (op == 0u) {
         const auto rd = static_cast<std::uint8_t>((instruction >> 11u) & 0x1fu);
         const auto shamt = static_cast<std::uint8_t>((instruction >> 6u) & 0x1fu);
@@ -83,8 +98,20 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             write_gpr(rd, state.gpr[rt] >> shamt);
             supported = true;
             break;
+        case 0x03u: // SRA
+            write_gpr(rd, arithmetic_shift_right(state.gpr[rt], shamt));
+            supported = true;
+            break;
         case 0x04u: // SLLV
             write_gpr(rd, state.gpr[rt] << (state.gpr[rs] & 0x1fu));
+            supported = true;
+            break;
+        case 0x06u: // SRLV
+            write_gpr(rd, state.gpr[rt] >> (state.gpr[rs] & 0x1fu));
+            supported = true;
+            break;
+        case 0x07u: // SRAV
+            write_gpr(rd, arithmetic_shift_right(state.gpr[rt], state.gpr[rs]));
             supported = true;
             break;
         case 0x08u: // JR
@@ -106,8 +133,24 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             write_gpr(rd, state.gpr[rs] - state.gpr[rt]);
             supported = true;
             break;
+        case 0x24u: // AND
+            write_gpr(rd, state.gpr[rs] & state.gpr[rt]);
+            supported = true;
+            break;
         case 0x25u: // OR
             write_gpr(rd, state.gpr[rs] | state.gpr[rt]);
+            supported = true;
+            break;
+        case 0x26u: // XOR
+            write_gpr(rd, state.gpr[rs] ^ state.gpr[rt]);
+            supported = true;
+            break;
+        case 0x27u: // NOR
+            write_gpr(rd, ~(state.gpr[rs] | state.gpr[rt]));
+            supported = true;
+            break;
+        case 0x2au: // SLT
+            write_gpr(rd, signed_value(state.gpr[rs]) < signed_value(state.gpr[rt]) ? 1u : 0u);
             supported = true;
             break;
         case 0x2bu: // SLTU
@@ -146,11 +189,23 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             static_cast<std::int16_t>(instruction & 0xffffu));
         write_gpr(rt, state.gpr[rs] + static_cast<std::uint32_t>(signed_immediate));
         supported = true;
+    } else if (op == 0x0au) { // SLTI
+        const auto immediate = static_cast<std::int16_t>(instruction & 0xffffu);
+        write_gpr(rt, signed_value(state.gpr[rs]) < static_cast<std::int64_t>(immediate) ? 1u : 0u);
+        supported = true;
+    } else if (op == 0x0bu) { // SLTIU
+        const auto immediate = static_cast<std::int32_t>(
+            static_cast<std::int16_t>(instruction & 0xffffu));
+        write_gpr(rt, state.gpr[rs] < static_cast<std::uint32_t>(immediate) ? 1u : 0u);
+        supported = true;
     } else if (op == 0x0cu) { // ANDI
         write_gpr(rt, state.gpr[rs] & (instruction & 0xffffu));
         supported = true;
     } else if (op == 0x0du) { // ORI
         write_gpr(rt, state.gpr[rs] | (instruction & 0xffffu));
+        supported = true;
+    } else if (op == 0x0eu) { // XORI
+        write_gpr(rt, state.gpr[rs] ^ (instruction & 0xffffu));
         supported = true;
     } else if (op == 0x0fu) { // LUI
         write_gpr(rt, (instruction & 0xffffu) << 16u);
