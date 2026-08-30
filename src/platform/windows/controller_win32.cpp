@@ -108,4 +108,6 @@ std::vector<InputDevice> enumerate_input_devices() {
     }
     return unique;
 }
+
+}
 #endif
