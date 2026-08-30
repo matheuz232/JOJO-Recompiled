@@ -26,6 +26,12 @@ jobs:
         run: cmake --build build/psx_interrupt_mask --parallel 2
       - name: Test PSX I_MASK contract
         run: ./build/psx_interrupt_mask/jojo_psx_interrupt_mask_tests
+      - name: Configure PSX I_STAT contract
+        run: cmake -S tests/psx_interrupt_status -B build/psx_interrupt_status -DCMAKE_BUILD_TYPE=Release
+      - name: Build PSX I_STAT contract
+        run: cmake --build build/psx_interrupt_status --parallel 2
+      - name: Test PSX I_STAT contract
+        run: ./build/psx_interrupt_status/jojo_psx_interrupt_status_tests
       - name: Configure R3000A frontier contract
         run: cmake -S tests/psx_r3000a_frontier -B build/psx_r3000a_frontier -DCMAKE_BUILD_TYPE=Release
       - name: Build R3000A frontier contract
@@ -58,6 +64,12 @@ jobs:
         run: cmake --build build/psx_interrupt_mask --config Release --parallel 2
       - name: Test PSX I_MASK contract
         run: .\build\psx_interrupt_mask\Release\jojo_psx_interrupt_mask_tests.exe
+      - name: Configure PSX I_STAT contract
+        run: cmake -S tests/psx_interrupt_status -B build/psx_interrupt_status -G "Visual Studio 17 2022" -A x64
+      - name: Build PSX I_STAT contract
+        run: cmake --build build/psx_interrupt_status --config Release --parallel 2
+      - name: Test PSX I_STAT contract
+        run: .\build\psx_interrupt_status\Release\jojo_psx_interrupt_status_tests.exe
       - name: Configure R3000A frontier contract
         run: cmake -S tests/psx_r3000a_frontier -B build/psx_r3000a_frontier -G "Visual Studio 17 2022" -A x64
       - name: Build R3000A frontier contract
