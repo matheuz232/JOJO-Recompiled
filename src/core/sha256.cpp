@@ -52,11 +52,11 @@ Result<Sha256Digest> Sha256Hasher::finalize() noexcept {
     const std::uint64_t bit_length = total_bytes_ * 8u;
     buffer_[buffer_size_++] = 0x80u;
     if (buffer_size_ > 56u) {
-        std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_), buffer_.end(), 0u);
+        std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_), buffer_.end(), std::uint8_t{0});
         transform(buffer_.data());
         buffer_size_ = 0u;
     }
-    std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_), buffer_.begin() + 56, 0u);
+    std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_), buffer_.begin() + 56, std::uint8_t{0});
     for (unsigned i = 0; i < 8; ++i) {
         buffer_[63u - i] = static_cast<std::uint8_t>(bit_length >> (i * 8u));
     }
