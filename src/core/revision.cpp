@@ -1,4 +1,5 @@
 #include "core/revision.h"
+#include "core/psx_exe.h"
 #include "core/psx_system_cnf.h"
 #include <algorithm>
 #include <charconv>
@@ -111,6 +112,13 @@ Result<std::string> normalize_boot_path(std::string_view value) {
     return Result<std::string>::success(std::move(path));
 }
 
+std::uint32_t read_le32(std::span<const std::uint8_t> file, std::size_t offset) noexcept {
+    return static_cast<std::uint32_t>(file[offset]) |
+           (static_cast<std::uint32_t>(file[offset + 1u]) << 8u) |
+           (static_cast<std::uint32_t>(file[offset + 2u]) << 16u) |
+           (static_cast<std::uint32_t>(file[offset + 3u]) << 24u);
+}
+
 }
 
 Result<PsxSystemCnf> parse_psx_system_cnf(std::string_view text) {
@@ -185,6 +193,58 @@ Result<PsxSystemCnf> parse_psx_system_cnf(std::string_view text) {
                                              "SYSTEM.CNF is missing BOOT entry");
     }
     return Result<PsxSystemCnf>::success(std::move(result));
+}
+
+Result<PsxExeHeader> parse_psx_exe(std::span<const std::uint8_t> file) {
+    constexpr std::size_t header_size = 0x800u;
+    constexpr char magic[] = "PS-X EXE";
+
+    if (file.size() < header_size) {
+        return Result<PsxExeHeader>::failure(ErrorCode::invalid_installation,
+                                             "PS-X EXE file is shorter than its 0x800-byte header");
+    }
+    for (std::size_t i = 0; i < sizeof(magic) - 1u; ++i) {
+        if (file[i] != static_cast<std::uint8_t>(magic[i])) {
+            return Result<PsxExeHeader>::failure(ErrorCode::invalid_installation,
+                                                 "PlayStation executable is missing PS-X EXE magic");
+        }
+    }
+
+    PsxExeHeader header{};
+    header.initial_pc = read_le32(file, 0x10u);
+    header.initial_gp = read_le32(file, 0x14u);
+    header.load_address = read_le32(file, 0x18u);
+    header.payload_size = read_le32(file, 0x1cu);
+    header.data_start = read_le32(file, 0x20u);
+    header.data_size = read_le32(file, 0x24u);
+    header.bss_start = read_le32(file, 0x28u);
+    header.bss_size = read_le32(file, 0x2cu);
+    header.stack_base = read_le32(file, 0x30u);
+    header.stack_offset = read_le32(file, 0x34u);
+
+    if ((header.payload_size % 0x800u) != 0u) {
+        return Result<PsxExeHeader>::failure(ErrorCode::invalid_installation,
+                                             "PS-X EXE payload size is not 0x800-byte aligned");
+    }
+    if (file.size() - header_size != static_cast<std::size_t>(header.payload_size)) {
+        return Result<PsxExeHeader>::failure(ErrorCode::invalid_installation,
+                                             "PS-X EXE payload size does not match file size");
+    }
+
+    const auto load_begin = static_cast<std::uint64_t>(header.load_address);
+    const auto load_end = load_begin + static_cast<std::uint64_t>(header.payload_size);
+    constexpr std::uint64_t address_space_end = 0x1'0000'0000ull;
+    if (load_end > address_space_end) {
+        return Result<PsxExeHeader>::failure(ErrorCode::invalid_installation,
+                                             "PS-X EXE load range overflows the 32-bit address space");
+    }
+    const auto pc = static_cast<std::uint64_t>(header.initial_pc);
+    if (pc < load_begin || pc >= load_end) {
+        return Result<PsxExeHeader>::failure(ErrorCode::invalid_installation,
+                                             "PS-X EXE initial PC is outside the loaded payload");
+    }
+
+    return Result<PsxExeHeader>::success(header);
 }
 
 Result<GameRevisionMatch> identify_game_revision(
