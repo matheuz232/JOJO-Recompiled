@@ -17,7 +17,8 @@ M7 implements the reusable deterministic training runtime defined by `docs/super
 
 - RED run `33295770713` at `2dcd1281a937f6328d0ac4fde9d4de90ed347558`: the permanent `tests/test_training.cpp` contract failed on Linux exactly because `core/training.h` did not exist. The temporary RED workflow was removed before final integration.
 - GREEN build run `33295869315` at `6f014a0724364201e5c0bea9136d0e9dbedbe127`: Portable core / Linux configured, built and passed CTest; Windows x64 / MSVC 2022 configured, built Release, passed CTest and uploaded the single executable artifact.
-- GREEN Windows artifact: `JOJO-Recompiled-Windows-x64`, artifact `9727410426`, digest `sha256:173b964368b44f0dd28d927478648fa5f38dc5868400b0836e8964a0f5bd9ef1`.
+- Final pre-PR verification run `33296019892` at `76ad7115e20fc523cbad11d792daffb362ac6dff`: Portable core / Linux and Windows x64 / MSVC 2022 both completed successfully, including CTest and Windows executable upload.
+- Final pre-PR Windows artifact: `JOJO-Recompiled-Windows-x64`, artifact `9727451760`, digest `sha256:ddff024451d418e085f05759992248e5158ce867af4019eca26bd67cac9b7dea`.
 - Final cleanup removed `.github/workflows/m7-red.yml`; the normal build workflow is the only permanent CI path.
 
 ## Readiness boundary
