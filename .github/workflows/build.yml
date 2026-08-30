@@ -20,6 +20,14 @@ jobs:
         run: cmake --build build --parallel 2
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Build R1 media probe
+        run: c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc tools/r1_media_probe.cpp build/libjojo_core.a -ldl -o build/jojo_r1_media_probe
+      - name: Upload R1 media probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: JOJO-R1-Media-Probe-Linux
+          path: build/jojo_r1_media_probe
+          if-no-files-found: error
 
   windows-x64:
     name: Windows x64 / MSVC 2022
