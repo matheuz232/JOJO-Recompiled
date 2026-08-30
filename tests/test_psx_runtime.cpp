@@ -129,12 +129,27 @@ static void test_fetch_fault_is_explicit_and_does_not_advance_pc() {
     CHECK(runtime.cpu.next_pc == 0x1f801004u);
 }
 
+static void test_bios_vectors_are_boundaries_not_executable_ram() {
+    constexpr std::uint32_t vectors[] = {0x000000a0u, 0x000000b0u, 0x000000c0u};
+    for (const auto vector : vectors) {
+        jojo::PsxRuntime runtime{};
+        jojo::reset_psx_r3000a(runtime.cpu, vector);
+        runtime.cpu.gpr[9] = 0x7fu;
+
+        const auto result = jojo::step_psx_runtime(runtime);
+        CHECK(result.reason == jojo::PsxR3000aStepReason::unsupported_instruction);
+        CHECK(runtime.cpu.pc == vector);
+        CHECK(runtime.cpu.next_pc == vector + 4u);
+    }
+}
+
 int main() {
     test_loader_copies_payload_and_initializes_boot_registers();
     test_system_cnf_stack_overrides_exe_stack_and_zero_falls_back();
     test_runtime_fetches_and_executes_instructions_from_ram();
     test_loader_rejects_payload_outside_main_ram_window();
     test_fetch_fault_is_explicit_and_does_not_advance_pc();
+    test_bios_vectors_are_boundaries_not_executable_ram();
     if (failures) return 1;
     std::cout << "PS-X EXE runtime loading/fetch assertions passed\n";
     return 0;
