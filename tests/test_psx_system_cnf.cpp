@@ -1,6 +1,9 @@
 #include "core/psx_system_cnf.h"
+#include "core/psx_exe.h"
+#include <cstdint>
 #include <iostream>
 #include <string_view>
+#include <vector>
 
 static int failures = 0;
 
@@ -74,6 +77,97 @@ static void test_rejects_embedded_nul() {
     if (!parsed) CHECK(parsed.error == jojo::ErrorCode::invalid_installation);
 }
 
+static void le32(std::vector<std::uint8_t>& file, std::size_t offset, std::uint32_t value) {
+    file[offset + 0] = static_cast<std::uint8_t>(value);
+    file[offset + 1] = static_cast<std::uint8_t>(value >> 8u);
+    file[offset + 2] = static_cast<std::uint8_t>(value >> 16u);
+    file[offset + 3] = static_cast<std::uint8_t>(value >> 24u);
+}
+
+static std::vector<std::uint8_t> synthetic_psx_exe(std::size_t payload_size = 0x800u) {
+    std::vector<std::uint8_t> file(0x800u + payload_size, 0);
+    constexpr char magic[] = "PS-X EXE";
+    for (std::size_t i = 0; i < sizeof(magic) - 1; ++i) {
+        file[i] = static_cast<std::uint8_t>(magic[i]);
+    }
+    le32(file, 0x10, 0x8001000cu);
+    le32(file, 0x14, 0x80020000u);
+    le32(file, 0x18, 0x80010000u);
+    le32(file, 0x1c, static_cast<std::uint32_t>(payload_size));
+    le32(file, 0x20, 0x80030000u);
+    le32(file, 0x24, 0x20u);
+    le32(file, 0x28, 0x80040000u);
+    le32(file, 0x2c, 0x40u);
+    le32(file, 0x30, 0x801ffff0u);
+    le32(file, 0x34, 0x10u);
+    return file;
+}
+
+static void test_psx_exe_parses_header_and_payload_contract() {
+    const auto file = synthetic_psx_exe();
+    const auto parsed = jojo::parse_psx_exe(file);
+    CHECK(parsed);
+    if (parsed) {
+        CHECK(parsed.value.initial_pc == 0x8001000cu);
+        CHECK(parsed.value.initial_gp == 0x80020000u);
+        CHECK(parsed.value.load_address == 0x80010000u);
+        CHECK(parsed.value.payload_size == 0x800u);
+        CHECK(parsed.value.data_start == 0x80030000u);
+        CHECK(parsed.value.data_size == 0x20u);
+        CHECK(parsed.value.bss_start == 0x80040000u);
+        CHECK(parsed.value.bss_size == 0x40u);
+        CHECK(parsed.value.stack_base == 0x801ffff0u);
+        CHECK(parsed.value.stack_offset == 0x10u);
+    }
+}
+
+static void test_psx_exe_rejects_short_file() {
+    const std::vector<std::uint8_t> file(0x7ffu, 0);
+    const auto parsed = jojo::parse_psx_exe(file);
+    CHECK(!parsed);
+    if (!parsed) CHECK(parsed.error == jojo::ErrorCode::invalid_installation);
+}
+
+static void test_psx_exe_rejects_bad_magic() {
+    auto file = synthetic_psx_exe();
+    file[0] = 'X';
+    const auto parsed = jojo::parse_psx_exe(file);
+    CHECK(!parsed);
+    if (!parsed) CHECK(parsed.error == jojo::ErrorCode::invalid_installation);
+}
+
+static void test_psx_exe_rejects_non_aligned_payload() {
+    auto file = synthetic_psx_exe(0x801u);
+    const auto parsed = jojo::parse_psx_exe(file);
+    CHECK(!parsed);
+    if (!parsed) CHECK(parsed.error == jojo::ErrorCode::invalid_installation);
+}
+
+static void test_psx_exe_rejects_declared_size_mismatch() {
+    auto file = synthetic_psx_exe();
+    le32(file, 0x1c, 0x1000u);
+    const auto parsed = jojo::parse_psx_exe(file);
+    CHECK(!parsed);
+    if (!parsed) CHECK(parsed.error == jojo::ErrorCode::invalid_installation);
+}
+
+static void test_psx_exe_rejects_pc_outside_loaded_payload() {
+    auto file = synthetic_psx_exe();
+    le32(file, 0x10, 0x80010800u);
+    const auto parsed = jojo::parse_psx_exe(file);
+    CHECK(!parsed);
+    if (!parsed) CHECK(parsed.error == jojo::ErrorCode::invalid_installation);
+}
+
+static void test_psx_exe_rejects_load_address_overflow() {
+    auto file = synthetic_psx_exe();
+    le32(file, 0x10, 0xfffffff0u);
+    le32(file, 0x18, 0xfffffff0u);
+    const auto parsed = jojo::parse_psx_exe(file);
+    CHECK(!parsed);
+    if (!parsed) CHECK(parsed.error == jojo::ErrorCode::invalid_installation);
+}
+
 int main() {
     test_parses_supported_disc_shape();
     test_accepts_case_insensitive_keys_and_lf();
@@ -83,10 +177,17 @@ int main() {
     test_rejects_parent_traversal();
     test_rejects_invalid_hex_fields();
     test_rejects_embedded_nul();
+    test_psx_exe_parses_header_and_payload_contract();
+    test_psx_exe_rejects_short_file();
+    test_psx_exe_rejects_bad_magic();
+    test_psx_exe_rejects_non_aligned_payload();
+    test_psx_exe_rejects_declared_size_mismatch();
+    test_psx_exe_rejects_pc_outside_loaded_payload();
+    test_psx_exe_rejects_load_address_overflow();
     if (failures) {
         std::cerr << failures << " test assertion(s) failed\n";
         return 1;
     }
-    std::cout << "PS1 SYSTEM.CNF assertions passed\n";
+    std::cout << "PS1 intake parser assertions passed\n";
     return 0;
 }
