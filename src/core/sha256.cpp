@@ -24,116 +24,110 @@ constexpr std::uint32_t rotr(std::uint32_t x, unsigned n) noexcept {
     return (x >> n) | (x << (32u - n));
 }
 
-class Sha256State {
-public:
-    Sha256State() = default;
+}
 
-    void update(std::span<const std::uint8_t> bytes) noexcept {
-        total_bytes_ += bytes.size();
-        while (!bytes.empty()) {
-            const std::size_t take = std::min<std::size_t>(64u - buffer_size_, bytes.size());
-            std::copy_n(bytes.begin(), take, buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_));
-            buffer_size_ += take;
-            bytes = bytes.subspan(take);
-            if (buffer_size_ == 64u) {
-                transform(buffer_.data());
-                buffer_size_ = 0u;
-            }
-        }
+Result<void> Sha256Hasher::update(std::span<const std::uint8_t> bytes) noexcept {
+    if (finalized_) {
+        return Result<void>::failure(ErrorCode::invalid_argument, "SHA-256 hasher is already finalized");
     }
-
-    Sha256Digest finalize() noexcept {
-        const std::uint64_t bit_length = total_bytes_ * 8u;
-        buffer_[buffer_size_++] = 0x80u;
-        if (buffer_size_ > 56u) {
-            std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_), buffer_.end(), 0u);
+    total_bytes_ += bytes.size();
+    while (!bytes.empty()) {
+        const std::size_t take = std::min<std::size_t>(64u - buffer_size_, bytes.size());
+        std::copy_n(bytes.begin(), take, buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_));
+        buffer_size_ += take;
+        bytes = bytes.subspan(take);
+        if (buffer_size_ == 64u) {
             transform(buffer_.data());
             buffer_size_ = 0u;
         }
-        std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_), buffer_.begin() + 56, 0u);
-        for (unsigned i = 0; i < 8; ++i) {
-            buffer_[63u - i] = static_cast<std::uint8_t>(bit_length >> (i * 8u));
-        }
+    }
+    return Result<void>::success();
+}
+
+Result<Sha256Digest> Sha256Hasher::finalize() noexcept {
+    if (finalized_) {
+        return Result<Sha256Digest>::failure(ErrorCode::invalid_argument, "SHA-256 hasher is already finalized");
+    }
+    finalized_ = true;
+    const std::uint64_t bit_length = total_bytes_ * 8u;
+    buffer_[buffer_size_++] = 0x80u;
+    if (buffer_size_ > 56u) {
+        std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_), buffer_.end(), 0u);
         transform(buffer_.data());
+        buffer_size_ = 0u;
+    }
+    std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_), buffer_.begin() + 56, 0u);
+    for (unsigned i = 0; i < 8; ++i) {
+        buffer_[63u - i] = static_cast<std::uint8_t>(bit_length >> (i * 8u));
+    }
+    transform(buffer_.data());
 
-        Sha256Digest digest{};
-        for (std::size_t i = 0; i < h_.size(); ++i) {
-            digest[i * 4u + 0u] = static_cast<std::uint8_t>(h_[i] >> 24u);
-            digest[i * 4u + 1u] = static_cast<std::uint8_t>(h_[i] >> 16u);
-            digest[i * 4u + 2u] = static_cast<std::uint8_t>(h_[i] >> 8u);
-            digest[i * 4u + 3u] = static_cast<std::uint8_t>(h_[i]);
-        }
-        return digest;
+    Sha256Digest digest{};
+    for (std::size_t i = 0; i < state_.size(); ++i) {
+        digest[i * 4u + 0u] = static_cast<std::uint8_t>(state_[i] >> 24u);
+        digest[i * 4u + 1u] = static_cast<std::uint8_t>(state_[i] >> 16u);
+        digest[i * 4u + 2u] = static_cast<std::uint8_t>(state_[i] >> 8u);
+        digest[i * 4u + 3u] = static_cast<std::uint8_t>(state_[i]);
+    }
+    return Result<Sha256Digest>::success(digest);
+}
+
+void Sha256Hasher::transform(const std::uint8_t* block) noexcept {
+    std::array<std::uint32_t, 64> w{};
+    for (std::size_t i = 0; i < 16; ++i) {
+        const std::size_t o = i * 4u;
+        w[i] = (static_cast<std::uint32_t>(block[o]) << 24u) |
+               (static_cast<std::uint32_t>(block[o + 1u]) << 16u) |
+               (static_cast<std::uint32_t>(block[o + 2u]) << 8u) |
+               static_cast<std::uint32_t>(block[o + 3u]);
+    }
+    for (std::size_t i = 16; i < 64; ++i) {
+        const std::uint32_t s0 = rotr(w[i - 15u], 7u) ^ rotr(w[i - 15u], 18u) ^ (w[i - 15u] >> 3u);
+        const std::uint32_t s1 = rotr(w[i - 2u], 17u) ^ rotr(w[i - 2u], 19u) ^ (w[i - 2u] >> 10u);
+        w[i] = w[i - 16u] + s0 + w[i - 7u] + s1;
     }
 
-private:
-    void transform(const std::uint8_t* block) noexcept {
-        std::array<std::uint32_t, 64> w{};
-        for (std::size_t i = 0; i < 16; ++i) {
-            const std::size_t o = i * 4u;
-            w[i] = (static_cast<std::uint32_t>(block[o]) << 24u) |
-                   (static_cast<std::uint32_t>(block[o + 1u]) << 16u) |
-                   (static_cast<std::uint32_t>(block[o + 2u]) << 8u) |
-                   static_cast<std::uint32_t>(block[o + 3u]);
-        }
-        for (std::size_t i = 16; i < 64; ++i) {
-            const std::uint32_t s0 = rotr(w[i - 15u], 7u) ^ rotr(w[i - 15u], 18u) ^ (w[i - 15u] >> 3u);
-            const std::uint32_t s1 = rotr(w[i - 2u], 17u) ^ rotr(w[i - 2u], 19u) ^ (w[i - 2u] >> 10u);
-            w[i] = w[i - 16u] + s0 + w[i - 7u] + s1;
-        }
+    std::uint32_t a = state_[0];
+    std::uint32_t b = state_[1];
+    std::uint32_t c = state_[2];
+    std::uint32_t d = state_[3];
+    std::uint32_t e = state_[4];
+    std::uint32_t f = state_[5];
+    std::uint32_t g = state_[6];
+    std::uint32_t h = state_[7];
 
-        std::uint32_t a = h_[0];
-        std::uint32_t b = h_[1];
-        std::uint32_t c = h_[2];
-        std::uint32_t d = h_[3];
-        std::uint32_t e = h_[4];
-        std::uint32_t f = h_[5];
-        std::uint32_t g = h_[6];
-        std::uint32_t h = h_[7];
-
-        for (std::size_t i = 0; i < 64; ++i) {
-            const std::uint32_t s1 = rotr(e, 6u) ^ rotr(e, 11u) ^ rotr(e, 25u);
-            const std::uint32_t ch = (e & f) ^ ((~e) & g);
-            const std::uint32_t temp1 = h + s1 + ch + k[i] + w[i];
-            const std::uint32_t s0 = rotr(a, 2u) ^ rotr(a, 13u) ^ rotr(a, 22u);
-            const std::uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
-            const std::uint32_t temp2 = s0 + maj;
-
-            h = g;
-            g = f;
-            f = e;
-            e = d + temp1;
-            d = c;
-            c = b;
-            b = a;
-            a = temp1 + temp2;
-        }
-
-        h_[0] += a;
-        h_[1] += b;
-        h_[2] += c;
-        h_[3] += d;
-        h_[4] += e;
-        h_[5] += f;
-        h_[6] += g;
-        h_[7] += h;
+    for (std::size_t i = 0; i < 64; ++i) {
+        const std::uint32_t s1 = rotr(e, 6u) ^ rotr(e, 11u) ^ rotr(e, 25u);
+        const std::uint32_t ch = (e & f) ^ ((~e) & g);
+        const std::uint32_t temp1 = h + s1 + ch + k[i] + w[i];
+        const std::uint32_t s0 = rotr(a, 2u) ^ rotr(a, 13u) ^ rotr(a, 22u);
+        const std::uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+        const std::uint32_t temp2 = s0 + maj;
+        h = g;
+        g = f;
+        f = e;
+        e = d + temp1;
+        d = c;
+        c = b;
+        b = a;
+        a = temp1 + temp2;
     }
 
-    std::array<std::uint32_t, 8> h_{
-        0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
-        0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u,
-    };
-    std::array<std::uint8_t, 64> buffer_{};
-    std::size_t buffer_size_{};
-    std::uint64_t total_bytes_{};
-};
-
+    state_[0] += a;
+    state_[1] += b;
+    state_[2] += c;
+    state_[3] += d;
+    state_[4] += e;
+    state_[5] += f;
+    state_[6] += g;
+    state_[7] += h;
 }
 
 Sha256Digest sha256(std::span<const std::uint8_t> bytes) noexcept {
-    Sha256State state;
-    state.update(bytes);
-    return state.finalize();
+    Sha256Hasher hasher;
+    (void)hasher.update(bytes);
+    const auto digest = hasher.finalize();
+    return digest ? digest.value : Sha256Digest{};
 }
 
 Result<Sha256Digest> sha256_file(const std::filesystem::path& path) {
@@ -142,19 +136,21 @@ Result<Sha256Digest> sha256_file(const std::filesystem::path& path) {
         return Result<Sha256Digest>::failure(ErrorCode::file_not_found, "failed to open file for SHA-256: " + path.string());
     }
 
-    Sha256State state;
+    Sha256Hasher hasher;
     std::array<char, 64 * 1024> buffer{};
     while (in) {
         in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
         const auto count = in.gcount();
         if (count > 0) {
-            state.update(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(buffer.data()), static_cast<std::size_t>(count)));
+            const auto updated = hasher.update(std::span<const std::uint8_t>(
+                reinterpret_cast<const std::uint8_t*>(buffer.data()), static_cast<std::size_t>(count)));
+            if (!updated) return Result<Sha256Digest>::failure(updated.error, updated.detail);
         }
     }
     if (!in.eof()) {
         return Result<Sha256Digest>::failure(ErrorCode::io_error, "failed while reading file for SHA-256: " + path.string());
     }
-    return Result<Sha256Digest>::success(state.finalize());
+    return hasher.finalize();
 }
 
 std::string sha256_hex(const Sha256Digest& digest) {
