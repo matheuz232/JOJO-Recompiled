@@ -159,10 +159,11 @@ static void test_binding_capture_detects_new_button_and_axis_direction() {
 
 static void test_settings_menu_uses_draft_commit_and_discard() {
     jojo::InputDeviceRegistry registry;
-    registry.refresh({
+    const auto initial_changes = registry.refresh({
         {"keyboard:default", "Keyboard", jojo::DeviceKind::keyboard},
         {"xinput:0", "Controller", jojo::DeviceKind::xinput},
     });
+    CHECK(initial_changes.size() == 2);
 
     jojo::AppSettings baseline{};
     jojo::SettingsMenuSession menu(baseline);
