@@ -70,6 +70,33 @@ static void test_sltu_uses_unsigned_comparison() {
     CHECK(state.gpr[1] == 1u);
 }
 
+static void test_signed_add_sub_results_and_overflow_stop() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x800100a0u);
+    state.gpr[2] = 0x7ffffffeu;
+    state.gpr[3] = 1u;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(2, 3, 4, 0, 0x20)).reason ==
+          jojo::PsxR3000aStepReason::ok); // ADD
+    CHECK(state.gpr[4] == 0x7fffffffu);
+
+    state.gpr[2] = 0x80000001u;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(2, 3, 5, 0, 0x22)).reason ==
+          jojo::PsxR3000aStepReason::ok); // SUB
+    CHECK(state.gpr[5] == 0x80000000u);
+
+    state.gpr[2] = 0x7fffffffu;
+    state.gpr[4] = 0xfeedfaceu;
+    const auto add_overflow = jojo::step_psx_r3000a(state, encode_r(2, 3, 4, 0, 0x20));
+    CHECK(add_overflow.reason == jojo::PsxR3000aStepReason::unsupported_instruction);
+    CHECK(state.gpr[4] == 0xfeedfaceu);
+
+    state.gpr[2] = 0x80000000u;
+    state.gpr[5] = 0xcafebabeu;
+    const auto sub_overflow = jojo::step_psx_r3000a(state, encode_r(2, 3, 5, 0, 0x22));
+    CHECK(sub_overflow.reason == jojo::PsxR3000aStepReason::unsupported_instruction);
+    CHECK(state.gpr[5] == 0xcafebabeu);
+}
+
 static void test_or_combines_register_bits() {
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x80010058u);
@@ -690,6 +717,7 @@ int main() {
     test_addi_sign_extends_and_advances();
     test_addi_overflow_stops_without_corrupting_state();
     test_sltu_uses_unsigned_comparison();
+    test_signed_add_sub_results_and_overflow_stop();
     test_or_combines_register_bits();
     test_srl_zero_fills_high_bits();
     test_arithmetic_and_variable_shifts_use_r3000a_rules();
