@@ -30,6 +30,7 @@ using ConversionProgressCallback = std::function<void(const ConversionProgress&)
 
 struct ConversionOptions {
     std::vector<GameRevisionProfile> revision_profiles;
+    bool validate_psx_boot{false};
 };
 
 struct ConversionManifest {
