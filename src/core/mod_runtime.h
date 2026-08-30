@@ -4,6 +4,7 @@
 #include "core/semver.h"
 
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -43,9 +44,17 @@ struct DiscoveredMod {
 
 using ModCatalog = std::vector<DiscoveredMod>;
 
+struct ResolvedModSet {
+    std::vector<const DiscoveredMod*> load_order;
+    std::vector<std::string> diagnostics;
+};
+
 [[nodiscard]] Result<ModManifest> parse_mod_manifest(
     std::string_view text,
     const std::filesystem::path& root);
 [[nodiscard]] Result<ModCatalog> discover_mods(const std::filesystem::path& mods_root);
+[[nodiscard]] Result<ResolvedModSet> resolve_mod_set(
+    const ModCatalog& catalog,
+    std::span<const std::string> requested_ids);
 
 }
