@@ -43,8 +43,18 @@ add_library(jojo_core STATIC
   src/core/native_backend.cpp
   src/core/native_x64.cpp
   src/core/device_id.cpp
+  src/core/semver.cpp
+  src/core/sha256.cpp
+  src/core/mod_runtime.cpp
+  src/core/mod_resolver.cpp
+  src/core/mod_content.cpp
+  src/core/mod_policy.cpp
+  src/core/native_mod_loader.cpp
 )
 target_include_directories(jojo_core PUBLIC src)
+if(CMAKE_DL_LIBS)
+  target_link_libraries(jojo_core PUBLIC ${CMAKE_DL_LIBS})
+endif()
 
 if(WIN32)
   add_executable(jojo_recompiled WIN32
@@ -194,3 +204,51 @@ add_test(NAME jojo_native_backend_tests COMMAND jojo_native_backend_tests)
 add_executable(jojo_presentation_tests tests/test_presentation.cpp)
 target_link_libraries(jojo_presentation_tests PRIVATE jojo_core)
 add_test(NAME jojo_presentation_tests COMMAND jojo_presentation_tests)
+
+add_executable(jojo_semver_tests tests/test_semver.cpp)
+target_link_libraries(jojo_semver_tests PRIVATE jojo_core)
+add_test(NAME jojo_semver_tests COMMAND jojo_semver_tests)
+
+add_executable(jojo_sha256_tests tests/test_sha256.cpp)
+target_link_libraries(jojo_sha256_tests PRIVATE jojo_core)
+add_test(NAME jojo_sha256_tests COMMAND jojo_sha256_tests)
+
+add_executable(jojo_mod_runtime_tests tests/test_mod_runtime.cpp)
+target_link_libraries(jojo_mod_runtime_tests PRIVATE jojo_core)
+add_test(NAME jojo_mod_runtime_tests COMMAND jojo_mod_runtime_tests)
+
+add_executable(jojo_mod_policy_tests tests/test_mod_policy.cpp)
+target_link_libraries(jojo_mod_policy_tests PRIVATE jojo_core)
+add_test(NAME jojo_mod_policy_tests COMMAND jojo_mod_policy_tests)
+
+function(add_jojo_native_mod_fixture target mod_id)
+  add_library(${target} SHARED tests/fixtures/test_native_mod.cpp)
+  target_include_directories(${target} PRIVATE src)
+  target_compile_definitions(${target} PRIVATE JOJO_TEST_NATIVE_MOD_ID=\"${mod_id}\")
+endfunction()
+
+add_jojo_native_mod_fixture(jojo_native_mod_fixture_first native.first)
+add_jojo_native_mod_fixture(jojo_native_mod_fixture_second native.second)
+add_jojo_native_mod_fixture(jojo_native_mod_fixture_failure native.failure)
+target_compile_definitions(jojo_native_mod_fixture_failure PRIVATE JOJO_TEST_NATIVE_MOD_LOAD_RESULT=7)
+add_jojo_native_mod_fixture(jojo_native_mod_fixture_bad_abi native.badabi)
+target_compile_definitions(jojo_native_mod_fixture_bad_abi PRIVATE JOJO_TEST_NATIVE_MOD_ABI=2)
+add_jojo_native_mod_fixture(jojo_native_mod_fixture_no_export native.noexport)
+target_compile_definitions(jojo_native_mod_fixture_no_export PRIVATE JOJO_TEST_NATIVE_MOD_NO_EXPORT=1)
+
+add_executable(jojo_native_mod_loader_tests tests/test_native_mod_loader.cpp)
+target_link_libraries(jojo_native_mod_loader_tests PRIVATE jojo_core)
+add_dependencies(jojo_native_mod_loader_tests
+  jojo_native_mod_fixture_first
+  jojo_native_mod_fixture_second
+  jojo_native_mod_fixture_failure
+  jojo_native_mod_fixture_bad_abi
+  jojo_native_mod_fixture_no_export)
+add_test(
+  NAME jojo_native_mod_loader_tests
+  COMMAND jojo_native_mod_loader_tests
+    "$<TARGET_FILE:jojo_native_mod_fixture_first>"
+    "$<TARGET_FILE:jojo_native_mod_fixture_second>"
+    "$<TARGET_FILE:jojo_native_mod_fixture_failure>"
+    "$<TARGET_FILE:jojo_native_mod_fixture_bad_abi>"
+    "$<TARGET_FILE:jojo_native_mod_fixture_no_export>")
