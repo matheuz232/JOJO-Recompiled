@@ -73,14 +73,19 @@ M3 criteria:
 
 M3 completion closes the **backend architecture contract defined by this roadmap**. It does **not** claim that every SH-4 IR operation already has a dedicated x86-64 machine-code lowering: blocks without one remain explicit and observable reference fallbacks. It also does **not** mark a commercial installation `native-ready`, prove real-game boot, render a real frame/menu, or provide functional game input. Those require the following device/integration milestones and end-to-end evidence with legally supplied game data.
 
-### M4 — Renderer, presentation and aspect correction
+### M4 — Renderer, presentation and aspect correction — Complete (100%)
 
-- Separate simulation resolution from presentation resolution.
-- 4:3, 16:9, 16:10, 21:9 and 32:9 camera/presentation policies.
-- No non-uniform stretching.
-- UI logical-coordinate system with safe areas and DPI-aware scaling from 480p through 8K.
-- Windowed, exclusive fullscreen (when available) and borderless fullscreen.
-- Texture filtering Off/2x/4x/8x/16x and MSAA Off/2x/4x/8x where the active renderer/device supports it.
+Completion evidence is tracked in [`../superpowers/plans/2026-08-30-presentation-renderer.md`](../superpowers/plans/2026-08-30-presentation-renderer.md).
+
+- [x] Separate simulation resolution from presentation resolution.
+- [x] 4:3, 16:9, 16:10, 21:9 and 32:9 camera/presentation policies.
+- [x] No non-uniform stretching; output uses a centered aspect-fitted viewport with one uniform scale.
+- [x] UI logical-coordinate system with safe areas and DPI-aware scaling from 480p through 8K.
+- [x] Windowed, exclusive fullscreen (when available) and borderless fullscreen host plans, with deterministic borderless fallback when exclusive capability is unavailable.
+- [x] Texture filtering Off/2x/4x/8x/16x and MSAA Off/2x/4x/8x negotiated against renderer/device capabilities; Windows CI probes a real D3D11 hardware-or-WARP device for multisample support.
+- [x] Linux portable-core and Windows x64/MSVC build/test coverage for the complete M4 presentation contract.
+
+M4 completion closes the **host presentation/aspect/quality contract defined above**. It does **not** claim that Dreamcast PVR2 scene rendering is complete, that a commercial revision boots, that a real frame/menu is visible, or that game input/audio are functional. Those remain device/integration work and are still required before conversion output can become `native-ready`.
 
 ### M5 — In-game settings + input
 
