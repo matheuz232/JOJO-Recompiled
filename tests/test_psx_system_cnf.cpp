@@ -2,6 +2,7 @@
 #include "core/iso9660.h"
 #include "core/psx_boot.h"
 #include "core/psx_exe.h"
+#include "core/psx_r3000a.h"
 #include "core/psx_revision.h"
 #include "core/psx_system_cnf.h"
 #include "iso_fixture.h"
@@ -284,6 +285,94 @@ static void test_default_conversion_rejects_filename_correct_but_fingerprint_wro
     std::filesystem::remove_all(install, ec);
 }
 
+static std::uint32_t encode_r(std::uint8_t rs, std::uint8_t rt, std::uint8_t rd,
+                              std::uint8_t shamt, std::uint8_t funct) {
+    return (static_cast<std::uint32_t>(rs) << 21u) |
+           (static_cast<std::uint32_t>(rt) << 16u) |
+           (static_cast<std::uint32_t>(rd) << 11u) |
+           (static_cast<std::uint32_t>(shamt) << 6u) |
+           funct;
+}
+
+static std::uint32_t encode_i(std::uint8_t op, std::uint8_t rs, std::uint8_t rt,
+                              std::uint16_t imm) {
+    return (static_cast<std::uint32_t>(op) << 26u) |
+           (static_cast<std::uint32_t>(rs) << 21u) |
+           (static_cast<std::uint32_t>(rt) << 16u) |
+           imm;
+}
+
+static std::uint32_t encode_j(std::uint8_t op, std::uint32_t target) {
+    return (static_cast<std::uint32_t>(op) << 26u) | ((target >> 2u) & 0x03ffffffu);
+}
+
+static void test_r3000a_reset_and_zero_register_invariant() {
+    jojo::PsxR3000aState state{};
+    state.gpr.fill(0xffffffffu);
+    jojo::reset_psx_r3000a(state, 0x8001000cu);
+    CHECK(state.pc == 0x8001000cu);
+    CHECK(state.next_pc == 0x80010010u);
+    for (const auto value : state.gpr) CHECK(value == 0u);
+
+    state.gpr[1] = 7u;
+    state.gpr[2] = 9u;
+    const auto result = jojo::step_psx_r3000a(state, encode_r(1, 2, 0, 0, 0x21));
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[0] == 0u);
+}
+
+static void test_r3000a_addu_subu_wrap_without_overflow_exception() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010000u);
+    state.gpr[1] = 0xffffffffu;
+    state.gpr[2] = 2u;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(1, 2, 3, 0, 0x21)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[3] == 1u);
+
+    state.gpr[4] = 1u;
+    state.gpr[5] = 2u;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(4, 5, 6, 0, 0x23)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[6] == 0xffffffffu);
+}
+
+static void test_r3000a_taken_branch_executes_delay_slot_before_target() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x1000u);
+    state.gpr[1] = 7u;
+    state.gpr[2] = 7u;
+
+    const auto branch = jojo::step_psx_r3000a(state, encode_i(0x04, 1, 2, 2));
+    CHECK(branch.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.pc == 0x1004u);
+    CHECK(state.next_pc == 0x100cu);
+
+    const auto delay = jojo::step_psx_r3000a(state, 0u);
+    CHECK(delay.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.pc == 0x100cu);
+    CHECK(state.next_pc == 0x1010u);
+}
+
+static void test_r3000a_jal_links_after_delay_slot() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010000u);
+    const auto result = jojo::step_psx_r3000a(state, encode_j(0x03, 0x80011000u));
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[31] == 0x80010008u);
+    CHECK(state.pc == 0x80010004u);
+    CHECK(state.next_pc == 0x80011000u);
+}
+
+static void test_r3000a_reports_unsupported_opcode() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010000u);
+    const auto result = jojo::step_psx_r3000a(state, 0xfc000000u);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::unsupported_instruction);
+    CHECK(result.instruction == 0xfc000000u);
+    CHECK(result.instruction_pc == 0x80010000u);
+}
+
 int main() {
     test_parses_supported_disc_shape();
     test_accepts_case_insensitive_keys_and_lf();
@@ -307,10 +396,15 @@ int main() {
     test_psx_boot_analysis_rejects_malformed_executable();
     test_supported_psx_revision_profile_is_exact();
     test_default_conversion_rejects_filename_correct_but_fingerprint_wrong_image();
+    test_r3000a_reset_and_zero_register_invariant();
+    test_r3000a_addu_subu_wrap_without_overflow_exception();
+    test_r3000a_taken_branch_executes_delay_slot_before_target();
+    test_r3000a_jal_links_after_delay_slot();
+    test_r3000a_reports_unsupported_opcode();
     if (failures) {
         std::cerr << failures << " test assertion(s) failed\n";
         return 1;
     }
-    std::cout << "PS1 intake parser assertions passed\n";
+    std::cout << "PS1 intake and R3000A foundation assertions passed\n";
     return 0;
 }
