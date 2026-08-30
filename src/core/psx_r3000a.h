@@ -166,7 +166,7 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
 [[nodiscard]] inline PsxR3000aStepResult step_psx_r3000a(
     PsxR3000aState& state, std::uint32_t instruction, PsxBus& bus) noexcept {
     const auto op = static_cast<std::uint8_t>(instruction >> 26u);
-    if (op != 0x23u && op != 0x2bu) return step_psx_r3000a(state, instruction);
+    if (op != 0x23u && op != 0x25u && op != 0x2bu) return step_psx_r3000a(state, instruction);
 
     const std::uint32_t instruction_pc = state.pc;
     const std::uint32_t sequential_pc = state.next_pc;
@@ -188,8 +188,19 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         return {PsxR3000aStepReason::ok, instruction_pc, instruction};
     }
 
-    const auto loaded = psx_bus_read_u32(bus, address); // LW
-    if (loaded.reason != PsxBusAccessReason::ok) {
+    PsxBusAccessReason load_reason = PsxBusAccessReason::ok;
+    std::uint32_t load_value = 0u;
+    if (op == 0x25u) { // LHU
+        const auto loaded = psx_bus_read_u16(bus, address);
+        load_reason = loaded.reason;
+        load_value = static_cast<std::uint32_t>(loaded.value);
+    } else { // LW
+        const auto loaded = psx_bus_read_u32(bus, address);
+        load_reason = loaded.reason;
+        load_value = loaded.value;
+    }
+
+    if (load_reason != PsxBusAccessReason::ok) {
         return {PsxR3000aStepReason::memory_fault, instruction_pc, instruction};
     }
 
@@ -205,7 +216,7 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
 
     state.pending_load_valid = rt != 0u;
     state.pending_load_register = rt;
-    state.pending_load_value = loaded.value;
+    state.pending_load_value = load_value;
     state.gpr[0] = 0u;
     state.pc = sequential_pc;
     state.next_pc = sequential_pc + 4u;
