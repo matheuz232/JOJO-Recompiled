@@ -1,5 +1,7 @@
 #include "core/conversion.h"
 #include "core/disc_image.h"
+#include "core/psx_boot.h"
+#include "core/psx_revision.h"
 #include "core/version.h"
 #include <charconv>
 #include <fstream>
@@ -152,6 +154,13 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
         return Result<ConversionManifest>::failure(filesystem.error, filesystem.detail);
     }
 
+    if (options.validate_psx_boot) {
+        auto boot = analyze_psx_boot(filesystem.value);
+        if (!boot) {
+            return Result<ConversionManifest>::failure(boot.error, boot.detail);
+        }
+    }
+
     report(ConversionStage::identifying_revision, 45, "identify_revision",
            "Identificando a revisão exata do jogo.");
     auto revision = identify_game_revision(filesystem.value, options.revision_profiles);
@@ -190,7 +199,10 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
 Result<ConversionManifest> convert_image(const std::filesystem::path& source,
                                          const std::filesystem::path& install_dir,
                                          const ConversionProgressCallback& on_progress) {
-    return convert_image(source, install_dir, ConversionOptions{}, on_progress);
+    ConversionOptions options{};
+    options.revision_profiles = supported_psx_game_revision_profiles();
+    options.validate_psx_boot = true;
+    return convert_image(source, install_dir, options, on_progress);
 }
 
 }
