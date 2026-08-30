@@ -11,7 +11,7 @@
 
 namespace {
 
-constexpr std::uint64_t execution_limit = 100000u;
+constexpr std::uint64_t execution_limit = 10000000u;
 
 const char* step_reason_name(jojo::PsxR3000aStepReason reason) noexcept {
     switch (reason) {
