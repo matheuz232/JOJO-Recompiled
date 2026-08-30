@@ -69,13 +69,13 @@ int rollback_impairment(std::uint32_t value) noexcept {
 
 std::pair<std::uint8_t, std::string> signal_for_quality(ConnectionQuality quality) {
     switch (quality) {
-        case ConnectionQuality::excellent: return {4, "Excellent"};
-        case ConnectionQuality::good: return {3, "Good"};
-        case ConnectionQuality::fair: return {2, "Fair"};
-        case ConnectionQuality::poor: return {1, "Poor"};
-        case ConnectionQuality::unusable: return {0, "Unusable"};
+        case ConnectionQuality::excellent: return {std::uint8_t{4}, "Excellent"};
+        case ConnectionQuality::good: return {std::uint8_t{3}, "Good"};
+        case ConnectionQuality::fair: return {std::uint8_t{2}, "Fair"};
+        case ConnectionQuality::poor: return {std::uint8_t{1}, "Poor"};
+        case ConnectionQuality::unusable: return {std::uint8_t{0}, "Unusable"};
     }
-    return {0, "Unusable"};
+    return {std::uint8_t{0}, "Unusable"};
 }
 
 } // namespace
@@ -292,10 +292,10 @@ ConnectionIndicator make_connection_indicator(
     const OnlineConnectionMetrics& metrics,
     OnlineConnectionLifecycle lifecycle) {
     if (lifecycle == OnlineConnectionLifecycle::disconnected) {
-        return {ConnectionQuality::unusable, lifecycle, 0, "signal-0", "Disconnected"};
+        return {ConnectionQuality::unusable, lifecycle, std::uint8_t{0}, "signal-0", "Disconnected"};
     }
     if (lifecycle == OnlineConnectionLifecycle::left) {
-        return {ConnectionQuality::unusable, lifecycle, 0, "signal-0", "Left match"};
+        return {ConnectionQuality::unusable, lifecycle, std::uint8_t{0}, "signal-0", "Left match"};
     }
 
     const auto quality = evaluate_connection_quality(metrics);
