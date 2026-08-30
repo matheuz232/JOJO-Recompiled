@@ -19,6 +19,17 @@ int main() {
     const std::vector<std::uint8_t> abc{'a', 'b', 'c'};
     CHECK(sha256_hex(sha256(abc)) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 
+    Sha256Hasher incremental;
+    const std::vector<std::uint8_t> a{'a'};
+    const std::vector<std::uint8_t> bc{'b', 'c'};
+    CHECK(incremental.update(a));
+    CHECK(incremental.update(bc));
+    const auto incremental_digest = incremental.finalize();
+    CHECK(incremental_digest);
+    if (incremental_digest) CHECK(incremental_digest.value == sha256(abc));
+    CHECK(!incremental.update(a));
+    CHECK(!incremental.finalize());
+
     const std::string long_text = "The quick brown fox jumps over the lazy dog";
     const std::vector<std::uint8_t> quick(long_text.begin(), long_text.end());
     CHECK(sha256_hex(sha256(quick)) == "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592");
