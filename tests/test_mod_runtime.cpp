@@ -16,13 +16,13 @@ void write_text(const std::filesystem::path& path, const std::string& text) {
     out << text;
 }
 
-std::string data_manifest(std::string id, std::string version = "1.0.0") {
+std::string data_manifest(std::string id, std::string version = "1.0.0", bool gameplay = false) {
     return "id=" + id + "\n"
            "name=Test Mod\n"
            "version=" + version + "\n"
            "api_version=1.0.0\n"
            "kind=data\n"
-           "gameplay=false\n";
+           "gameplay=" + std::string(gameplay ? "true" : "false") + "\n";
 }
 
 jojo::DiscoveredMod make_mod(
@@ -154,9 +154,7 @@ int main() {
         }
     }
 
-    ModCatalog missing{
-        make_mod("needs.missing", {1, 0, 0}, {dep("absent.mod")}),
-    };
+    ModCatalog missing{make_mod("needs.missing", {1, 0, 0}, {dep("absent.mod")})};
     const std::vector<std::string> missing_request{"needs.missing"};
     const auto missing_result = resolve_mod_set(missing, missing_request);
     CHECK(!missing_result);
@@ -191,6 +189,87 @@ int main() {
 
     const std::vector<std::string> unknown_request{"does.not.exist"};
     CHECK(!resolve_mod_set(graph, unknown_request));
+
+    const auto content_root = std::filesystem::temp_directory_path() / "jojo_mod_content_tests";
+    std::filesystem::remove_all(content_root, ec);
+    write_text(content_root / "alpha" / "mod.ini", data_manifest("alpha.mod"));
+    write_text(content_root / "alpha" / "data" / "ui" / "menu.txt", "alpha-menu");
+    write_text(content_root / "alpha" / "data" / "only-alpha.txt", "alpha-only");
+    write_text(content_root / "gameplay" / "mod.ini", data_manifest("gameplay.mod", "1.0.0", true));
+    write_text(content_root / "gameplay" / "data" / "rules.bin", "rules-v1");
+    write_text(content_root / "zeta" / "mod.ini", data_manifest("zeta.mod"));
+    write_text(content_root / "zeta" / "data" / "ui" / "menu.txt", "zeta-menu");
+
+    const auto content_catalog = discover_mods(content_root);
+    CHECK(content_catalog);
+    std::vector<std::string> content_requested{"zeta.mod", "gameplay.mod", "alpha.mod"};
+    Result<ResolvedModSet> content_resolved{};
+    if (content_catalog) content_resolved = resolve_mod_set(content_catalog.value, content_requested);
+    CHECK(content_resolved);
+    if (content_resolved) {
+        const auto overlay = build_mod_overlay(content_resolved.value);
+        CHECK(overlay);
+        if (overlay) {
+            CHECK(overlay.value.files.size() == 3u);
+            CHECK(overlay.value.files.at("ui/menu.txt").mod_id == "zeta.mod");
+            CHECK(overlay.value.files.at("ui/menu.txt").host_path == content_root / "zeta" / "data" / "ui" / "menu.txt");
+            CHECK(overlay.value.collisions.size() == 1u);
+            if (!overlay.value.collisions.empty()) {
+                CHECK(overlay.value.collisions[0].logical_path == "ui/menu.txt");
+                CHECK(overlay.value.collisions[0].previous_mod_id == "alpha.mod");
+                CHECK(overlay.value.collisions[0].replacing_mod_id == "zeta.mod");
+            }
+        }
+
+        const auto hashes1 = compute_mod_set_hashes(content_resolved.value);
+        CHECK(hashes1);
+        if (hashes1) {
+            CHECK(hashes1.value.mod_set_hash.size() == 64u);
+            CHECK(hashes1.value.gameplay_hash.size() == 64u);
+
+            write_text(content_root / "zeta" / "data" / "ui" / "menu.txt", "zeta-menu-v2");
+            const auto hashes2 = compute_mod_set_hashes(content_resolved.value);
+            CHECK(hashes2);
+            if (hashes2) {
+                CHECK(hashes2.value.mod_set_hash != hashes1.value.mod_set_hash);
+                CHECK(hashes2.value.gameplay_hash == hashes1.value.gameplay_hash);
+
+                write_text(content_root / "gameplay" / "data" / "rules.bin", "rules-v2");
+                const auto hashes3 = compute_mod_set_hashes(content_resolved.value);
+                CHECK(hashes3);
+                if (hashes3) CHECK(hashes3.value.gameplay_hash != hashes2.value.gameplay_hash);
+            }
+        }
+    }
+
+    const auto copy_root = content_root / "alpha-copy";
+    write_text(copy_root / "data" / "only-alpha.txt", "alpha-only");
+    write_text(copy_root / "data" / "ui" / "menu.txt", "alpha-menu");
+    write_text(copy_root / "mod.ini", data_manifest("alpha.mod"));
+    if (content_catalog && !content_catalog.value.empty()) {
+        const auto* alpha = [&]() -> const DiscoveredMod* {
+            for (const auto& mod : content_catalog.value) if (mod.manifest.id == "alpha.mod") return &mod;
+            return nullptr;
+        }();
+        CHECK(alpha != nullptr);
+        if (alpha) {
+            DiscoveredMod copy{alpha->manifest, copy_root};
+            const auto original_hash = compute_mod_content_hash(*alpha);
+            const auto copy_hash = compute_mod_content_hash(copy);
+            CHECK(original_hash);
+            CHECK(copy_hash);
+            if (original_hash && copy_hash) CHECK(original_hash.value == copy_hash.value);
+
+            std::error_code symlink_ec;
+            std::filesystem::create_symlink(copy_root / "data" / "only-alpha.txt", copy_root / "data" / "link.txt", symlink_ec);
+            if (!symlink_ec) {
+                CHECK(!compute_mod_content_hash(copy));
+                std::filesystem::remove(copy_root / "data" / "link.txt", symlink_ec);
+            }
+        }
+    }
+
+    std::filesystem::remove_all(content_root, ec);
 
     if (failures != 0) {
         std::cerr << failures << " mod runtime test(s) failed\n";
