@@ -289,6 +289,113 @@ static void test_scratchpad_storage_and_segment_aliases() {
           jojo::PsxBusAccessReason::unmapped);
 }
 
+static void test_lwl_lwr_pair_merges_pending_load_for_little_endian_word() {
+    jojo::PsxBus bus{};
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010700u);
+    state.gpr[2] = 0x80001001u;
+    state.gpr[3] = 0xaabbccddu;
+    CHECK(jojo::psx_bus_write_u32(bus, 0x80001000u, 0x33221100u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u32(bus, 0x80001004u, 0x77665544u) ==
+          jojo::PsxBusAccessReason::ok);
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x22, 2, 3, 3u), bus).reason ==
+          jojo::PsxR3000aStepReason::ok); // LWL at address + 3
+    CHECK(state.gpr[3] == 0xaabbccddu);
+    CHECK(state.pending_load_value == 0x44bbccddu);
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x26, 2, 3, 0u), bus).reason ==
+          jojo::PsxR3000aStepReason::ok); // LWR merges forwarded pending value
+    CHECK(state.gpr[3] == 0xaabbccddu);
+    CHECK(state.pending_load_value == 0x44332211u);
+
+    CHECK(jojo::step_psx_r3000a(state, 0u, bus).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[3] == 0x44332211u);
+}
+
+static void test_swl_swr_pair_stores_little_endian_unaligned_word() {
+    jojo::PsxBus bus{};
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010800u);
+    state.gpr[2] = 0x80001001u;
+    state.gpr[3] = 0x44332211u;
+    CHECK(jojo::psx_bus_write_u32(bus, 0x80001000u, 0xaaaaaaaau) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u32(bus, 0x80001004u, 0xbbbbbbbbu) ==
+          jojo::PsxBusAccessReason::ok);
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x2a, 2, 3, 3u), bus).reason ==
+          jojo::PsxR3000aStepReason::ok); // SWL
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x2e, 2, 3, 0u), bus).reason ==
+          jojo::PsxR3000aStepReason::ok); // SWR
+    CHECK(jojo::psx_bus_read_u32(bus, 0x80001000u).value == 0x332211aau);
+    CHECK(jojo::psx_bus_read_u32(bus, 0x80001004u).value == 0xbbbbbb44u);
+
+    jojo::reset_psx_r3000a(state, 0x80010900u);
+    state.gpr[2] = 0x1f801001u;
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x2e, 2, 3, 0u), bus).reason ==
+          jojo::PsxR3000aStepReason::memory_fault);
+    CHECK(state.pc == 0x80010900u);
+}
+
+static void test_unaligned_word_merge_masks_for_every_byte_offset() {
+    constexpr std::uint32_t lwl_expected[] = {
+        0x11bbccddu, 0x2211ccddu, 0x332211ddu, 0x44332211u,
+    };
+    constexpr std::uint32_t lwr_expected[] = {
+        0x44332211u, 0xaa443322u, 0xaabb4433u, 0xaabbcc44u,
+    };
+    constexpr std::uint32_t swl_expected[] = {
+        0x443322aau, 0x4433aabbu, 0x44aabbccu, 0xaabbccddu,
+    };
+    constexpr std::uint32_t swr_expected[] = {
+        0xaabbccddu, 0xbbccdd11u, 0xccdd2211u, 0xdd332211u,
+    };
+
+    jojo::PsxBus bus{};
+    jojo::PsxR3000aState state{};
+    for (std::uint32_t offset = 0u; offset < 4u; ++offset) {
+        CHECK(jojo::psx_bus_write_u32(bus, 0x80001000u, 0x44332211u) ==
+              jojo::PsxBusAccessReason::ok);
+        jojo::reset_psx_r3000a(state, 0x80010a00u);
+        state.gpr[2] = 0x80001000u + offset;
+        state.gpr[3] = 0xaabbccddu;
+        CHECK(jojo::step_psx_r3000a(state, encode_i(0x22, 2, 3, 0u), bus).reason ==
+              jojo::PsxR3000aStepReason::ok);
+        CHECK(jojo::step_psx_r3000a(state, 0u, bus).reason ==
+              jojo::PsxR3000aStepReason::ok);
+        CHECK(state.gpr[3] == lwl_expected[offset]);
+
+        jojo::reset_psx_r3000a(state, 0x80010b00u);
+        state.gpr[2] = 0x80001000u + offset;
+        state.gpr[3] = 0xaabbccddu;
+        CHECK(jojo::step_psx_r3000a(state, encode_i(0x26, 2, 3, 0u), bus).reason ==
+              jojo::PsxR3000aStepReason::ok);
+        CHECK(jojo::step_psx_r3000a(state, 0u, bus).reason ==
+              jojo::PsxR3000aStepReason::ok);
+        CHECK(state.gpr[3] == lwr_expected[offset]);
+
+        CHECK(jojo::psx_bus_write_u32(bus, 0x80001000u, 0x44332211u) ==
+              jojo::PsxBusAccessReason::ok);
+        jojo::reset_psx_r3000a(state, 0x80010c00u);
+        state.gpr[2] = 0x80001000u + offset;
+        state.gpr[3] = 0xaabbccddu;
+        CHECK(jojo::step_psx_r3000a(state, encode_i(0x2a, 2, 3, 0u), bus).reason ==
+              jojo::PsxR3000aStepReason::ok);
+        CHECK(jojo::psx_bus_read_u32(bus, 0x80001000u).value == swl_expected[offset]);
+
+        CHECK(jojo::psx_bus_write_u32(bus, 0x80001000u, 0x44332211u) ==
+              jojo::PsxBusAccessReason::ok);
+        jojo::reset_psx_r3000a(state, 0x80010d00u);
+        state.gpr[2] = 0x80001000u + offset;
+        state.gpr[3] = 0xaabbccddu;
+        CHECK(jojo::step_psx_r3000a(state, encode_i(0x2e, 2, 3, 0u), bus).reason ==
+              jojo::PsxR3000aStepReason::ok);
+        CHECK(jojo::psx_bus_read_u32(bus, 0x80001000u).value == swr_expected[offset]);
+    }
+}
+
 static void test_jr_preserves_delay_slot_then_uses_register_target() {
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x80035a34u);
@@ -592,6 +699,9 @@ int main() {
     test_division_results_and_psx_edge_behavior();
     test_signed_unsigned_subword_loads_and_byte_store();
     test_scratchpad_storage_and_segment_aliases();
+    test_lwl_lwr_pair_merges_pending_load_for_little_endian_word();
+    test_swl_swr_pair_stores_little_endian_unaligned_word();
+    test_unaligned_word_merge_masks_for_every_byte_offset();
     test_jr_preserves_delay_slot_then_uses_register_target();
     test_jalr_links_and_preserves_delay_slot();
     test_jalr_reads_target_before_writing_same_register_link();
