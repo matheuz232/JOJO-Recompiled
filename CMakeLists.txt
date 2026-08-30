@@ -47,10 +47,19 @@ add_library(jojo_core STATIC
 target_include_directories(jojo_core PUBLIC src)
 
 if(WIN32)
-  add_executable(jojo_recompiled WIN32 src/app_win32/main.cpp)
+  add_executable(jojo_recompiled WIN32
+    src/app_win32/main.cpp
+    src/app_win32/presentation_host.cpp)
   set_target_properties(jojo_recompiled PROPERTIES OUTPUT_NAME "JOJO-Recompiled")
   target_compile_definitions(jojo_recompiled PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
-  target_link_libraries(jojo_recompiled PRIVATE jojo_core shell32 ole32 uuid)
+  target_link_libraries(jojo_recompiled PRIVATE jojo_core shell32 ole32 uuid d3d11 dxgi)
+
+  add_executable(jojo_win32_presentation_tests
+    tests/test_win32_presentation.cpp
+    src/app_win32/presentation_host.cpp)
+  target_compile_definitions(jojo_win32_presentation_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+  target_link_libraries(jojo_win32_presentation_tests PRIVATE jojo_core d3d11 dxgi)
+  add_test(NAME jojo_win32_presentation_tests COMMAND jojo_win32_presentation_tests)
 endif()
 
 add_executable(jojo_tests tests/test_main.cpp)
