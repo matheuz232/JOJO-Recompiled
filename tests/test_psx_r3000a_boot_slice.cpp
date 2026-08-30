@@ -78,16 +78,17 @@ static void test_main_ram_is_two_megabytes_and_zero_initialized() {
     CHECK(first.value == 0u);
 }
 
-static void test_ram_kuseg_kseg0_kseg1_alias_the_same_storage() {
+static void test_ram_kuseg_kseg0_kseg1_and_default_8mb_window_alias_storage() {
     jojo::PsxBus bus{};
     CHECK(jojo::psx_bus_write_u32(bus, 0x00000100u, 0x11223344u) ==
           jojo::PsxBusAccessReason::ok);
     CHECK(jojo::psx_bus_read_u32(bus, 0x80000100u).value == 0x11223344u);
     CHECK(jojo::psx_bus_read_u32(bus, 0xa0000100u).value == 0x11223344u);
 
-    CHECK(jojo::psx_bus_write_u32(bus, 0x80000104u, 0xaabbccddu) ==
+    CHECK(jojo::psx_bus_write_u32(bus, 0x80200104u, 0xaabbccddu) ==
           jojo::PsxBusAccessReason::ok);
     CHECK(jojo::psx_bus_read_u32(bus, 0x00000104u).value == 0xaabbccddu);
+    CHECK(jojo::psx_bus_read_u32(bus, 0x80600104u).value == 0xaabbccddu);
 }
 
 static void test_ram_access_rejects_unaligned_and_unmapped_addresses() {
@@ -96,7 +97,7 @@ static void test_ram_access_rejects_unaligned_and_unmapped_addresses() {
           jojo::PsxBusAccessReason::misaligned);
     CHECK(jojo::psx_bus_read_u32(bus, 0x80000002u).reason ==
           jojo::PsxBusAccessReason::misaligned);
-    CHECK(jojo::psx_bus_write_u32(bus, 0x80200000u, 1u) ==
+    CHECK(jojo::psx_bus_write_u32(bus, 0x80800000u, 1u) ==
           jojo::PsxBusAccessReason::unmapped);
     CHECK(jojo::psx_bus_read_u32(bus, 0x1f801000u).reason ==
           jojo::PsxBusAccessReason::unmapped);
@@ -136,7 +137,7 @@ int main() {
     test_sltu_uses_unsigned_comparison();
     test_bne_taken_preserves_delay_slot();
     test_main_ram_is_two_megabytes_and_zero_initialized();
-    test_ram_kuseg_kseg0_kseg1_alias_the_same_storage();
+    test_ram_kuseg_kseg0_kseg1_and_default_8mb_window_alias_storage();
     test_ram_access_rejects_unaligned_and_unmapped_addresses();
     test_sw_uses_signed_offset_and_writes_through_bus();
     test_sw_reports_memory_fault_without_advancing_pipeline();
