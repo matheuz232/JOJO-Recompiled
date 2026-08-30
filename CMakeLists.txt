@@ -18,6 +18,7 @@ add_library(jojo_core STATIC
   src/core/settings.cpp
   src/core/presentation.cpp
   src/core/input.cpp
+  src/core/settings_menu.cpp
   src/core/disc_image.cpp
   src/core/disc_media.cpp
   src/core/iso9660.cpp
