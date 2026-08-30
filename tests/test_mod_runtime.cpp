@@ -114,6 +114,25 @@ int main() {
     const auto root = std::filesystem::temp_directory_path() / "jojo_mod_discovery_tests";
     std::error_code ec;
     std::filesystem::remove_all(root, ec);
+
+    const auto symlink_catalog_root = std::filesystem::temp_directory_path() / "jojo_mod_symlink_catalog_tests";
+    const auto symlink_target_root = std::filesystem::temp_directory_path() / "jojo_mod_symlink_catalog_target";
+    std::filesystem::remove_all(symlink_catalog_root, ec);
+    std::filesystem::remove_all(symlink_target_root, ec);
+    std::filesystem::create_directories(symlink_catalog_root, ec);
+    write_text(symlink_target_root / "mod.ini", data_manifest("linked.mod"));
+    std::error_code catalog_symlink_ec;
+    std::filesystem::create_directory_symlink(
+        symlink_target_root,
+        symlink_catalog_root / "linked",
+        catalog_symlink_ec);
+    if (!catalog_symlink_ec) {
+        const auto linked_catalog = discover_mods(symlink_catalog_root);
+        CHECK(!linked_catalog);
+        if (!linked_catalog) CHECK(linked_catalog.detail.find("symlink") != std::string::npos);
+    }
+    std::filesystem::remove_all(symlink_catalog_root, ec);
+    std::filesystem::remove_all(symlink_target_root, ec);
     write_text(root / "zeta" / "mod.ini", data_manifest("zeta.mod"));
     write_text(root / "alpha" / "mod.ini", data_manifest("alpha.mod"));
     std::filesystem::create_directories(root / "ignored-no-manifest");
@@ -189,6 +208,13 @@ int main() {
 
     const std::vector<std::string> unknown_request{"does.not.exist"};
     CHECK(!resolve_mod_set(graph, unknown_request));
+
+    ModCatalog incompatible_api{make_mod("future.api")};
+    incompatible_api[0].manifest.api_version = {2, 0, 0};
+    const std::vector<std::string> incompatible_api_request{"future.api"};
+    const auto incompatible_api_result = resolve_mod_set(incompatible_api, incompatible_api_request);
+    CHECK(!incompatible_api_result);
+    if (!incompatible_api_result) CHECK(incompatible_api_result.detail.find("API") != std::string::npos);
 
     const auto content_root = std::filesystem::temp_directory_path() / "jojo_mod_content_tests";
     std::filesystem::remove_all(content_root, ec);

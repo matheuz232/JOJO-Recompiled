@@ -38,9 +38,18 @@ Result<ResolvedModSet> resolve_mod_set(
             return Result<void>::success();
         }
 
+        const auto& manifest = found->second->manifest;
+        if (manifest.api_version.major != kModApiVersion.major ||
+            compare_semver(manifest.api_version, kModApiVersion) > 0) {
+            return Result<void>::failure(
+                ErrorCode::invalid_argument,
+                "mod " + id + " requires incompatible API " +
+                    to_string(manifest.api_version) + " (host " +
+                    to_string(kModApiVersion) + ")");
+        }
+
         visit.emplace(id, VisitState::visiting);
         enabled.insert(id);
-        const auto& manifest = found->second->manifest;
         for (const auto& dependency : manifest.dependencies) {
             const auto dependency_it = by_id.find(dependency.id);
             if (dependency_it == by_id.end()) {

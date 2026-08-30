@@ -219,8 +219,18 @@ Result<ModCatalog> discover_mods(const std::filesystem::path& mods_root) {
 
     ModCatalog catalog;
     for (std::filesystem::directory_iterator it(mods_root, ec), end; !ec && it != end; it.increment(ec)) {
-        if (!it->is_directory(ec) || ec) {
-            if (ec) return Result<ModCatalog>::failure(ErrorCode::io_error, "failed to inspect mod directory: " + ec.message());
+        const auto status = it->symlink_status(ec);
+        if (ec) {
+            return Result<ModCatalog>::failure(
+                ErrorCode::io_error,
+                "failed to inspect mod directory: " + ec.message());
+        }
+        if (std::filesystem::is_symlink(status)) {
+            return Result<ModCatalog>::failure(
+                ErrorCode::invalid_argument,
+                "symlinked mod directory is not allowed: " + it->path().string());
+        }
+        if (!std::filesystem::is_directory(status)) {
             continue;
         }
         const auto manifest_path = it->path() / "mod.ini";
