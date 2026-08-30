@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <string>
 
 #ifndef JOJO_TEST_NATIVE_MOD_ID
 #define JOJO_TEST_NATIVE_MOD_ID "native.fixture"
@@ -18,9 +19,25 @@
 namespace {
 
 #if !defined(JOJO_TEST_NATIVE_MOD_NO_EXPORT)
+std::string test_log_path() {
+#if defined(_MSC_VER)
+    char* raw = nullptr;
+    std::size_t length = 0;
+    if (_dupenv_s(&raw, &length, "JOJO_NATIVE_MOD_TEST_LOG") != 0 || raw == nullptr) {
+        return {};
+    }
+    std::string value(raw);
+    std::free(raw);
+    return value;
+#else
+    const char* raw = std::getenv("JOJO_NATIVE_MOD_TEST_LOG");
+    return raw == nullptr ? std::string{} : std::string(raw);
+#endif
+}
+
 void append_event(const char* action) {
-    const char* log_path = std::getenv("JOJO_NATIVE_MOD_TEST_LOG");
-    if (log_path == nullptr || *log_path == '\0') return;
+    const auto log_path = test_log_path();
+    if (log_path.empty()) return;
 
     std::ofstream out(log_path, std::ios::app);
     out << action << ':' << JOJO_TEST_NATIVE_MOD_ID << '\n';
@@ -38,25 +55,20 @@ void on_unload() {
 
 }
 
-#if !defined(JOJO_TEST_NATIVE_MOD_NO_EXPORT)
 #if defined(_WIN32)
-#define JOJO_TEST_EXPORT extern "C" __declspec(dllexport)
+#define JOJO_MOD_EXPORT extern "C" __declspec(dllexport)
 #else
-#define JOJO_TEST_EXPORT extern "C" __attribute__((visibility("default")))
+#define JOJO_MOD_EXPORT extern "C" __attribute__((visibility("default")))
 #endif
 
-JOJO_TEST_EXPORT const JojoNativeModV1* jojo_get_native_mod_v1(void) {
-    static const JojoNativeModV1 descriptor{
-        static_cast<uint32_t>(sizeof(JojoNativeModV1)),
+#if !defined(JOJO_TEST_NATIVE_MOD_NO_EXPORT)
+JOJO_MOD_EXPORT const jojo_native_mod_descriptor_v1* jojo_mod_get_descriptor_v1() {
+    static const jojo_native_mod_descriptor_v1 descriptor{
         JOJO_TEST_NATIVE_MOD_ABI,
         JOJO_TEST_NATIVE_MOD_ID,
         &on_load,
         &on_unload,
     };
     return &descriptor;
-}
-#else
-extern "C" int jojo_native_mod_fixture_without_entry_point(void) {
-    return 0;
 }
 #endif
