@@ -118,10 +118,13 @@ static void test_block_limit_is_reported_without_claiming_successful_boot() {
 
 static void test_sleep_is_reported_as_sleep_not_end_of_program() {
     jojo::DreamcastBootProgram program{};
-    append_word(program, 0x001Bu); // SLEEP
+    append_word(program, 0x001Bu); // SLEEP (privileged)
     append_word(program, 0x0009u); // NOP that must not be treated as normal continuation
 
-    const auto run = jojo::run_dreamcast_boot_reference(program, {}, 32u);
+    jojo::Sh4ReferenceState initial{};
+    initial.sr = 0x40000000u; // MD=1: privileged mode required by SH-4 SLEEP.
+
+    const auto run = jojo::run_dreamcast_boot_reference(program, initial, 32u);
     CHECK(run);
     if (!run) return;
 
@@ -129,6 +132,7 @@ static void test_sleep_is_reported_as_sleep_not_end_of_program() {
     CHECK(run.value.state.sleeping);
     CHECK(run.value.state.last_system_event == jojo::Sh4ReferenceSystemEvent::sleep);
     CHECK(run.value.blocks_executed == 1u);
+    CHECK(run.value.operations_executed == 1u);
 }
 
 int main() {
