@@ -330,7 +330,9 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
 [[nodiscard]] inline PsxR3000aStepResult step_psx_r3000a(
     PsxR3000aState& state, std::uint32_t instruction, PsxBus& bus) noexcept {
     const auto op = static_cast<std::uint8_t>(instruction >> 26u);
-    if (op != 0x23u && op != 0x25u && op != 0x29u && op != 0x2bu) {
+    if (op != 0x20u && op != 0x21u && op != 0x23u &&
+        op != 0x24u && op != 0x25u && op != 0x28u &&
+        op != 0x29u && op != 0x2bu) {
         return step_psx_r3000a(state, instruction);
     }
 
@@ -342,10 +344,15 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         static_cast<std::int16_t>(instruction & 0xffffu));
     const auto address = state.gpr[rs] + static_cast<std::uint32_t>(signed_immediate);
 
-    if (op == 0x29u || op == 0x2bu) { // SH / SW
-        const auto store_reason = op == 0x29u
-            ? psx_bus_write_u16(bus, address, static_cast<std::uint16_t>(state.gpr[rt]))
-            : psx_bus_write_u32(bus, address, state.gpr[rt]);
+    if (op == 0x28u || op == 0x29u || op == 0x2bu) { // SB / SH / SW
+        PsxBusAccessReason store_reason = PsxBusAccessReason::unmapped;
+        if (op == 0x28u) {
+            store_reason = psx_bus_write_u8(bus, address, static_cast<std::uint8_t>(state.gpr[rt]));
+        } else if (op == 0x29u) {
+            store_reason = psx_bus_write_u16(bus, address, static_cast<std::uint16_t>(state.gpr[rt]));
+        } else {
+            store_reason = psx_bus_write_u32(bus, address, state.gpr[rt]);
+        }
         if (store_reason != PsxBusAccessReason::ok) {
             return {PsxR3000aStepReason::memory_fault, instruction_pc, instruction};
         }
@@ -359,10 +366,20 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
 
     PsxBusAccessReason load_reason = PsxBusAccessReason::ok;
     std::uint32_t load_value = 0u;
-    if (op == 0x25u) { // LHU
+    if (op == 0x20u || op == 0x24u) { // LB / LBU
+        const auto loaded = psx_bus_read_u8(bus, address);
+        load_reason = loaded.reason;
+        load_value = static_cast<std::uint32_t>(loaded.value);
+        if (op == 0x20u && (loaded.value & 0x80u) != 0u) {
+            load_value |= 0xffffff00u;
+        }
+    } else if (op == 0x21u || op == 0x25u) { // LH / LHU
         const auto loaded = psx_bus_read_u16(bus, address);
         load_reason = loaded.reason;
         load_value = static_cast<std::uint32_t>(loaded.value);
+        if (op == 0x21u && (loaded.value & 0x8000u) != 0u) {
+            load_value |= 0xffff0000u;
+        }
     } else { // LW
         const auto loaded = psx_bus_read_u32(bus, address);
         load_reason = loaded.reason;
