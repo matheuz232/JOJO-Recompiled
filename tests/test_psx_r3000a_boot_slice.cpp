@@ -164,6 +164,23 @@ static void test_lw_delay_slot_reads_old_value_then_loaded_value_becomes_visible
     CHECK(state.gpr[3] == 0x89abcdefu);
 }
 
+static void test_load_delay_slot_write_to_same_register_wins() {
+    jojo::PsxBus bus{};
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010050u);
+    state.gpr[2] = 0x80001000u;
+    state.gpr[3] = 0x11111111u;
+    CHECK(jojo::psx_bus_write_u32(bus, 0x80001000u, 0x89abcdefu) ==
+          jojo::PsxBusAccessReason::ok);
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x23, 2, 3, 0u), bus).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x09, 0, 3, 7u), bus).reason ==
+          jojo::PsxR3000aStepReason::ok);
+
+    CHECK(state.gpr[3] == 7u);
+}
+
 static void test_lw_memory_fault_does_not_advance_or_modify_target() {
     jojo::PsxBus bus{};
     jojo::PsxR3000aState state{};
@@ -190,6 +207,7 @@ int main() {
     test_sw_reports_memory_fault_without_advancing_pipeline();
     test_lw_uses_signed_offset_and_defers_register_update();
     test_lw_delay_slot_reads_old_value_then_loaded_value_becomes_visible();
+    test_load_delay_slot_write_to_same_register_wins();
     test_lw_memory_fault_does_not_advance_or_modify_target();
     if (failures) return 1;
     std::cout << "R3000A boot integer and RAM load/store assertions passed\n";
