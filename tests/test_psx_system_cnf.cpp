@@ -1,6 +1,10 @@
-#include "core/psx_system_cnf.h"
+#include "core/iso9660.h"
+#include "core/psx_boot.h"
 #include "core/psx_exe.h"
+#include "core/psx_system_cnf.h"
+#include "iso_fixture.h"
 #include <cstdint>
+#include <filesystem>
 #include <iostream>
 #include <string_view>
 #include <vector>
@@ -168,6 +172,79 @@ static void test_psx_exe_rejects_load_address_overflow() {
     if (!parsed) CHECK(parsed.error == jojo::ErrorCode::invalid_installation);
 }
 
+static std::filesystem::path temp_iso(std::string_view name) {
+    return std::filesystem::temp_directory_path() / std::string(name);
+}
+
+static void test_psx_boot_analysis_follows_system_cnf_to_executable() {
+    const auto path = temp_iso("jojo_psx_boot_ok.iso");
+    test_iso::write_psx_image(path);
+    const auto image = jojo::open_iso9660(path);
+    CHECK(image);
+    if (image) {
+        const auto boot = jojo::analyze_psx_boot(image.value);
+        CHECK(boot);
+        if (boot) {
+            CHECK(boot.value.executable_path == "/SLUS_010.60");
+            CHECK(boot.value.system.boot_iso_path == "/SLUS_010.60");
+            CHECK(boot.value.executable.initial_pc == 0x8001000cu);
+            CHECK(boot.value.executable.load_address == 0x80010000u);
+            CHECK(boot.value.executable.payload_size == 0x800u);
+            CHECK(boot.value.executable.stack_base == 0x801ffff0u);
+        }
+    }
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+static void test_psx_boot_analysis_rejects_missing_system_cnf() {
+    const auto path = temp_iso("jojo_psx_boot_no_cnf.iso");
+    test_iso::PsxImageOptions options{};
+    options.include_system_cnf = false;
+    test_iso::write_psx_image(path, options);
+    const auto image = jojo::open_iso9660(path);
+    CHECK(image);
+    if (image) CHECK(!jojo::analyze_psx_boot(image.value));
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+static void test_psx_boot_analysis_rejects_missing_boot_file() {
+    const auto path = temp_iso("jojo_psx_boot_no_exe.iso");
+    test_iso::PsxImageOptions options{};
+    options.include_boot_executable = false;
+    test_iso::write_psx_image(path, options);
+    const auto image = jojo::open_iso9660(path);
+    CHECK(image);
+    if (image) CHECK(!jojo::analyze_psx_boot(image.value));
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+static void test_psx_boot_analysis_rejects_malformed_system_cnf() {
+    const auto path = temp_iso("jojo_psx_boot_bad_cnf.iso");
+    test_iso::PsxImageOptions options{};
+    options.system_cnf = "BOOT=host:\\SLUS_010.60;1\r\n";
+    test_iso::write_psx_image(path, options);
+    const auto image = jojo::open_iso9660(path);
+    CHECK(image);
+    if (image) CHECK(!jojo::analyze_psx_boot(image.value));
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+static void test_psx_boot_analysis_rejects_malformed_executable() {
+    const auto path = temp_iso("jojo_psx_boot_bad_exe.iso");
+    test_iso::PsxImageOptions options{};
+    options.valid_executable_magic = false;
+    test_iso::write_psx_image(path, options);
+    const auto image = jojo::open_iso9660(path);
+    CHECK(image);
+    if (image) CHECK(!jojo::analyze_psx_boot(image.value));
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
 int main() {
     test_parses_supported_disc_shape();
     test_accepts_case_insensitive_keys_and_lf();
@@ -184,6 +261,11 @@ int main() {
     test_psx_exe_rejects_declared_size_mismatch();
     test_psx_exe_rejects_pc_outside_loaded_payload();
     test_psx_exe_rejects_load_address_overflow();
+    test_psx_boot_analysis_follows_system_cnf_to_executable();
+    test_psx_boot_analysis_rejects_missing_system_cnf();
+    test_psx_boot_analysis_rejects_missing_boot_file();
+    test_psx_boot_analysis_rejects_malformed_system_cnf();
+    test_psx_boot_analysis_rejects_malformed_executable();
     if (failures) {
         std::cerr << failures << " test assertion(s) failed\n";
         return 1;
