@@ -15,11 +15,15 @@ jobs:
           Add-Content -Path CMakeLists.txt -Value @'
 
           if(WIN32)
-            add_executable(jojo_win32_presentation_tests tests/test_win32_presentation.cpp)
+            add_executable(jojo_win32_presentation_tests
+              tests/test_win32_presentation.cpp
+              src/app_win32/presentation_host.cpp)
             target_link_libraries(jojo_win32_presentation_tests PRIVATE jojo_core)
           endif()
           '@
       - name: Configure
         run: cmake -S . -B build
-      - name: Build RED target
+      - name: Build GREEN target
         run: cmake --build build --config Release --target jojo_win32_presentation_tests
+      - name: Run GREEN target
+        run: .\build\Release\jojo_win32_presentation_tests.exe
