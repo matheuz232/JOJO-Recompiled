@@ -18,6 +18,7 @@ add_library(jojo_core STATIC
   src/core/settings.cpp
   src/core/presentation.cpp
   src/core/input.cpp
+  src/core/settings_menu.cpp
   src/core/disc_image.cpp
   src/core/disc_media.cpp
   src/core/iso9660.cpp
@@ -57,12 +58,17 @@ if(CMAKE_DL_LIBS)
 endif()
 
 if(WIN32)
+  add_library(jojo_win32_input_host STATIC
+    src/platform/windows/controller_win32.cpp)
+  target_compile_definitions(jojo_win32_input_host PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+  target_link_libraries(jojo_win32_input_host PUBLIC jojo_core setupapi hid user32)
+
   add_executable(jojo_recompiled WIN32
     src/app_win32/main.cpp
     src/app_win32/presentation_host.cpp)
   set_target_properties(jojo_recompiled PROPERTIES OUTPUT_NAME "JOJO-Recompiled")
   target_compile_definitions(jojo_recompiled PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
-  target_link_libraries(jojo_recompiled PRIVATE jojo_core shell32 ole32 uuid d3d11 dxgi)
+  target_link_libraries(jojo_recompiled PRIVATE jojo_core jojo_win32_input_host shell32 ole32 uuid d3d11 dxgi)
 
   add_executable(jojo_win32_presentation_tests
     tests/test_win32_presentation.cpp
@@ -70,6 +76,11 @@ if(WIN32)
   target_compile_definitions(jojo_win32_presentation_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
   target_link_libraries(jojo_win32_presentation_tests PRIVATE jojo_core d3d11 dxgi)
   add_test(NAME jojo_win32_presentation_tests COMMAND jojo_win32_presentation_tests)
+
+  add_executable(jojo_win32_input_tests tests/test_win32_input.cpp)
+  target_compile_definitions(jojo_win32_input_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+  target_link_libraries(jojo_win32_input_tests PRIVATE jojo_win32_input_host)
+  add_test(NAME jojo_win32_input_tests COMMAND jojo_win32_input_tests)
 endif()
 
 add_executable(jojo_tests tests/test_main.cpp)
@@ -216,6 +227,10 @@ add_test(NAME jojo_sha256_tests COMMAND jojo_sha256_tests)
 add_executable(jojo_mod_runtime_tests tests/test_mod_runtime.cpp)
 target_link_libraries(jojo_mod_runtime_tests PRIVATE jojo_core)
 add_test(NAME jojo_mod_runtime_tests COMMAND jojo_mod_runtime_tests)
+
+add_executable(jojo_m5_settings_input_tests tests/test_m5_settings_input.cpp)
+target_link_libraries(jojo_m5_settings_input_tests PRIVATE jojo_core)
+add_test(NAME jojo_m5_settings_input_tests COMMAND jojo_m5_settings_input_tests)
 
 add_executable(jojo_mod_policy_tests tests/test_mod_policy.cpp)
 target_link_libraries(jojo_mod_policy_tests PRIVATE jojo_core)
