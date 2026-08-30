@@ -13,6 +13,15 @@ static std::uint32_t encode_i(std::uint8_t op, std::uint8_t rs, std::uint8_t rt,
            imm;
 }
 
+static std::uint32_t encode_r(std::uint8_t rs, std::uint8_t rt, std::uint8_t rd,
+                              std::uint8_t shamt, std::uint8_t funct) {
+    return (static_cast<std::uint32_t>(rs) << 21u) |
+           (static_cast<std::uint32_t>(rt) << 16u) |
+           (static_cast<std::uint32_t>(rd) << 11u) |
+           (static_cast<std::uint32_t>(shamt) << 6u) |
+           funct;
+}
+
 static void test_ori_zero_extends_immediate_and_advances() {
     jojo::PsxR3000aState cpu{};
     jojo::reset_psx_r3000a(cpu, 0x8003c674u);
@@ -49,9 +58,30 @@ static void test_andi_zero_extends_immediate_and_advances() {
     CHECK(cpu.gpr[3] == 0u);
 }
 
+static void test_sllv_uses_low_five_shift_bits_and_advances() {
+    jojo::PsxR3000aState cpu{};
+    jojo::reset_psx_r3000a(cpu, 0x8003c950u);
+    cpu.gpr[17] = 4u;
+    cpu.gpr[3] = 1u;
+
+    const auto result = jojo::step_psx_r3000a(cpu, encode_r(17, 3, 3, 0, 0x04));
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.gpr[3] == 0x10u);
+    CHECK(cpu.pc == 0x8003c954u);
+    CHECK(cpu.next_pc == 0x8003c958u);
+
+    jojo::reset_psx_r3000a(cpu, 0x80001000u);
+    cpu.gpr[2] = 0x21u;
+    cpu.gpr[3] = 3u;
+    CHECK(jojo::step_psx_r3000a(cpu, encode_r(2, 3, 4, 0, 0x04)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.gpr[4] == 6u);
+}
+
 int main() {
     test_ori_zero_extends_immediate_and_advances();
     test_andi_zero_extends_immediate_and_advances();
+    test_sllv_uses_low_five_shift_bits_and_advances();
     if (failures) return 1;
     std::cout << "R3000A commercial frontier assertions passed\n";
     return 0;
