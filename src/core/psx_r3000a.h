@@ -87,6 +87,13 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             following_pc = state.gpr[rs];
             supported = true;
             break;
+        case 0x09u: { // JALR
+            const auto target = state.gpr[rs];
+            write_gpr(rd, instruction_pc + 8u);
+            following_pc = target;
+            supported = true;
+            break;
+        }
         case 0x21u: // ADDU
             write_gpr(rd, state.gpr[rs] + state.gpr[rt]);
             supported = true;
