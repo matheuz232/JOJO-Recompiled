@@ -13,6 +13,12 @@ endif()
 
 enable_testing()
 
+add_test(
+  NAME jojo_offline_scope_policy
+  COMMAND ${CMAKE_COMMAND}
+    -DROOT=${CMAKE_SOURCE_DIR}
+    -P ${CMAKE_SOURCE_DIR}/cmake/verify_offline_scope.cmake)
+
 add_library(jojo_core STATIC
   src/core/version.cpp
   src/core/settings.cpp
@@ -230,6 +236,10 @@ add_test(NAME jojo_native_backend_tests COMMAND jojo_native_backend_tests)
 add_executable(jojo_presentation_tests tests/test_presentation.cpp)
 target_link_libraries(jojo_presentation_tests PRIVATE jojo_core)
 add_test(NAME jojo_presentation_tests COMMAND jojo_presentation_tests)
+
+add_executable(jojo_offline_product_contract_tests tests/test_offline_product_contract.cpp)
+target_link_libraries(jojo_offline_product_contract_tests PRIVATE jojo_core)
+add_test(NAME jojo_offline_product_contract_tests COMMAND jojo_offline_product_contract_tests)
 
 add_executable(jojo_semver_tests tests/test_semver.cpp)
 target_link_libraries(jojo_semver_tests PRIVATE jojo_core)
