@@ -131,6 +131,53 @@ static void test_sw_reports_memory_fault_without_advancing_pipeline() {
     CHECK(state.next_pc == 0x80010010u);
 }
 
+static void test_lw_uses_signed_offset_and_defers_register_update() {
+    jojo::PsxBus bus{};
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010050u);
+    state.gpr[2] = 0x80001004u;
+    state.gpr[3] = 0x11111111u;
+    CHECK(jojo::psx_bus_write_u32(bus, 0x80001000u, 0x89abcdefu) ==
+          jojo::PsxBusAccessReason::ok);
+
+    const auto result = jojo::step_psx_r3000a(state, encode_i(0x23, 2, 3, 0xfffcu), bus);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[3] == 0x11111111u);
+    CHECK(state.pc == 0x80010054u);
+}
+
+static void test_lw_delay_slot_reads_old_value_then_loaded_value_becomes_visible() {
+    jojo::PsxBus bus{};
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010050u);
+    state.gpr[2] = 0x80001000u;
+    state.gpr[3] = 0x11111111u;
+    CHECK(jojo::psx_bus_write_u32(bus, 0x80001000u, 0x89abcdefu) ==
+          jojo::PsxBusAccessReason::ok);
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x23, 2, 3, 0u), bus).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(jojo::step_psx_r3000a(state, encode_r(3, 0, 4, 0, 0x21), bus).reason ==
+          jojo::PsxR3000aStepReason::ok);
+
+    CHECK(state.gpr[4] == 0x11111111u);
+    CHECK(state.gpr[3] == 0x89abcdefu);
+}
+
+static void test_lw_memory_fault_does_not_advance_or_modify_target() {
+    jojo::PsxBus bus{};
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010050u);
+    state.gpr[2] = 0x80001002u;
+    state.gpr[3] = 0x12345678u;
+
+    const auto result = jojo::step_psx_r3000a(state, encode_i(0x23, 2, 3, 0u), bus);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::memory_fault);
+    CHECK(state.gpr[3] == 0x12345678u);
+    CHECK(state.pc == 0x80010050u);
+    CHECK(state.next_pc == 0x80010054u);
+}
+
 int main() {
     test_lui_and_addiu_build_boot_addresses();
     test_addiu_sign_extends_immediate();
@@ -141,7 +188,10 @@ int main() {
     test_ram_access_rejects_unaligned_and_unmapped_addresses();
     test_sw_uses_signed_offset_and_writes_through_bus();
     test_sw_reports_memory_fault_without_advancing_pipeline();
+    test_lw_uses_signed_offset_and_defers_register_update();
+    test_lw_delay_slot_reads_old_value_then_loaded_value_becomes_visible();
+    test_lw_memory_fault_does_not_advance_or_modify_target();
     if (failures) return 1;
-    std::cout << "R3000A boot integer and RAM/SW assertions passed\n";
+    std::cout << "R3000A boot integer and RAM load/store assertions passed\n";
     return 0;
 }
