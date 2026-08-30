@@ -12,9 +12,16 @@
 
 namespace jojo {
 
+struct PsxBiosState {
+    bool heap_initialized{};
+    std::uint32_t heap_base{};
+    std::uint32_t heap_size{};
+};
+
 struct PsxRuntime {
     PsxBus bus{};
     PsxR3000aState cpu{};
+    PsxBiosState bios{};
 };
 
 [[nodiscard]] inline Result<void> load_psx_boot_executable(
