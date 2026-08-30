@@ -1,4 +1,5 @@
 #include "core/revision.h"
+#include "core/psx_boot.h"
 #include "core/psx_exe.h"
 #include "core/psx_system_cnf.h"
 #include <algorithm>
@@ -245,6 +246,36 @@ Result<PsxExeHeader> parse_psx_exe(std::span<const std::uint8_t> file) {
     }
 
     return Result<PsxExeHeader>::success(header);
+}
+
+Result<PsxBootImage> analyze_psx_boot(const Iso9660Image& image) {
+    auto cnf_file = read_iso9660_file(image, "/SYSTEM.CNF");
+    if (!cnf_file) {
+        return Result<PsxBootImage>::failure(cnf_file.error, cnf_file.detail);
+    }
+
+    const std::string cnf_text(cnf_file.value.begin(), cnf_file.value.end());
+    auto system = parse_psx_system_cnf(cnf_text);
+    if (!system) {
+        return Result<PsxBootImage>::failure(system.error, system.detail);
+    }
+
+    const auto executable_path = system.value.boot_iso_path;
+    auto executable_file = read_iso9660_file(image, executable_path);
+    if (!executable_file) {
+        return Result<PsxBootImage>::failure(executable_file.error, executable_file.detail);
+    }
+
+    auto executable = parse_psx_exe(executable_file.value);
+    if (!executable) {
+        return Result<PsxBootImage>::failure(executable.error, executable.detail);
+    }
+
+    PsxBootImage boot{};
+    boot.system = std::move(system.value);
+    boot.executable = executable.value;
+    boot.executable_path = executable_path;
+    return Result<PsxBootImage>::success(std::move(boot));
 }
 
 Result<GameRevisionMatch> identify_game_revision(
