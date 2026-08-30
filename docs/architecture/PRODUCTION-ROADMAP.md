@@ -87,12 +87,20 @@ Completion evidence is tracked in [`../superpowers/plans/2026-08-30-presentation
 
 M4 completion closes the **host presentation/aspect/quality contract defined above**. It does **not** claim that Dreamcast PVR2 scene rendering is complete, that a commercial revision boots, that a real frame/menu is visible, or that game input/audio are functional. Those remain device/integration work and are still required before conversion output can become `native-ready`.
 
-### M5 — In-game settings + input
+### M5 — In-game settings + input — Complete (100%)
 
-- Graphics, audio and controls inside the game menus.
-- Keyboard, XInput and generic HID devices.
-- USB, Bluetooth and dongle transport are transparent to the binding model.
-- Per-player/per-device bindings and hot-plug refresh.
+Completion evidence is tracked in [`../superpowers/plans/2026-08-30-ingame-settings-input.md`](../superpowers/plans/2026-08-30-ingame-settings-input.md) and [`../superpowers/plans/2026-08-30-ingame-settings-input-verification.md`](../superpowers/plans/2026-08-30-ingame-settings-input-verification.md).
+
+- [x] Runtime graphics, audio and controls settings modeled for the in-game menu while remaining absent from the first-run conversion shell.
+- [x] Two-player per-device bindings, deterministic action resolution and interactive binding capture.
+- [x] Backward-compatible player-1 input settings loading with the new two-player persisted schema.
+- [x] Keyboard, dynamically loaded XInput and generic joystick/gamepad HID support on Windows.
+- [x] USB cable, Bluetooth and wireless dongle remain transport-transparent to persisted bindings.
+- [x] Hot-plug catalog refresh with explicit connected/disconnected changes while preserving bindings for devices that later reconnect.
+- [x] Real Windows Raw Input HID decoding plus XInput HID-shadow filtering to avoid duplicate physical controllers.
+- [x] Linux portable-core and Windows x64/MSVC build/test coverage, including Windows executable artifact upload.
+
+M5 completion closes the reusable **settings/menu/input runtime contract**. It does **not** claim that a commercial revision currently reaches a rendered native settings screen, that Dreamcast Maple input has been wired into original game code, that AICA audio playback is complete, or that a converted commercial installation is `native-ready`. Those remain real-game/device integration work requiring legally supplied media for end-to-end evidence.
 
 ### M6 — Mod runtime — Complete (100%)
 
