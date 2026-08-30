@@ -4,6 +4,7 @@
 #include "core/semver.h"
 
 #include <filesystem>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
@@ -49,6 +50,27 @@ struct ResolvedModSet {
     std::vector<std::string> diagnostics;
 };
 
+struct OverlayEntry {
+    std::string mod_id;
+    std::filesystem::path host_path;
+};
+
+struct OverlayCollision {
+    std::string logical_path;
+    std::string previous_mod_id;
+    std::string replacing_mod_id;
+};
+
+struct ModOverlay {
+    std::map<std::string, OverlayEntry> files;
+    std::vector<OverlayCollision> collisions;
+};
+
+struct ModSetHashes {
+    std::string mod_set_hash;
+    std::string gameplay_hash;
+};
+
 [[nodiscard]] Result<ModManifest> parse_mod_manifest(
     std::string_view text,
     const std::filesystem::path& root);
@@ -56,5 +78,8 @@ struct ResolvedModSet {
 [[nodiscard]] Result<ResolvedModSet> resolve_mod_set(
     const ModCatalog& catalog,
     std::span<const std::string> requested_ids);
+[[nodiscard]] Result<ModOverlay> build_mod_overlay(const ResolvedModSet& mods);
+[[nodiscard]] Result<std::string> compute_mod_content_hash(const DiscoveredMod& mod);
+[[nodiscard]] Result<ModSetHashes> compute_mod_set_hashes(const ResolvedModSet& mods);
 
 }
