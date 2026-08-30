@@ -1,0 +1,18 @@
+name: m6-policy-red
+
+on:
+  push:
+    branches: [feature/m6-mod-runtime]
+    paths:
+      - 'tests/test_mod_policy.cpp'
+      - 'src/core/mod_runtime.h'
+      - 'src/core/mod_policy.cpp'
+      - '.github/workflows/m6-policy-red.yml'
+
+jobs:
+  policy-red:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile policy RED
+        run: c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc -c tests/test_mod_policy.cpp -o /tmp/test_mod_policy.o
