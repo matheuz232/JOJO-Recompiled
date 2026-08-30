@@ -1,6 +1,8 @@
+#include "core/conversion.h"
 #include "core/iso9660.h"
 #include "core/psx_boot.h"
 #include "core/psx_exe.h"
+#include "core/psx_revision.h"
 #include "core/psx_system_cnf.h"
 #include "iso_fixture.h"
 #include <cstdint>
@@ -245,6 +247,43 @@ static void test_psx_boot_analysis_rejects_malformed_executable() {
     std::filesystem::remove(path, ec);
 }
 
+static void test_supported_psx_revision_profile_is_exact() {
+    const auto& profiles = jojo::supported_psx_game_revision_profiles();
+    CHECK(profiles.size() == 1u);
+    if (profiles.size() == 1u) {
+        const auto& profile = profiles.front();
+        CHECK(profile.revision_id == "ps1-usa-slus-01060");
+        CHECK(profile.files.size() == 2u);
+        if (profile.files.size() == 2u) {
+            CHECK(profile.files[0].path == "/SYSTEM.CNF");
+            CHECK(profile.files[0].size_bytes == 68u);
+            CHECK(profile.files[0].fnv1a64 == 0x1eb36f6335bbf54aull);
+            CHECK(profile.files[1].path == "/SLUS_010.60");
+            CHECK(profile.files[1].size_bytes == 565248u);
+            CHECK(profile.files[1].fnv1a64 == 0xb84be235e572adccull);
+        }
+    }
+}
+
+static void test_default_conversion_rejects_filename_correct_but_fingerprint_wrong_image() {
+    const auto source = temp_iso("jojo_psx_wrong_revision.iso");
+    const auto install = std::filesystem::temp_directory_path() / "jojo_psx_wrong_revision_install";
+    std::error_code ec;
+    std::filesystem::remove_all(install, ec);
+    test_iso::write_psx_image(source);
+
+    const auto converted = jojo::convert_image(source, install);
+    CHECK(!converted);
+    if (!converted) {
+        CHECK(converted.error == jojo::ErrorCode::unknown_revision);
+        CHECK(converted.detail.find("fingerprint mismatch") != std::string::npos);
+    }
+    CHECK(!std::filesystem::exists(install / "game_manifest.ini"));
+
+    std::filesystem::remove(source, ec);
+    std::filesystem::remove_all(install, ec);
+}
+
 int main() {
     test_parses_supported_disc_shape();
     test_accepts_case_insensitive_keys_and_lf();
@@ -266,6 +305,8 @@ int main() {
     test_psx_boot_analysis_rejects_missing_boot_file();
     test_psx_boot_analysis_rejects_malformed_system_cnf();
     test_psx_boot_analysis_rejects_malformed_executable();
+    test_supported_psx_revision_profile_is_exact();
+    test_default_conversion_rejects_filename_correct_but_fingerprint_wrong_image();
     if (failures) {
         std::cerr << failures << " test assertion(s) failed\n";
         return 1;
