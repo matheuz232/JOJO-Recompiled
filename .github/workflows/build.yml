@@ -26,6 +26,12 @@ jobs:
         run: cmake --build build/psx_interrupt_mask --parallel 2
       - name: Test PSX I_MASK contract
         run: ./build/psx_interrupt_mask/jojo_psx_interrupt_mask_tests
+      - name: Configure R3000A frontier contract
+        run: cmake -S tests/psx_r3000a_frontier -B build/psx_r3000a_frontier -DCMAKE_BUILD_TYPE=Release
+      - name: Build R3000A frontier contract
+        run: cmake --build build/psx_r3000a_frontier --parallel 2
+      - name: Test R3000A frontier contract
+        run: ./build/psx_r3000a_frontier/jojo_psx_r3000a_frontier_tests
       - name: Build R1 media probe
         run: c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc tools/r1_media_probe.cpp build/libjojo_core.a -ldl -o build/jojo_r1_media_probe
       - name: Upload R1 media probe
@@ -52,6 +58,12 @@ jobs:
         run: cmake --build build/psx_interrupt_mask --config Release --parallel 2
       - name: Test PSX I_MASK contract
         run: .\build\psx_interrupt_mask\Release\jojo_psx_interrupt_mask_tests.exe
+      - name: Configure R3000A frontier contract
+        run: cmake -S tests/psx_r3000a_frontier -B build/psx_r3000a_frontier -G "Visual Studio 17 2022" -A x64
+      - name: Build R3000A frontier contract
+        run: cmake --build build/psx_r3000a_frontier --config Release --parallel 2
+      - name: Test R3000A frontier contract
+        run: .\build\psx_r3000a_frontier\Release\jojo_psx_r3000a_frontier_tests.exe
       - name: Upload single executable
         uses: actions/upload-artifact@v4
         with:
