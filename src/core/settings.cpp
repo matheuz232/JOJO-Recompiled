@@ -99,6 +99,15 @@ bool valid_aspect(AspectRatio a) noexcept {
     return false;
 }
 
+bool valid_binding_kind(BindingKind kind) noexcept {
+    switch (kind) {
+        case BindingKind::keyboard_key:
+        case BindingKind::gamepad_button:
+        case BindingKind::gamepad_axis: return true;
+    }
+    return false;
+}
+
 Result<void> replace_file(const std::filesystem::path& temp, const std::filesystem::path& target) {
 #ifdef _WIN32
     if (MoveFileExW(temp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
@@ -113,6 +122,21 @@ Result<void> replace_file(const std::filesystem::path& temp, const std::filesyst
 #endif
 }
 
+Result<void> load_binding_key(InputSettings& input,
+                              std::size_t player,
+                              std::string_view action_text,
+                              const std::string& value) {
+    if (player >= input.players.size()) {
+        return Result<void>::failure(ErrorCode::invalid_settings, "input player index is outside supported range");
+    }
+    auto action = game_action_from_string(action_text);
+    if (!action) return Result<void>::failure(action.error, action.detail);
+    auto binding = parse_binding(value);
+    if (!binding) return Result<void>::failure(binding.error, binding.detail);
+    input.players[player].bindings[action.value] = std::move(binding.value);
+    return Result<void>::success();
+}
+
 }
 
 bool validate_graphics(const GraphicsSettings& s) noexcept {
@@ -120,6 +144,22 @@ bool validate_graphics(const GraphicsSettings& s) noexcept {
            valid_aspect(s.aspect_ratio) && valid_filter(s.texture_filter) && valid_msaa(s.msaa) &&
            valid_display_mode(s.display_mode) && valid_ui_scale(s.ui_scale) &&
            valid_hud_safe_area(s.hud_safe_area);
+}
+
+bool validate_audio(const AudioSettings& s) noexcept {
+    const auto valid_volume = [](int value) { return value >= 0 && value <= 100; };
+    return valid_volume(s.master_volume) && valid_volume(s.music_volume) && valid_volume(s.effects_volume);
+}
+
+bool validate_input(const InputSettings& settings) noexcept {
+    for (const auto& player : settings.players) {
+        if (player.selected_device.empty()) return false;
+        for (const auto& [action, binding] : player.bindings) {
+            (void)action;
+            if (binding.device_id.empty() || binding.code.empty() || !valid_binding_kind(binding.kind)) return false;
+        }
+    }
+    return true;
 }
 
 std::string to_string(AspectRatio value) {
@@ -187,15 +227,18 @@ Result<AppSettings> load_settings(const std::filesystem::path& path) {
         const auto value = trim(line.substr(eq + 1));
 
         if (key == "install_dir") result.install_dir = value;
-        else if (key == "selected_device") result.input.selected_device = value;
-        else if (key.rfind("bind.", 0) == 0) {
-            auto action = game_action_from_string(key.substr(5));
-            if (!action) return Result<AppSettings>::failure(action.error, action.detail);
-            auto binding = parse_binding(value);
-            if (!binding) return Result<AppSettings>::failure(binding.error, binding.detail);
-            result.input.bindings[action.value] = std::move(binding.value);
-        }
-        else if (key == "width") {
+        else if (key == "selected_device" || key == "selected_device.p1") result.input.players[0].selected_device = value;
+        else if (key == "selected_device.p2") result.input.players[1].selected_device = value;
+        else if (key.rfind("bind.p1.", 0) == 0) {
+            auto loaded = load_binding_key(result.input, 0, key.substr(8), value);
+            if (!loaded) return Result<AppSettings>::failure(loaded.error, loaded.detail);
+        } else if (key.rfind("bind.p2.", 0) == 0) {
+            auto loaded = load_binding_key(result.input, 1, key.substr(8), value);
+            if (!loaded) return Result<AppSettings>::failure(loaded.error, loaded.detail);
+        } else if (key.rfind("bind.", 0) == 0) {
+            auto loaded = load_binding_key(result.input, 0, key.substr(5), value);
+            if (!loaded) return Result<AppSettings>::failure(loaded.error, loaded.detail);
+        } else if (key == "width") {
             auto p = parse_int(value); if (!p) return Result<AppSettings>::failure(p.error, p.detail); result.graphics.width = p.value;
         } else if (key == "height") {
             auto p = parse_int(value); if (!p) return Result<AppSettings>::failure(p.error, p.detail); result.graphics.height = p.value;
@@ -216,11 +259,25 @@ Result<AppSettings> load_settings(const std::filesystem::path& path) {
             auto p = hud_safe_area_from_string(value); if (!p) return Result<AppSettings>::failure(p.error, p.detail); result.graphics.hud_safe_area = p.value;
         } else if (key == "vsync") {
             auto p = parse_bool(value); if (!p) return Result<AppSettings>::failure(p.error, p.detail); result.graphics.vsync = p.value;
+        } else if (key == "master_volume") {
+            auto p = parse_int(value); if (!p) return Result<AppSettings>::failure(p.error, p.detail); result.audio.master_volume = p.value;
+        } else if (key == "music_volume") {
+            auto p = parse_int(value); if (!p) return Result<AppSettings>::failure(p.error, p.detail); result.audio.music_volume = p.value;
+        } else if (key == "effects_volume") {
+            auto p = parse_int(value); if (!p) return Result<AppSettings>::failure(p.error, p.detail); result.audio.effects_volume = p.value;
+        } else if (key == "mute_when_unfocused") {
+            auto p = parse_bool(value); if (!p) return Result<AppSettings>::failure(p.error, p.detail); result.audio.mute_when_unfocused = p.value;
         }
     }
 
     if (!validate_graphics(result.graphics)) {
         return Result<AppSettings>::failure(ErrorCode::invalid_settings, "graphics settings are outside supported ranges");
+    }
+    if (!validate_audio(result.audio)) {
+        return Result<AppSettings>::failure(ErrorCode::invalid_settings, "audio settings are outside supported ranges");
+    }
+    if (!validate_input(result.input)) {
+        return Result<AppSettings>::failure(ErrorCode::invalid_settings, "input settings are invalid");
     }
     return Result<AppSettings>::success(std::move(result));
 }
@@ -228,6 +285,12 @@ Result<AppSettings> load_settings(const std::filesystem::path& path) {
 Result<void> save_settings_atomic(const std::filesystem::path& path, const AppSettings& settings) {
     if (!validate_graphics(settings.graphics)) {
         return Result<void>::failure(ErrorCode::invalid_settings, "graphics settings are outside supported ranges");
+    }
+    if (!validate_audio(settings.audio)) {
+        return Result<void>::failure(ErrorCode::invalid_settings, "audio settings are outside supported ranges");
+    }
+    if (!validate_input(settings.input)) {
+        return Result<void>::failure(ErrorCode::invalid_settings, "input settings are invalid");
     }
     std::error_code ec;
     if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
@@ -249,11 +312,17 @@ Result<void> save_settings_atomic(const std::filesystem::path& path, const AppSe
         out << "vsync=" << (settings.graphics.vsync ? 1 : 0) << '\n';
         out << "ui_scale=" << static_cast<int>(settings.graphics.ui_scale) << '\n';
         out << "hud_safe_area=" << to_string(settings.graphics.hud_safe_area) << '\n';
-        out << "selected_device=" << settings.input.selected_device << '\n';
-        for (const auto action : all_game_actions()) {
-            const auto it = settings.input.bindings.find(action);
-            if (it != settings.input.bindings.end()) {
-                out << "bind." << to_string(action) << '=' << serialize_binding(it->second) << '\n';
+        out << "master_volume=" << settings.audio.master_volume << '\n';
+        out << "music_volume=" << settings.audio.music_volume << '\n';
+        out << "effects_volume=" << settings.audio.effects_volume << '\n';
+        out << "mute_when_unfocused=" << (settings.audio.mute_when_unfocused ? 1 : 0) << '\n';
+        for (std::size_t player = 0; player < settings.input.players.size(); ++player) {
+            out << "selected_device.p" << (player + 1) << '=' << settings.input.players[player].selected_device << '\n';
+            for (const auto action : all_game_actions()) {
+                const auto it = settings.input.players[player].bindings.find(action);
+                if (it != settings.input.players[player].bindings.end()) {
+                    out << "bind.p" << (player + 1) << '.' << to_string(action) << '=' << serialize_binding(it->second) << '\n';
+                }
             }
         }
         out.flush();
