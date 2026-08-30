@@ -330,9 +330,9 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
 [[nodiscard]] inline PsxR3000aStepResult step_psx_r3000a(
     PsxR3000aState& state, std::uint32_t instruction, PsxBus& bus) noexcept {
     const auto op = static_cast<std::uint8_t>(instruction >> 26u);
-    if (op != 0x20u && op != 0x21u && op != 0x23u &&
-        op != 0x24u && op != 0x25u && op != 0x28u &&
-        op != 0x29u && op != 0x2bu) {
+    if (op != 0x20u && op != 0x21u && op != 0x22u && op != 0x23u &&
+        op != 0x24u && op != 0x25u && op != 0x26u && op != 0x28u &&
+        op != 0x29u && op != 0x2au && op != 0x2bu && op != 0x2eu) {
         return step_psx_r3000a(state, instruction);
     }
 
@@ -364,9 +364,66 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         return {PsxR3000aStepReason::ok, instruction_pc, instruction};
     }
 
+    if (op == 0x2au || op == 0x2eu) { // SWL / SWR
+        const auto aligned_address = address & ~std::uint32_t{3};
+        const auto current = psx_bus_read_u32(bus, aligned_address);
+        if (current.reason != PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, instruction};
+        }
+
+        const auto source = state.gpr[rt];
+        std::uint32_t merged = current.value;
+        if (op == 0x2au) {
+            switch (address & 3u) {
+            case 0u: merged = (current.value & 0xffffff00u) | (source >> 24u); break;
+            case 1u: merged = (current.value & 0xffff0000u) | (source >> 16u); break;
+            case 2u: merged = (current.value & 0xff000000u) | (source >> 8u); break;
+            case 3u: merged = source; break;
+            }
+        } else {
+            switch (address & 3u) {
+            case 0u: merged = source; break;
+            case 1u: merged = (current.value & 0x000000ffu) | (source << 8u); break;
+            case 2u: merged = (current.value & 0x0000ffffu) | (source << 16u); break;
+            case 3u: merged = (current.value & 0x00ffffffu) | (source << 24u); break;
+            }
+        }
+
+        if (psx_bus_write_u32(bus, aligned_address, merged) != PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, instruction};
+        }
+        complete_psx_pending_load(state);
+        state.gpr[0] = 0u;
+        state.pc = sequential_pc;
+        state.next_pc = sequential_pc + 4u;
+        return {PsxR3000aStepReason::ok, instruction_pc, instruction};
+    }
+
     PsxBusAccessReason load_reason = PsxBusAccessReason::ok;
     std::uint32_t load_value = 0u;
-    if (op == 0x20u || op == 0x24u) { // LB / LBU
+    if (op == 0x22u || op == 0x26u) { // LWL / LWR
+        const auto loaded = psx_bus_read_u32(bus, address & ~std::uint32_t{3});
+        load_reason = loaded.reason;
+        const auto merge_source = state.pending_load_valid &&
+                                  state.pending_load_register == rt
+            ? state.pending_load_value
+            : state.gpr[rt];
+        if (op == 0x22u) {
+            switch (address & 3u) {
+            case 0u: load_value = (merge_source & 0x00ffffffu) | (loaded.value << 24u); break;
+            case 1u: load_value = (merge_source & 0x0000ffffu) | (loaded.value << 16u); break;
+            case 2u: load_value = (merge_source & 0x000000ffu) | (loaded.value << 8u); break;
+            case 3u: load_value = loaded.value; break;
+            }
+        } else {
+            switch (address & 3u) {
+            case 0u: load_value = loaded.value; break;
+            case 1u: load_value = (merge_source & 0xff000000u) | (loaded.value >> 8u); break;
+            case 2u: load_value = (merge_source & 0xffff0000u) | (loaded.value >> 16u); break;
+            case 3u: load_value = (merge_source & 0xffffff00u) | (loaded.value >> 24u); break;
+            }
+        }
+    } else if (op == 0x20u || op == 0x24u) { // LB / LBU
         const auto loaded = psx_bus_read_u8(bus, address);
         load_reason = loaded.reason;
         load_value = static_cast<std::uint32_t>(loaded.value);
