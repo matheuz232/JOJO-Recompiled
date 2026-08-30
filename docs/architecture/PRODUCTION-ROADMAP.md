@@ -39,7 +39,9 @@ Completion evidence is tracked in [`../superpowers/plans/2026-08-28-disc-filesys
 
 M2 completion covers the safe media, filesystem and revision-profile infrastructure. Commercial revision fingerprints are intentionally **not** guessed or copied from game data: until signatures are independently verified from legally supplied media, that media remains an explicit `unknown_revision`. M2 completion does **not** imply that a commercial revision is enabled, that the native backend is ready, or that the game boots.
 
-### M3 — Native recompiler backend — In progress
+### M3 — Native recompiler backend — Complete (100%)
+
+Completion evidence is tracked in [`../superpowers/plans/2026-08-29-playable-backend-path.md`](../superpowers/plans/2026-08-29-playable-backend-path.md).
 
 #### M3.1 — Dreamcast executable loader + deterministic memory map — Complete (100%)
 
@@ -50,15 +52,26 @@ M2 completion covers the safe media, filesystem and revision-profile infrastruct
 - [x] Reject unsupported MIL-CD/unknown encodings before memory preparation instead of guessing normalization.
 - [x] Linux and Windows/MSVC build/test coverage for the complete M3.1 contract.
 
-M3.1 completion does **not** mean the full native backend is ready. MMIO/timing, deterministic frame stepping, generated native cache/versioning and the production execution backend remain open M3 work.
+#### M3.2 — Deterministic native runtime + versioned compiled-code cache — Complete (100%)
+
+- [x] Compile eligible straight-line SH-4 CFG/IR blocks into executable x86-64 machine code; blocks without a dedicated machine-code lowering remain an explicit reference fallback.
+- [x] Execute generated code from RX memory using the correct Windows x64 or SysV x64 calling convention.
+- [x] Deterministic `step_native_frame()` state transition with frame index and CPU+RAM state hashing.
+- [x] Versioned, host-ABI-specific native-backend ABI exposed independently from the application/core version.
+- [x] Reloadable compiled code/data cache stored under `<converted-game>/cache/native/compiled_plan.bin` with metadata in `backend_cache.ini`; the binary cache persists the generated machine-code bytes themselves.
+- [x] Cache reuse when ABI/core/program identity matches.
+- [x] Automatic rebuild independently verified for ABI changes, core-version changes and program-content changes.
+- [x] Linux x86-64 and Windows x64/MSVC build/test coverage that executes generated machine code on both host ABIs.
 
 M3 criteria:
 
 - [x] Parse/analyze the supported executable and establish its deterministic memory map (M3.1).
 - [x] Lift supported CPU instructions into an explicit intermediate representation.
-- [ ] Deterministic runtime state and frame-step API.
-- [ ] Generated native code/data cache stored in the converted game directory.
-- [ ] Recompiler versioning and automatic rebuild when ABI/version changes.
+- [x] Deterministic runtime state and frame-step API.
+- [x] Generated native code/data cache stored in the converted game directory.
+- [x] Recompiler versioning and automatic rebuild when ABI/version changes.
+
+M3 completion closes the **backend architecture contract defined by this roadmap**. It does **not** claim that every SH-4 IR operation already has a dedicated x86-64 machine-code lowering: blocks without one remain explicit and observable reference fallbacks. It also does **not** mark a commercial installation `native-ready`, prove real-game boot, render a real frame/menu, or provide functional game input. Those require the following device/integration milestones and end-to-end evidence with legally supplied game data.
 
 ### M4 — Renderer, presentation and aspect correction
 
