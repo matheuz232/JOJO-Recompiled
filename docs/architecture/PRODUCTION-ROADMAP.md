@@ -123,18 +123,20 @@ The completed portable contract includes:
 
 M6 completion closes the reusable mod-runtime contract. It does **not** claim that commercial game assets are already routed through overlays, that in-game mod controls exist, that native plugins are sandboxed, or that the converted installation is `native-ready`.
 
-### M7 — Training laboratory
+### M7 — Training laboratory — Complete (100%)
 
-A deterministic frame timeline powers:
+Completion evidence is tracked in [`../superpowers/plans/2026-08-30-training-laboratory.md`](../superpowers/plans/2026-08-30-training-laboratory.md) and [`../superpowers/plans/2026-08-30-training-laboratory-verification.md`](../superpowers/plans/2026-08-30-training-laboratory-verification.md).
 
-- startup / active / recovery bars;
-- hitstop, hitstun, blockstun, advantage and cancel windows;
-- hitbox/hurtbox visualization;
-- input history, damage/scaling and combo information;
-- pause and frame-step;
-- save/load training state.
+- [x] Bounded deterministic frame timeline with strict monotonic frame indexes.
+- [x] Startup / active / recovery meter segments with explicit labels and icon tokens in addition to any future color treatment.
+- [x] Hitstop, hitstun, blockstun, signed frame advantage and cancel-window diagnostics.
+- [x] Logical attack/vulnerable/push collision geometry suitable for hit/hurt/push visualization without proprietary offsets.
+- [x] Stable two-player input history plus cumulative damage, scaling and combo information.
+- [x] Simulation pause and bounded exact frame-step permissions.
+- [x] Ten save/load training-state slots with deterministic SHA-256 integrity validation.
+- [x] Linux portable-core and Windows x64/MSVC build/test coverage, including Windows executable artifact upload.
 
-The visual meter uses icon/labels in addition to color so it remains readable with color-vision deficiencies.
+M7 completion closes the portable **training-laboratory runtime contract**. It does **not** claim that a commercial revision already supplies real character phase, combat, collision or complete runtime snapshot data to the adapter. Those remain real-game integration work requiring legally supplied media for end-to-end proof.
 
 ### M8 — Rollback networking core
 
