@@ -16,6 +16,17 @@ bool blank(std::string_view text) {
     });
 }
 
+bool valid_online_mode(OnlineMode mode) noexcept {
+    switch (mode) {
+        case OnlineMode::casual:
+        case OnlineMode::ranked:
+        case OnlineMode::direct:
+        case OnlineMode::custom:
+            return true;
+    }
+    return false;
+}
+
 int rtt_impairment(double value) noexcept {
     if (value <= 60.0) return 0;
     if (value <= 100.0) return 1;
@@ -109,6 +120,12 @@ Result<ModSessionPolicy> make_mod_session_policy(
     OnlineMode mode,
     const OnlineModPolicy& online_policy,
     const ModSetHashes& local_hashes) {
+    if (!valid_online_mode(mode)) {
+        return Result<ModSessionPolicy>::failure(
+            ErrorCode::invalid_argument,
+            "unknown online mode");
+    }
+
     if (mode == OnlineMode::ranked) {
         if (online_policy.kind != OnlineModPolicyKind::ranked_legal_only) {
             return Result<ModSessionPolicy>::failure(
