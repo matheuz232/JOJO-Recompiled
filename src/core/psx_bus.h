@@ -101,6 +101,18 @@ struct PsxBus {
     return {PsxBusAccessReason::ok, value};
 }
 
+[[nodiscard]] inline PsxBusAccessReason psx_bus_write_u16(PsxBus& bus,
+                                                           std::uint32_t address,
+                                                           std::uint16_t value) noexcept {
+    std::size_t offset = 0;
+    const auto reason = psx_bus_ram_offset_u16(address, offset);
+    if (reason != PsxBusAccessReason::ok) return reason;
+
+    bus.ram[offset + 0u] = static_cast<std::uint8_t>(value);
+    bus.ram[offset + 1u] = static_cast<std::uint8_t>(value >> 8u);
+    return PsxBusAccessReason::ok;
+}
+
 [[nodiscard]] inline PsxBusAccessReason psx_bus_write_u32(PsxBus& bus,
                                                            std::uint32_t address,
                                                            std::uint32_t value) noexcept {
