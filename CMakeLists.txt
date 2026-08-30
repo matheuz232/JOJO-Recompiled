@@ -236,3 +236,7 @@ add_test(NAME jojo_m5_settings_input_tests COMMAND jojo_m5_settings_input_tests)
 add_executable(jojo_psx_system_cnf_tests tests/test_psx_system_cnf.cpp)
 target_link_libraries(jojo_psx_system_cnf_tests PRIVATE jojo_core)
 add_test(NAME jojo_psx_system_cnf_tests COMMAND jojo_psx_system_cnf_tests)
+
+add_executable(jojo_psx_r3000a_boot_slice_tests tests/test_psx_r3000a_boot_slice.cpp)
+target_link_libraries(jojo_psx_r3000a_boot_slice_tests PRIVATE jojo_core)
+add_test(NAME jojo_psx_r3000a_boot_slice_tests COMMAND jojo_psx_r3000a_boot_slice_tests)
