@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-30-mod-runtime-design.md`
 
-**Status:** Tasks 1–7 are complete. Task 8 closure is in progress; the final branch/PR/post-merge gates remain authoritative.
+**Status:** Tasks 1–7 and the final branch gate are complete. PR integration and post-merge verification remain authoritative.
 
 ## Global Constraints
 
@@ -323,10 +323,19 @@ Expected: only M6 source/tests/build/docs, no temporary workflows, binaries, gen
 
 Document exact contract and limitation that real-game asset routing/menu integration is not claimed.
 
-- [ ] **Step 4: Re-run final-head branch CI**
+- [x] **Step 4: Re-run final-head branch CI**
 
 Expected: both hosts green on the exact documented head.
 
 - [ ] **Step 5: Open PR, wait for PR CI, merge with expected head SHA, and verify post-merge CI**
 
 Expected: PR Linux+Windows green, merge succeeds only on validated head, `main` post-merge Linux+Windows green.
+
+## Verification evidence
+
+- The online-policy RED is preserved at `a1b6a0e10ab14c1c2c16bede7187d388e92995f4`; the GREEN implementation is `caa55fa1d427de66ad19e36fb252a2161d512727`.
+- The versioned native ABI/loader GREEN is `3eceb132e85adb8ba3ca5260a866d4866f9d7cb9`; workflow run `33293304909` passed Linux and Windows/MSVC with real shared-library lifecycle tests.
+- Security hardening rejects incompatible API catalogs, symlinked mod roots/manifests, parent-traversing entries and dangling manifest symlinks.
+- Final code head `e9d112e85c8001185c95879941891eed1f38faf7` passed workflow run `33293821593` on Linux and Windows x64/MSVC, including the single Windows executable artifact.
+- The local Release suite passes 48/48 tests. Targeted M6 runs also pass AddressSanitizer and UndefinedBehaviorSanitizer; leak detection alone is unavailable under this container's ptrace environment.
+- The final diff contains no temporary workflows, game/disc images, compiled binaries, archives, extracted assets or commercial fingerprints.
