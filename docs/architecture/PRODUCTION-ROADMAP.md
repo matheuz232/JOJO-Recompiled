@@ -94,14 +94,26 @@ M4 completion closes the **host presentation/aspect/quality contract defined abo
 - USB, Bluetooth and dongle transport are transparent to the binding model.
 - Per-player/per-device bindings and hot-plug refresh.
 
-### M6 — Mod runtime
+### M6 — Mod runtime — Complete (100%)
+
+Completion evidence is tracked in [`../superpowers/plans/2026-08-30-mod-runtime.md`](../superpowers/plans/2026-08-30-mod-runtime.md).
 
 Two compatibility levels:
 
 1. Data/script mods for assets, localization, UI, stages, character data and gameplay definitions.
 2. Explicitly opt-in native plugins through a versioned C ABI for invasive extensions.
 
-The loader owns manifests, semantic API version, dependency graph, load order, conflict diagnostics and gameplay-mod hashing. Ranked online rejects gameplay-changing mods; custom rooms can require an exact mod set.
+The completed portable contract includes:
+
+- [x] Strict manifests, semantic API compatibility and deterministic discovery.
+- [x] Dependency closure, version requirements, cycle/conflict diagnostics and stable topological load order.
+- [x] Data overlays with normalized logical paths, deterministic collision reporting and symlink/traversal rejection.
+- [x] SHA-256 content, full mod-set and gameplay-only identities independent of host path separators and file creation order.
+- [x] Ranked rejection of gameplay-changing mods and optional exact mod-set matching for custom sessions.
+- [x] Native plugins disabled by default and enabled only through explicit opt-in to the versioned C ABI.
+- [x] Real dynamic-library lifecycle coverage on Linux and Windows/MSVC, including descriptor validation, partial-failure cleanup and reverse-order unload.
+
+M6 completion closes the reusable mod-runtime contract. It does **not** claim that commercial game assets are already routed through overlays, that in-game mod controls exist, that native plugins are sandboxed, or that the converted installation is `native-ready`.
 
 ### M7 — Training laboratory
 
