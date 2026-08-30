@@ -1,198 +1,134 @@
-# JOJO Recompiled — Production Architecture
+# JOJO Recompiled — Production Roadmap
 
 ## Product contract
 
-The end user receives and launches a single executable: `JOJO-Recompiled.exe`.
+The active product is a native Windows port of the original **offline** *JoJo's Bizarre Adventure: Heritage for the Future* experience built from a supported, legally obtained user-supplied game copy.
 
-On first launch the executable asks for a legally obtained image of the user's own game copy, validates it, converts/recompiles the required content into `%LOCALAPPDATA%/JOJO Recompiled/game`, and reports real stage progress. On subsequent launches it goes directly into the game.
+The end user receives one executable: `JOJO-Recompiled.exe`. First run performs real media validation/conversion work; subsequent runs must launch the converted game directly once the commercial runtime is actually ready.
 
-Graphics, controls, audio, mods, training tools and online options belong to the in-game UI. The first-run conversion UI is not a launcher/settings application.
+Local two-player play is mandatory. Online multiplayer, rollback/netcode/network services, Mods and Training tools are removed from active product scope.
 
-The repository must never contain game images, extracted copyrighted assets, generated game data, or user save/configuration files.
+## Product readiness rule
 
-## Product readiness gate
+**Overall product status: IN PROGRESS.**
 
-**Overall product status: IN PROGRESS.** A milestone marked `Scoped contract complete` means its reusable engineering contract is implemented and verified; it does **not** mean the commercial game or the complete end-user product is ready.
+No percentage, milestone label, unit-test count or CI badge may substitute for end-to-end product evidence. The project may claim overall `100%` / `production-ready` only after **R1 through R7** below are all proven through the same production path used by `JOJO-Recompiled.exe`.
 
-The project may only claim **overall 100% / production-ready** after end-to-end evidence from a legally supplied supported game copy proves that the single Windows executable can convert the media, boot the commercial game, render real gameplay, produce real audio, accept real player input, expose the required in-game settings/mod/training/Online UI, persist saves/configuration/replays, and complete real network sessions through deployed services where those modes require them. CI-only models, fake progress, placeholder backends, mock-only networking and UI that is not connected to the actual runtime do not satisfy this gate.
+Mocks, placeholder backends, fake progress, no-op UI, synthetic success returns, settings that are not wired to the commercial runtime, duplicated frames presented as gameplay 60 FPS, or isolated model tests do not satisfy a release gate.
 
-## Milestones
+## Active release gates
 
-### M1 — Production foundation — Scoped contract complete
+### R1 — Media and revision intake — IN PROGRESS
 
-Completion evidence is tracked in [`../superpowers/plans/2026-08-28-production-foundation.md`](../superpowers/plans/2026-08-28-production-foundation.md).
+Required evidence:
 
-- [x] One Windows end-user executable.
-- [x] First-run conversion flow with progress events and a persistent conversion log.
-- [x] Modern custom-drawn JoJo-inspired first-run visual language.
-- [x] `%LOCALAPPDATA%` application/game-data layout.
-- [x] Graphics model extended to MSAA 8x, windowed/fullscreen/borderless and UI scaling.
-- [x] No external graphics/control tabs in the first-run shell.
-- [x] Windows CI build + tests.
+- accept the supported ISO/BIN/CUE/GDI layout from the user's own copy;
+- parse the media and disc filesystem read-only;
+- identify a supported commercial revision from independently verified fingerprints;
+- reject unknown revisions explicitly rather than guessing offsets or silently continuing;
+- feed the exact validated commercial executable/data into the production conversion/runtime path.
 
-M1 completion does **not** imply that the commercial game is playable or that the native backend is ready; those remain later milestones.
+Portable parser/revision infrastructure exists, but R1 is not complete until supported commercial-media evidence is recorded.
 
-### M2 — Disc filesystem + game revision identification — Scoped contract complete
+### R2 — Commercial boot/runtime — NOT COMPLETE
 
-Completion evidence is tracked in [`../superpowers/plans/2026-08-28-disc-filesystem.md`](../superpowers/plans/2026-08-28-disc-filesystem.md) and [`../superpowers/plans/2026-08-28-track-media.md`](../superpowers/plans/2026-08-28-track-media.md).
+Required evidence:
 
-- [x] Read-only disc filesystem abstraction.
-- [x] ISO9660 parser with track-aware ISO/BIN/CUE/GDI readers behind the same logical-sector interface.
-- [x] Locate executable/data files through the disc filesystem without hard-coded host paths.
-- [x] Identify a supported revision from multiple declarative file fingerprints.
-- [x] Reject unknown revisions explicitly with profile/file-level diagnostics instead of guessing offsets.
-- [x] Linux and Windows/MSVC CI coverage for the complete media/filesystem/revision pipeline.
+- boot the real supported commercial executable through the production runtime;
+- execute every CPU instruction required to reach normal game operation correctly;
+- implement required Dreamcast memory/MMIO/device behavior instead of ignoring unsupported accesses;
+- fail explicitly and diagnostically during development on unsupported behavior;
+- use the native backend/recompiler path as designed without cosmetically reporting a game-ready installation before it is true.
 
-M2 completion covers the safe media, filesystem and revision-profile infrastructure. Commercial revision fingerprints are intentionally **not** guessed or copied from game data: until signatures are independently verified from legally supplied media, that media remains an explicit `unknown_revision`. M2 completion does **not** imply that a commercial revision is enabled, that the native backend is ready, or that the game boots.
+Existing SH-4, memory, bus, interrupt, PVR2 and native-backend components are foundations only; they do not by themselves prove commercial boot.
 
-### M3 — Native recompiler backend — Scoped contract complete
+### R3 — Real video output + resolution/aspect/60 FPS — NOT COMPLETE
 
-Completion evidence is tracked in [`../superpowers/plans/2026-08-29-playable-backend-path.md`](../superpowers/plans/2026-08-29-playable-backend-path.md).
+Required evidence:
 
-#### M3.1 — Dreamcast executable loader + deterministic memory map — Scoped contract complete
+- render real commercial-game frames through the shipping Windows presentation path;
+- make selected output resolution affect actual rendered output;
+- support 4:3, 16:9, 16:10, 21:9 and 32:9 without non-uniform horizontal stretching;
+- apply filtering/MSAA/window-mode/V-Sync/presentation options only where they affect the real renderer;
+- validate gameplay scenes and UI at representative resolutions/aspects;
+- implement and prove a **real 60 FPS commercial-runtime patch**.
 
-- [x] Analyze the supported plain GD-ROM boot executable before loading it.
-- [x] Load executable bytes deterministically at `0x8C010000` into a zero-initialized 16 MiB main-RAM backing store.
-- [x] Model the complete 64 MiB Area-3 address window as four mirrors of the same 16 MiB RAM for physical, P1 cached and P2 uncached aliases.
-- [x] Keep Dreamcast bus classification consistent with those RAM mirrors.
-- [x] Reject unsupported MIL-CD/unknown encodings before memory preparation instead of guessing normalization.
-- [x] Linux and Windows/MSVC build/test coverage for the complete M3.1 contract.
+The 60 FPS gate requires correct game/update cadence, gameplay speed, input timing, animation/timing behavior and audio synchronization. A 60 Hz swap chain alone does not pass. Frame duplication alone does not pass. Interpolation may be an optional presentation feature but cannot be labeled as the gameplay 60 FPS patch unless the underlying runtime update behavior meets the requirement.
 
-#### M3.2 — Deterministic native runtime + versioned compiled-code cache — Scoped contract complete
+Resolution/aspect presentation infrastructure exists. **The real 60 FPS patch is currently unproven and must remain marked incomplete until runtime evidence exists.**
 
-- [x] Compile eligible straight-line SH-4 CFG/IR blocks into executable x86-64 machine code; blocks without a dedicated machine-code lowering remain an explicit reference fallback.
-- [x] Execute generated code from RX memory using the correct Windows x64 or SysV x64 calling convention.
-- [x] Deterministic `step_native_frame()` state transition with frame index and CPU+RAM state hashing.
-- [x] Versioned, host-ABI-specific native-backend ABI exposed independently from the application/core version.
-- [x] Reloadable compiled code/data cache stored under `<converted-game>/cache/native/compiled_plan.bin` with metadata in `backend_cache.ini`; the binary cache persists the generated machine-code bytes themselves.
-- [x] Cache reuse when ABI/core/program identity matches.
-- [x] Automatic rebuild independently verified for ABI changes, core-version changes and program-content changes.
-- [x] Linux x86-64 and Windows x64/MSVC build/test coverage that executes generated machine code on both host ABIs.
+### R4 — Real audio + local two-player input — NOT COMPLETE
 
-M3 criteria:
+Required evidence:
 
-- [x] Parse/analyze the supported executable and establish its deterministic memory map (M3.1).
-- [x] Lift supported CPU instructions into an explicit intermediate representation.
-- [x] Deterministic runtime state and frame-step API.
-- [x] Generated native code/data cache stored in the converted game directory.
-- [x] Recompiler versioning and automatic rebuild when ABI/version changes.
+- produce real commercial-game audio through the shipping runtime;
+- keep audio synchronized in normal and verified 60 FPS modes;
+- connect Player 1 and Player 2 host input to the real game's input path;
+- support two simultaneously active physical controllers;
+- support mixed local configurations such as keyboard + controller where exposed by host APIs;
+- preserve independent bindings across disconnect/reconnect;
+- complete a real local versus match through `JOJO-Recompiled.exe` with both players providing simultaneous input.
 
-M3 completion closes the **backend architecture contract defined by this roadmap**. It does **not** claim that every SH-4 IR operation already has a dedicated x86-64 machine-code lowering: blocks without one remain explicit and observable reference fallbacks. It also does **not** mark a commercial installation `native-ready`, prove real-game boot, render a real frame/menu, or provide functional game input. Those require the following device/integration milestones and end-to-end evidence with legally supplied game data.
+The reusable input model already defines exactly two logical players and Windows controller support, but R4 requires commercial-runtime integration.
 
-### M4 — Renderer, presentation and aspect correction — Scoped contract complete
+### R5 — Original offline content completion — NOT COMPLETE
 
-Completion evidence is tracked in [`../superpowers/plans/2026-08-30-presentation-renderer.md`](../superpowers/plans/2026-08-30-presentation-renderer.md).
+Required evidence:
 
-- [x] Separate simulation resolution from presentation resolution.
-- [x] 4:3, 16:9, 16:10, 21:9 and 32:9 camera/presentation policies.
-- [x] No non-uniform stretching; output uses a centered aspect-fitted viewport with one uniform scale.
-- [x] UI logical-coordinate system with safe areas and DPI-aware scaling from 480p through 8K.
-- [x] Windowed, exclusive fullscreen (when available) and borderless fullscreen host plans, with deterministic borderless fallback when exclusive capability is unavailable.
-- [x] Texture filtering Off/2x/4x/8x/16x and MSAA Off/2x/4x/8x negotiated against renderer/device capabilities; Windows CI probes a real D3D11 hardware-or-WARP device for multisample support.
-- [x] Linux portable-core and Windows x64/MSVC build/test coverage for the complete M4 presentation contract.
+- normal menus and game flow operate correctly;
+- original playable characters and expected selectable content for the supported revision are reachable;
+- stages and match flow work;
+- single-player/offline progression and normal game modes expected from the supported original revision are playable;
+- no required original content is blocked by missing CPU/device/render/audio/input behavior.
 
-M4 completion closes the **host presentation/aspect/quality contract defined above**. It does **not** claim that Dreamcast PVR2 scene rendering is complete, that a commercial revision boots, that a real frame/menu is visible, or that game input/audio are functional. Those remain device/integration work and are still required before conversion output can become `native-ready`.
+Removed Online/Mods/Training features are not part of this gate.
 
-### M5 — In-game settings + input — Scoped contract complete
+### R6 — Persistence + real host settings — NOT COMPLETE
 
-Completion evidence is tracked in [`../superpowers/plans/2026-08-30-ingame-settings-input.md`](../superpowers/plans/2026-08-30-ingame-settings-input.md) and [`../superpowers/plans/2026-08-30-ingame-settings-input-verification.md`](../superpowers/plans/2026-08-30-ingame-settings-input-verification.md).
+Required evidence:
 
-- [x] Runtime graphics, audio and controls settings modeled for the in-game menu while remaining absent from the first-run conversion shell.
-- [x] Two-player per-device bindings, deterministic action resolution and interactive binding capture.
-- [x] Backward-compatible player-1 input settings loading with the new two-player persisted schema.
-- [x] Keyboard, dynamically loaded XInput and generic joystick/gamepad HID support on Windows.
-- [x] USB cable, Bluetooth and wireless dongle remain transport-transparent to persisted bindings.
-- [x] Hot-plug catalog refresh with explicit connected/disconnected changes while preserving bindings for devices that later reconnect.
-- [x] Real Windows Raw Input HID decoding plus XInput HID-shadow filtering to avoid duplicate physical controllers.
-- [x] Linux portable-core and Windows x64/MSVC build/test coverage, including Windows executable artifact upload.
+- required game save data persists correctly across restarts;
+- host configuration persists correctly;
+- Player 1/Player 2 bindings persist;
+- selected resolution/aspect/presentation settings apply to the real runtime after restart;
+- a 60 FPS setting/control is exposed only after the real patch exists and must persist/apply correctly when enabled.
 
-M5 completion closes the reusable **settings/menu/input runtime contract**. It does **not** claim that a commercial revision currently reaches a rendered native settings screen, that Dreamcast Maple input has been wired into original game code, that AICA audio playback is complete, or that a converted commercial installation is `native-ready`. Those remain real-game/device integration work requiring legally supplied media for end-to-end evidence.
+Do not add a decorative 60 FPS toggle before the runtime patch exists.
 
-### M6 — Mod runtime — Scoped contract complete
+### R7 — Release hardening — NOT COMPLETE
 
-Completion evidence is tracked in [`../superpowers/plans/2026-08-30-mod-runtime.md`](../superpowers/plans/2026-08-30-mod-runtime.md).
+Required evidence from the same Windows artifact intended for users:
 
-Two compatibility levels:
+- clean-environment first launch;
+- select and validate a supported legal game image;
+- complete conversion/preparation through real event-driven stages;
+- close/relaunch and enter the game directly;
+- complete representative single-player gameplay;
+- complete representative local two-player gameplay with two active inputs;
+- validate representative native resolutions and 4:3/widescreen/ultrawide modes;
+- validate real 60 FPS gameplay timing and audio synchronization when 60 FPS is enabled;
+- preserve saves/configuration after restart;
+- no Online/Mods/Training shipping linkage or UI.
 
-1. Data/script mods for assets, localization, UI, stages, character data and gameplay definitions.
-2. Explicitly opt-in native plugins through a versioned C ABI for invasive extensions.
+Only R1-R7 together may justify overall `100%` or `production-ready`.
 
-The completed portable contract includes:
-
-- [x] Strict manifests, semantic API compatibility and deterministic discovery.
-- [x] Dependency closure, version requirements, cycle/conflict diagnostics and stable topological load order.
-- [x] Data overlays with normalized logical paths, deterministic collision reporting and symlink/traversal rejection.
-- [x] SHA-256 content, full mod-set and gameplay-only identities independent of host path separators and file creation order.
-- [x] Ranked rejection of gameplay-changing mods and optional exact mod-set matching for custom sessions.
-- [x] Native plugins disabled by default and enabled only through explicit opt-in to the versioned C ABI.
-- [x] Real dynamic-library lifecycle coverage on Linux and Windows/MSVC, including descriptor validation, partial-failure cleanup and reverse-order unload.
-
-M6 completion closes the reusable mod-runtime contract. It does **not** claim that commercial game assets are already routed through overlays, that in-game mod controls exist, that native plugins are sandboxed, or that the converted installation is `native-ready`.
-
-### M7 — Training laboratory — Scoped contract complete
-
-Completion evidence is tracked in [`../superpowers/plans/2026-08-30-training-laboratory.md`](../superpowers/plans/2026-08-30-training-laboratory.md) and [`../superpowers/plans/2026-08-30-training-laboratory-verification.md`](../superpowers/plans/2026-08-30-training-laboratory-verification.md).
-
-- [x] Bounded deterministic frame timeline with strict monotonic frame indexes.
-- [x] Startup / active / recovery meter segments with explicit labels and icon tokens in addition to any future color treatment.
-- [x] Hitstop, hitstun, blockstun, signed frame advantage and cancel-window diagnostics.
-- [x] Logical attack/vulnerable/push collision geometry suitable for hit/hurt/push visualization without proprietary offsets.
-- [x] Stable two-player input history plus cumulative damage, scaling and combo information.
-- [x] Simulation pause and bounded exact frame-step permissions.
-- [x] Ten save/load training-state slots with deterministic SHA-256 integrity validation.
-- [x] Linux portable-core and Windows x64/MSVC build/test coverage, including Windows executable artifact upload.
-
-M7 completion closes the portable **training-laboratory runtime contract**. It does **not** claim that a commercial revision already supplies real character phase, combat, collision or complete runtime snapshot data to the adapter. Those remain real-game integration work requiring legally supplied media for end-to-end proof.
-
-### M8 — Rollback networking core — Scoped contract complete
-
-Completion evidence is tracked in [`../superpowers/plans/2026-08-30-rollback-networking-core.md`](../superpowers/plans/2026-08-30-rollback-networking-core.md) and [`../superpowers/plans/2026-08-30-rollback-networking-core-verification.md`](../superpowers/plans/2026-08-30-rollback-networking-core-verification.md).
-
-- [x] Deterministic local/remote frame-input contract with snapshot capture and restore around simulated frames.
-- [x] Latest-known remote-input prediction, late-input correction and bounded rollback/re-simulation with side effects suppressed during replay.
-- [x] SHA-256 state hashing with deterministic local hash lookup and earliest-frame desync detection against remote reports.
-- [x] Fixed integer-only deterministic RNG with explicit restorable state ownership.
-- [x] Versioned little-endian datagram protocol suitable for low-latency UDP input exchange, with malformed/truncated/oversized packet rejection.
-- [x] Input/ping/pong traffic remains unreliable while session hello/accept/disconnect alone use acknowledgement/retransmission reliability driven by caller-supplied monotonic network time.
-- [x] RTT, jitter, sent/received/lost packet counts, loss percentage, predicted frames, rollback depth and connected/reconnecting/disconnected telemetry.
-- [x] Linux portable-core and Windows x64/MSVC build/test coverage, including Windows executable artifact upload.
-
-M8 completion closes the reusable **rollback/networking core contract**. The wire layer is intentionally UDP-oriented and platform-socket independent so platform hosts can exchange datagrams without allowing networking APIs to own gameplay state. It does **not** claim public matchmaking, relay/NAT traversal, production socket threading, account services, encryption/key exchange or a commercial revision's full deterministic gameplay-state adapter. No implementation promises zero latency: physical RTT, jitter and packet loss remain external constraints.
-
-### M9 — Online product modes — In progress
-
-Verification of the portable core is tracked in [`../superpowers/plans/2026-08-30-online-product-modes.md`](../superpowers/plans/2026-08-30-online-product-modes.md) and [`../superpowers/plans/2026-08-30-online-product-modes-verification.md`](../superpowers/plans/2026-08-30-online-product-modes-verification.md).
-
-Portable Online core already implemented and verified:
-
-- [x] Stable Online product model for Casual, Ranked, Direct 1v1 and Custom match modes.
-- [x] Match rules plus rollback/input-delay/telemetry settings with deterministic validation boundaries.
-- [x] Ranked and custom/direct mod legality delegates to the existing M6 policy; gameplay-changing mods are rejected from Ranked and exact mod-set compatibility is supported.
-- [x] Backend-independent matchmaking orchestration plus validated Direct room descriptors and invite-code joining.
-- [x] Profile data and bounded match history with duplicate-ID/round validation and oldest-entry eviction.
-- [x] Versioned deterministic replay serialization for frame inputs, hashes and portable metadata only, with malformed/truncated/trailing-data rejection.
-- [x] Connection quality uses RTT, jitter, packet loss, prediction rate and rollback depth rather than ping alone.
-- [x] Every connection indicator exposes a non-color signal token plus text, with connected, reconnecting, disconnected and voluntary-left states kept distinct.
-- [x] Linux portable-core and Windows x64/MSVC build/test coverage, including Windows executable artifact upload.
-
-Required before **M9 itself** may be called complete:
-
-- [ ] Wire a real Windows socket transport to the M8 datagram protocol and prove two-process packet exchange instead of mock-only backend calls.
-- [ ] Implement and test a real session backend for Direct/Custom room creation/joining; no placeholder invite flow.
-- [ ] Implement real Casual/Ranked matchmaking service integration, with explicit service-unavailable behavior and no fabricated matches.
-- [ ] Connect Online settings, connection indicators, profile/history/replay controls and all four modes to the actual in-game UI/runtime path.
-- [ ] Persist profile/history/network settings/replays through the end-user executable rather than keeping them as model-only objects.
-- [ ] Connect live rollback sessions to the commercial game's deterministic state adapter once the commercial runtime is actually bootable.
-- [ ] Pass an end-to-end Windows test with two real processes/hosts exchanging packets and completing a session through the same production path used by `JOJO-Recompiled.exe`.
-
-Until those unchecked items are real, the M9 core is useful engineering infrastructure but **M9 is not 100% and Online is not claimed live**.
-
-## Architectural rules
+## Active architecture rules
 
 - Game simulation never depends on wall-clock rendering cadence.
 - Rendering never owns authoritative gameplay state.
-- Networking never directly mutates gameplay objects; it supplies timestamped/frame-numbered inputs and session commands.
-- Mods consume versioned public interfaces rather than private offsets whenever possible.
-- UI layout uses logical coordinates + anchors/safe areas, never resolution-specific pixel patches.
-- Conversion progress is event-driven from actual work stages, never timer-faked.
-- User-facing distribution contains one executable; developer test/build tools are not part of the release package.
+- UI/settings are counted only when wired to real runtime behavior.
+- Local input supports exactly two logical players for the original two-player experience.
+- UI/presentation uses logical coordinates/anchors/safe areas rather than resolution-specific stretching patches.
+- Conversion progress comes from actual work events, never a fake timer.
+- Unknown media/revisions and unsupported CPU/device behavior fail explicitly during development.
+- The repository/distribution contains no copyrighted game image or extracted proprietary assets.
+- The shipping product has no Online/networking, Mod/plugin, or Training-laboratory dependency.
+
+## Historical engineering milestones
+
+The former M1-M9 milestones remain useful Git history and documentation for engineering work that was attempted or verified in isolation. They are **not the current product-readiness model**.
+
+- M1-M5 produced reusable foundation, media/recompiler/presentation/settings/input contracts that may still serve the offline port and remain subject to R1-R7 end-to-end proof.
+- M6 (Mods), M7 (Training), M8 (rollback/networking) and M9 (Online product modes) are removed from active product scope. Their historical commits/docs may remain for audit/history, but their production sources/targets are not part of the shipping product.
+
+The active truth is R1-R7 above.
