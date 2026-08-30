@@ -111,6 +111,39 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
     return {PsxR3000aStepReason::exception, instruction_pc, instruction, code};
 }
 
+[[nodiscard]] inline bool read_psx_r3000a_cop0(
+    const PsxR3000aState& state, std::uint8_t reg, std::uint32_t& value) noexcept {
+    switch (reg) {
+    case 8u: value = state.cop0.bad_vaddr; return true;
+    case 12u: value = state.cop0.status; return true;
+    case 13u: value = state.cop0.cause; return true;
+    case 14u: value = state.cop0.epc; return true;
+    case 15u: value = state.cop0.prid; return true;
+    default: return false;
+    }
+}
+
+[[nodiscard]] inline bool write_psx_r3000a_cop0(
+    PsxR3000aState& state, std::uint8_t reg, std::uint32_t value) noexcept {
+    constexpr std::uint32_t status_write_mask = 0xf27fff3fu;
+    constexpr std::uint32_t cause_software_interrupt_mask = 0x00000300u;
+    switch (reg) {
+    case 12u:
+        state.cop0.status = (state.cop0.status & ~status_write_mask) |
+                            (value & status_write_mask);
+        return true;
+    case 13u:
+        state.cop0.cause = (state.cop0.cause & ~cause_software_interrupt_mask) |
+                           (value & cause_software_interrupt_mask);
+        return true;
+    case 14u:
+        state.cop0.epc = value;
+        return true;
+    default:
+        return false;
+    }
+}
+
 [[nodiscard]] inline PsxR3000aStepResult step_psx_r3000a(
     PsxR3000aState& state, std::uint32_t instruction) noexcept {
     const std::uint32_t instruction_pc = state.pc;
@@ -150,7 +183,40 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         return shifted | (~std::uint32_t{0} << (32u - shift));
     };
 
-    if (op == 0u) {
+    if (op == 0x10u) { // COP0
+        const auto cop_rs = rs;
+        const auto rd = static_cast<std::uint8_t>((instruction >> 11u) & 0x1fu);
+        const bool canonical_move = (instruction & 0x7ffu) == 0u;
+        if (cop_rs == 0x00u && canonical_move) { // MFC0
+            std::uint32_t load_value = 0u;
+            if (read_psx_r3000a_cop0(state, rd, load_value)) {
+                const bool previous_load_valid = state.pending_load_valid;
+                const auto previous_load_register = state.pending_load_register;
+                const auto previous_load_value = state.pending_load_value;
+                if (previous_load_valid &&
+                    previous_load_register != 0u &&
+                    previous_load_register != rt) {
+                    state.gpr[previous_load_register] = previous_load_value;
+                }
+
+                state.pending_load_valid = rt != 0u;
+                state.pending_load_register = rt;
+                state.pending_load_value = load_value;
+                state.gpr[0] = 0u;
+                state.pc = sequential_pc;
+                state.next_pc = following_pc;
+                state.current_instruction_is_branch_delay_slot = false;
+                state.branch_pc = 0u;
+                return {PsxR3000aStepReason::ok, instruction_pc, instruction};
+            }
+        } else if (cop_rs == 0x04u && canonical_move) { // MTC0
+            supported = write_psx_r3000a_cop0(state, rd, state.gpr[rt]);
+        } else if (instruction == 0x42000010u) { // RFE
+            state.cop0.status = (state.cop0.status & ~0x0fu) |
+                                ((state.cop0.status >> 2u) & 0x0fu);
+            supported = true;
+        }
+    } else if (op == 0u) {
         const auto rd = static_cast<std::uint8_t>((instruction >> 11u) & 0x1fu);
         const auto shamt = static_cast<std::uint8_t>((instruction >> 6u) & 0x1fu);
         const auto funct = static_cast<std::uint8_t>(instruction & 0x3fu);
