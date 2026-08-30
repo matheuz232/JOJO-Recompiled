@@ -183,10 +183,28 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             }
             supported = true;
             break;
+        case 0x20u: { // ADD
+            const auto sum = signed_value(state.gpr[rs]) + signed_value(state.gpr[rt]);
+            if (sum < -0x80000000ll || sum > 0x7fffffffll) {
+                return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, instruction};
+            }
+            write_gpr(rd, static_cast<std::uint32_t>(sum));
+            supported = true;
+            break;
+        }
         case 0x21u: // ADDU
             write_gpr(rd, state.gpr[rs] + state.gpr[rt]);
             supported = true;
             break;
+        case 0x22u: { // SUB
+            const auto difference = signed_value(state.gpr[rs]) - signed_value(state.gpr[rt]);
+            if (difference < -0x80000000ll || difference > 0x7fffffffll) {
+                return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, instruction};
+            }
+            write_gpr(rd, static_cast<std::uint32_t>(difference));
+            supported = true;
+            break;
+        }
         case 0x23u: // SUBU
             write_gpr(rd, state.gpr[rs] - state.gpr[rt]);
             supported = true;
