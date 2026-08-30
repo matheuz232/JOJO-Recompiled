@@ -1,0 +1,22 @@
+name: m6-content-green
+
+on:
+  push:
+    branches: [feature/m6-mod-runtime]
+    paths:
+      - 'src/core/mod_runtime.h'
+      - 'src/core/mod_content.cpp'
+      - 'src/core/sha256.h'
+      - 'src/core/sha256.cpp'
+      - 'tests/test_mod_runtime.cpp'
+      - '.github/workflows/m6-content-green.yml'
+
+jobs:
+  content-green:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build mod content test
+        run: c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc tests/test_mod_runtime.cpp src/core/mod_runtime.cpp src/core/mod_resolver.cpp src/core/mod_content.cpp src/core/semver.cpp src/core/sha256.cpp -o /tmp/test_mod_runtime
+      - name: Run mod content test
+        run: /tmp/test_mod_runtime
