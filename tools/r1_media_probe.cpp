@@ -18,6 +18,7 @@ const char* step_reason_name(jojo::PsxR3000aStepReason reason) noexcept {
     case jojo::PsxR3000aStepReason::ok: return "ok";
     case jojo::PsxR3000aStepReason::unsupported_instruction: return "unsupported-instruction";
     case jojo::PsxR3000aStepReason::memory_fault: return "memory-fault";
+    case jojo::PsxR3000aStepReason::exception: return "exception";
     }
     return "unknown";
 }

@@ -9,12 +9,34 @@ enum class PsxR3000aStepReason {
     ok,
     unsupported_instruction,
     memory_fault,
+    exception,
+};
+
+enum class PsxR3000aExceptionCode : std::uint8_t {
+    interrupt = 0u,
+    address_error_load = 4u,
+    address_error_store = 5u,
+    syscall = 8u,
+    breakpoint = 9u,
+    reserved_instruction = 10u,
+    coprocessor_unusable = 11u,
+    overflow = 12u,
+    none = 0xffu,
 };
 
 struct PsxR3000aStepResult {
     PsxR3000aStepReason reason{PsxR3000aStepReason::ok};
     std::uint32_t instruction_pc{};
     std::uint32_t instruction{};
+    PsxR3000aExceptionCode exception_code{PsxR3000aExceptionCode::none};
+};
+
+struct PsxR3000aCop0State {
+    std::uint32_t bad_vaddr{};
+    std::uint32_t status{};
+    std::uint32_t cause{};
+    std::uint32_t epc{};
+    std::uint32_t prid{2u};
 };
 
 struct PsxR3000aState {
@@ -23,6 +45,9 @@ struct PsxR3000aState {
     std::uint32_t lo{};
     std::uint32_t pc{};
     std::uint32_t next_pc{};
+    PsxR3000aCop0State cop0{};
+    bool current_instruction_is_branch_delay_slot{};
+    std::uint32_t branch_pc{};
     bool pending_load_valid{};
     std::uint8_t pending_load_register{};
     std::uint32_t pending_load_value{};
@@ -46,6 +71,46 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
     state.pending_load_value = 0u;
 }
 
+[[nodiscard]] inline bool psx_r3000a_interrupt_pending(
+    const PsxR3000aState& state) noexcept {
+    constexpr std::uint32_t current_interrupt_enable = 1u;
+    constexpr std::uint32_t interrupt_mask = 0x0000ff00u;
+    return (state.cop0.status & current_interrupt_enable) != 0u &&
+           (state.cop0.status & state.cop0.cause & interrupt_mask) != 0u;
+}
+
+[[nodiscard]] inline PsxR3000aStepResult raise_psx_r3000a_exception(
+    PsxR3000aState& state,
+    PsxR3000aExceptionCode code,
+    std::uint32_t instruction_pc,
+    std::uint32_t instruction,
+    bool has_bad_vaddr = false,
+    std::uint32_t bad_vaddr = 0u) noexcept {
+    constexpr std::uint32_t branch_delay_bit = 0x80000000u;
+    constexpr std::uint32_t pending_interrupt_bits = 0x0000ff00u;
+    constexpr std::uint32_t bootstrap_exception_vector_bit = 1u << 22u;
+
+    const bool in_delay_slot = state.current_instruction_is_branch_delay_slot;
+    state.cop0.epc = in_delay_slot ? state.branch_pc : instruction_pc;
+    state.cop0.cause = (state.cop0.cause & pending_interrupt_bits) |
+                       (static_cast<std::uint32_t>(code) << 2u) |
+                       (in_delay_slot ? branch_delay_bit : 0u);
+    if (has_bad_vaddr) state.cop0.bad_vaddr = bad_vaddr;
+
+    const bool bootstrap_vector =
+        (state.cop0.status & bootstrap_exception_vector_bit) != 0u;
+    state.cop0.status = (state.cop0.status & ~0x3fu) |
+                        ((state.cop0.status << 2u) & 0x3cu);
+
+    complete_psx_pending_load(state);
+    state.gpr[0] = 0u;
+    state.current_instruction_is_branch_delay_slot = false;
+    state.branch_pc = 0u;
+    state.pc = bootstrap_vector ? 0xbfc00180u : 0x80000080u;
+    state.next_pc = state.pc + 4u;
+    return {PsxR3000aStepReason::exception, instruction_pc, instruction, code};
+}
+
 [[nodiscard]] inline PsxR3000aStepResult step_psx_r3000a(
     PsxR3000aState& state, std::uint32_t instruction) noexcept {
     const std::uint32_t instruction_pc = state.pc;
@@ -56,6 +121,7 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
     const auto rs = static_cast<std::uint8_t>((instruction >> 21u) & 0x1fu);
     const auto rt = static_cast<std::uint8_t>((instruction >> 16u) & 0x1fu);
     bool supported = false;
+    bool creates_branch_delay_slot = false;
     std::uint8_t written_register = 0xffu;
 
     const auto write_gpr = [&](std::uint8_t reg, std::uint32_t value) noexcept {
@@ -117,12 +183,14 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         case 0x08u: // JR
             following_pc = state.gpr[rs];
             supported = true;
+            creates_branch_delay_slot = true;
             break;
         case 0x09u: { // JALR
             const auto target = state.gpr[rs];
             write_gpr(rd, instruction_pc + 8u);
             following_pc = target;
             supported = true;
+            creates_branch_delay_slot = true;
             break;
         }
         case 0x10u: // MFHI
@@ -263,26 +331,31 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         if (supported && take_branch) {
             following_pc = branch_target(static_cast<std::uint16_t>(instruction));
         }
+        creates_branch_delay_slot = supported;
     } else if (op == 0x04u) { // BEQ
         if (state.gpr[rs] == state.gpr[rt]) {
             following_pc = branch_target(static_cast<std::uint16_t>(instruction));
         }
         supported = true;
+        creates_branch_delay_slot = true;
     } else if (op == 0x05u) { // BNE
         if (state.gpr[rs] != state.gpr[rt]) {
             following_pc = branch_target(static_cast<std::uint16_t>(instruction));
         }
         supported = true;
+        creates_branch_delay_slot = true;
     } else if (op == 0x06u && rt == 0u) { // BLEZ
         if (signed_value(state.gpr[rs]) <= 0) {
             following_pc = branch_target(static_cast<std::uint16_t>(instruction));
         }
         supported = true;
+        creates_branch_delay_slot = true;
     } else if (op == 0x07u && rt == 0u) { // BGTZ
         if (signed_value(state.gpr[rs]) > 0) {
             following_pc = branch_target(static_cast<std::uint16_t>(instruction));
         }
         supported = true;
+        creates_branch_delay_slot = true;
     } else if (op == 0x08u) { // ADDI (overflow trap deferred until COP0 exists)
         const auto raw_immediate = static_cast<std::uint32_t>(instruction & 0xffffu);
         const std::int64_t lhs = state.gpr[rs] <= 0x7fffffffu
@@ -327,11 +400,13 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         const auto target = instruction & 0x03ffffffu;
         following_pc = ((instruction_pc + 4u) & 0xf0000000u) | (target << 2u);
         supported = true;
+        creates_branch_delay_slot = true;
     } else if (op == 0x03u) { // JAL
         const auto target = instruction & 0x03ffffffu;
         write_gpr(31u, instruction_pc + 8u);
         following_pc = ((instruction_pc + 4u) & 0xf0000000u) | (target << 2u);
         supported = true;
+        creates_branch_delay_slot = true;
     }
 
     if (!supported) {
@@ -342,6 +417,8 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
     state.gpr[0] = 0u;
     state.pc = sequential_pc;
     state.next_pc = following_pc;
+    state.current_instruction_is_branch_delay_slot = creates_branch_delay_slot;
+    state.branch_pc = creates_branch_delay_slot ? instruction_pc : 0u;
     return {PsxR3000aStepReason::ok, instruction_pc, instruction};
 }
 
@@ -379,6 +456,8 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         state.gpr[0] = 0u;
         state.pc = sequential_pc;
         state.next_pc = sequential_pc + 4u;
+        state.current_instruction_is_branch_delay_slot = false;
+        state.branch_pc = 0u;
         return {PsxR3000aStepReason::ok, instruction_pc, instruction};
     }
 
@@ -414,6 +493,8 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         state.gpr[0] = 0u;
         state.pc = sequential_pc;
         state.next_pc = sequential_pc + 4u;
+        state.current_instruction_is_branch_delay_slot = false;
+        state.branch_pc = 0u;
         return {PsxR3000aStepReason::ok, instruction_pc, instruction};
     }
 
@@ -481,6 +562,8 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
     state.gpr[0] = 0u;
     state.pc = sequential_pc;
     state.next_pc = sequential_pc + 4u;
+    state.current_instruction_is_branch_delay_slot = false;
+    state.branch_pc = 0u;
     return {PsxR3000aStepReason::ok, instruction_pc, instruction};
 }
 
