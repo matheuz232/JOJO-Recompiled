@@ -10,9 +10,11 @@ JOJO Recompiled is an offline native-Windows port/recompilation project for a us
 
 The product scope is intentionally reduced to the original game's normal offline content plus host-side compatibility and presentation improvements needed for a correct modern Windows experience.
 
-The project will not ship Online, networking, matchmaking, rollback netcode, mod support, training-laboratory features, or any UI that implies those removed systems exist.
+The project will not ship Online, networking, matchmaking, rollback netcode, mod support, project-added training-laboratory features, or any UI that implies those removed systems exist.
 
 Local two-player play remains mandatory because it is part of the original game experience. The runtime must support two independently configurable local player input routes and must not depend on networking code to do so.
+
+All content and modes that belong to the supported original game revision remain in scope. If the original game contains a built-in training/practice mode, that original mode remains; only the separate project-added Training Laboratory subsystem is removed.
 
 ## 2. Product contract
 
@@ -90,19 +92,21 @@ Remove:
 
 General utilities such as SHA-256 remain when used by installation validation, runtime state verification, cache identity, or other offline product requirements.
 
-### 4.4 Training laboratory
+### 4.4 Project-added Training Laboratory
 
 Remove:
 
 - frame-data training timeline;
 - startup/active/recovery training diagnostics;
-- hitbox/hurtbox/pushbox visualization abstractions created for Training;
-- combo/scaling training display;
-- training save-state slots;
-- exact frame-step UI created specifically for Training;
-- Training menu/settings and product claims.
+- hitbox/hurtbox/pushbox visualization abstractions created for Training Laboratory;
+- combo/scaling training display added by the project;
+- project-added training save-state slots;
+- exact frame-step UI created specifically for Training Laboratory;
+- Training Laboratory menu/settings and product claims.
 
-Low-level deterministic state capture/restore may remain only where required by the runtime, validation, debugging tests, or normal game save behavior. It must not remain presented as a Training feature.
+Do not remove or alter a training/practice mode that is part of the original supported game. Original game behavior remains product content and must run correctly like every other original mode.
+
+Low-level deterministic state capture/restore may remain only where required by the runtime, validation, debugging tests, or normal game save behavior. It must not remain presented as a project-added Training feature.
 
 ## 5. Local multiplayer preservation
 
@@ -149,7 +153,7 @@ For every existing subsystem, classify it during implementation as one of:
 - `PROVEN-OFFLINE`: used by the production offline path and verified;
 - `PARTIAL`: real implementation but missing product integration or coverage;
 - `DEV-ONLY`: useful development/reference implementation not acceptable as the release path;
-- `REMOVE`: belongs only to Online, Mods, Training, or otherwise removed scope;
+- `REMOVE`: belongs only to Online, Mods, Training Laboratory, or otherwise removed scope;
 - `BROKEN`: concrete defect requiring a regression test and fix before reuse.
 
 Only `PROVEN-OFFLINE` behavior may support a product completion claim.
@@ -173,9 +177,9 @@ The shipping executable must not link WinSock or removed feature libraries after
 
 README, roadmap, build docs, user-facing text, menus, and settings must describe only functionality that exists in the production path.
 
-Remove wording that advertises Online, Mods, Training, matchmaking, ranked play, network connection quality, mod APIs, or similar removed features.
+Remove wording that advertises Online, Mods, Training Laboratory, matchmaking, ranked play, network connection quality, mod APIs, or similar removed features. References to a training/practice mode that genuinely belongs to the original game are not removed.
 
-Do not leave disabled menu entries, "coming soon" buttons, hidden fake panels, placeholder services, or visual remnants that suggest removed features will ship.
+Do not leave disabled menu entries, "coming soon" buttons, hidden fake panels, placeholder services, or visual remnants that suggest removed project-added features will ship.
 
 Historical engineering documents may be retained in a clearly marked archive/history location if useful, but they must not be linked as current product capabilities.
 
@@ -203,7 +207,7 @@ At minimum, evidence must prove:
 - first-run media selection and real preparation;
 - supported revision identification;
 - commercial boot;
-- playable original game content through the required game modes;
+- playable original game content through the required original game modes;
 - correct real rendering and audio;
 - responsive local controls;
 - local two-player play with two independently routed player inputs;
@@ -211,7 +215,7 @@ At minimum, evidence must prove:
 - graphics options actually changing the production renderer where applicable;
 - close/relaunch behavior from the prepared installation;
 - clean Windows build and release artifact;
-- no production dependency on removed Online, Mods, or Training systems;
+- no production dependency on removed Online, Mods, or project-added Training Laboratory systems;
 - no fake progress, placeholder backend, decorative-only control, or unverified `100%` claim.
 
 Any unmet item keeps overall product status below 100%.
