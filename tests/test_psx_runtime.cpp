@@ -161,6 +161,22 @@ static void test_bios_a0_init_heap_initializes_hle_state_and_returns_to_ra() {
     CHECK(runtime.cpu.gpr[31] == 0x80012340u);
 }
 
+static void test_bios_b0_hook_entry_int_records_context_pointer_and_returns_to_ra() {
+    jojo::PsxRuntime runtime{};
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
+    runtime.cpu.gpr[4] = 0x800616f0u;
+    runtime.cpu.gpr[9] = 0x19u;
+    runtime.cpu.gpr[31] = 0x8003c6c4u;
+
+    const auto result = jojo::step_psx_runtime(runtime);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.bios.entry_interrupt_hook_installed);
+    CHECK(runtime.bios.entry_interrupt_hook_address == 0x800616f0u);
+    CHECK(runtime.cpu.pc == 0x8003c6c4u);
+    CHECK(runtime.cpu.next_pc == 0x8003c6c8u);
+    CHECK(runtime.cpu.gpr[31] == 0x8003c6c4u);
+}
+
 int main() {
     test_loader_copies_payload_and_initializes_boot_registers();
     test_system_cnf_stack_overrides_exe_stack_and_zero_falls_back();
@@ -169,6 +185,7 @@ int main() {
     test_fetch_fault_is_explicit_and_does_not_advance_pc();
     test_bios_vectors_are_boundaries_not_executable_ram();
     test_bios_a0_init_heap_initializes_hle_state_and_returns_to_ra();
+    test_bios_b0_hook_entry_int_records_context_pointer_and_returns_to_ra();
     if (failures) return 1;
     std::cout << "PS-X EXE runtime loading/fetch assertions passed\n";
     return 0;
