@@ -212,6 +212,75 @@ static void test_bne_taken_preserves_delay_slot() {
     CHECK(state.pc == 0x2ff4u);
 }
 
+static void test_zero_comparison_branches_preserve_delay_slots() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x00004000u);
+    state.gpr[2] = 0xffffffffu;
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x06, 2, 0, 2u)).reason ==
+          jojo::PsxR3000aStepReason::ok); // BLEZ taken
+    CHECK(state.pc == 0x00004004u);
+    CHECK(state.next_pc == 0x0000400cu);
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x09, 0, 3, 7u)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[3] == 7u);
+    CHECK(state.pc == 0x0000400cu);
+
+    jojo::reset_psx_r3000a(state, 0x00005000u);
+    state.gpr[2] = 1u;
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x07, 2, 0, 0xfffeu)).reason ==
+          jojo::PsxR3000aStepReason::ok); // BGTZ taken
+    CHECK(state.pc == 0x00005004u);
+    CHECK(state.next_pc == 0x00004ffcu);
+
+    jojo::reset_psx_r3000a(state, 0x00006000u);
+    state.gpr[2] = 1u;
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x06, 2, 0, 1u)).reason ==
+          jojo::PsxR3000aStepReason::ok); // BLEZ not taken
+    CHECK(state.pc == 0x00006004u);
+    CHECK(state.next_pc == 0x00006008u);
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x06, 2, 1, 0u)).reason ==
+          jojo::PsxR3000aStepReason::unsupported_instruction);
+}
+
+static void test_regimm_branches_link_unconditionally_and_preserve_delay_slots() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x00007000u);
+    state.gpr[2] = 0x80000000u;
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x01, 2, 0x00, 3u)).reason ==
+          jojo::PsxR3000aStepReason::ok); // BLTZ taken
+    CHECK(state.pc == 0x00007004u);
+    CHECK(state.next_pc == 0x00007010u);
+
+    jojo::reset_psx_r3000a(state, 0x00008000u);
+    state.gpr[2] = 0u;
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x01, 2, 0x01, 2u)).reason ==
+          jojo::PsxR3000aStepReason::ok); // BGEZ taken
+    CHECK(state.next_pc == 0x0000800cu);
+
+    jojo::reset_psx_r3000a(state, 0x00009000u);
+    state.gpr[2] = 1u;
+    state.gpr[31] = 0xdeadbeefu;
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x01, 2, 0x10, 2u)).reason ==
+          jojo::PsxR3000aStepReason::ok); // BLTZAL not taken, link still written
+    CHECK(state.gpr[31] == 0x00009008u);
+    CHECK(state.pc == 0x00009004u);
+    CHECK(state.next_pc == 0x00009008u);
+
+    jojo::reset_psx_r3000a(state, 0x0000a000u);
+    state.gpr[2] = 0u;
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x01, 2, 0x11, 0xfffdu)).reason ==
+          jojo::PsxR3000aStepReason::ok); // BGEZAL taken
+    CHECK(state.gpr[31] == 0x0000a008u);
+    CHECK(state.pc == 0x0000a004u);
+    CHECK(state.next_pc == 0x00009ff8u);
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x01, 2, 0x02, 0u)).reason ==
+          jojo::PsxR3000aStepReason::unsupported_instruction);
+}
+
 static void test_main_ram_is_two_megabytes_and_zero_initialized() {
     jojo::PsxBus bus{};
     CHECK(bus.ram.size() == 2u * 1024u * 1024u);
@@ -393,6 +462,8 @@ int main() {
     test_jalr_links_and_preserves_delay_slot();
     test_jalr_reads_target_before_writing_same_register_link();
     test_bne_taken_preserves_delay_slot();
+    test_zero_comparison_branches_preserve_delay_slots();
+    test_regimm_branches_link_unconditionally_and_preserve_delay_slots();
     test_main_ram_is_two_megabytes_and_zero_initialized();
     test_ram_kuseg_kseg0_kseg1_and_default_8mb_window_alias_storage();
     test_ram_access_rejects_unaligned_and_unmapped_addresses();
