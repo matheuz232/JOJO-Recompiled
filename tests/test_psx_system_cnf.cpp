@@ -364,13 +364,17 @@ static void test_r3000a_jal_links_after_delay_slot() {
     CHECK(state.next_pc == 0x80011000u);
 }
 
-static void test_r3000a_reports_unsupported_opcode() {
+static void test_r3000a_reserved_opcode_enters_exception_vector() {
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x80010000u);
     const auto result = jojo::step_psx_r3000a(state, 0xfc000000u);
-    CHECK(result.reason == jojo::PsxR3000aStepReason::unsupported_instruction);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(result.exception_code == jojo::PsxR3000aExceptionCode::reserved_instruction);
     CHECK(result.instruction == 0xfc000000u);
     CHECK(result.instruction_pc == 0x80010000u);
+    CHECK(state.cop0.epc == 0x80010000u);
+    CHECK(((state.cop0.cause >> 2u) & 0x1fu) == 10u);
+    CHECK(state.pc == 0x80000080u);
 }
 
 int main() {
@@ -400,7 +404,7 @@ int main() {
     test_r3000a_addu_subu_wrap_without_overflow_exception();
     test_r3000a_taken_branch_executes_delay_slot_before_target();
     test_r3000a_jal_links_after_delay_slot();
-    test_r3000a_reports_unsupported_opcode();
+    test_r3000a_reserved_opcode_enters_exception_vector();
     if (failures) {
         std::cerr << failures << " test assertion(s) failed\n";
         return 1;

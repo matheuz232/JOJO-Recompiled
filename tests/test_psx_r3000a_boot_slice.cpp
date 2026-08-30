@@ -59,15 +59,18 @@ static void test_addi_sign_extends_and_advances() {
     CHECK(state.pc == 0x800100a0u);
 }
 
-static void test_addi_overflow_stops_without_corrupting_state() {
+static void test_addi_overflow_enters_cop0_exception_vector() {
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x8001009cu);
     state.gpr[4] = 0x7fffffffu;
     const auto result = jojo::step_psx_r3000a(state, encode_i(0x08, 4, 4, 1u));
-    CHECK(result.reason == jojo::PsxR3000aStepReason::unsupported_instruction);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(result.exception_code == jojo::PsxR3000aExceptionCode::overflow);
     CHECK(state.gpr[4] == 0x7fffffffu);
-    CHECK(state.pc == 0x8001009cu);
-    CHECK(state.next_pc == 0x800100a0u);
+    CHECK(state.cop0.epc == 0x8001009cu);
+    CHECK(((state.cop0.cause >> 2u) & 0x1fu) == 12u);
+    CHECK(state.pc == 0x80000080u);
+    CHECK(state.next_pc == 0x80000084u);
 }
 
 static void test_sltu_uses_unsigned_comparison() {
@@ -96,13 +99,17 @@ static void test_signed_add_sub_results_and_overflow_stop() {
     state.gpr[2] = 0x7fffffffu;
     state.gpr[4] = 0xfeedfaceu;
     const auto add_overflow = jojo::step_psx_r3000a(state, encode_r(2, 3, 4, 0, 0x20));
-    CHECK(add_overflow.reason == jojo::PsxR3000aStepReason::unsupported_instruction);
+    CHECK(add_overflow.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(add_overflow.exception_code == jojo::PsxR3000aExceptionCode::overflow);
     CHECK(state.gpr[4] == 0xfeedfaceu);
 
+    jojo::reset_psx_r3000a(state, 0x800100b0u);
     state.gpr[2] = 0x80000000u;
+    state.gpr[3] = 1u;
     state.gpr[5] = 0xcafebabeu;
     const auto sub_overflow = jojo::step_psx_r3000a(state, encode_r(2, 3, 5, 0, 0x22));
-    CHECK(sub_overflow.reason == jojo::PsxR3000aStepReason::unsupported_instruction);
+    CHECK(sub_overflow.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(sub_overflow.exception_code == jojo::PsxR3000aExceptionCode::overflow);
     CHECK(state.gpr[5] == 0xcafebabeu);
 }
 
@@ -172,6 +179,7 @@ static void test_cop0_moves_load_delay_and_rfe_status_restore() {
     CHECK(state.gpr[4] == 0x11111111u);
     CHECK(state.gpr[3] == 0x0000ff3fu);
 
+    state.cop0.status &= ~1u;
     state.cop0.cause = 1u << 10u;
     state.gpr[2] = 0xffffffffu;
     CHECK(jojo::step_psx_r3000a(state, encode_cop0(0x04, 2, 13)).reason ==
@@ -188,6 +196,38 @@ static void test_cop0_moves_load_delay_and_rfe_status_restore() {
           jojo::PsxR3000aStepReason::ok); // MFC0 PRID
     CHECK(jojo::step_psx_r3000a(state, 0u).reason == jojo::PsxR3000aStepReason::ok);
     CHECK(state.gpr[5] == 2u);
+}
+
+static void test_syscall_break_and_masked_interrupt_enter_cop0() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80015000u);
+    state.gpr[2] = 1u;
+    state.gpr[3] = 1u;
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x04, 2, 3, 1u)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+
+    const auto syscall = jojo::step_psx_r3000a(state, 0x0000000cu);
+    CHECK(syscall.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(syscall.exception_code == jojo::PsxR3000aExceptionCode::syscall);
+    CHECK(state.cop0.epc == 0x80015000u);
+    CHECK((state.cop0.cause & 0x80000000u) != 0u);
+
+    jojo::reset_psx_r3000a(state, 0x80016000u);
+    const auto breakpoint = jojo::step_psx_r3000a(state, 0x0000000du);
+    CHECK(breakpoint.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(breakpoint.exception_code == jojo::PsxR3000aExceptionCode::breakpoint);
+    CHECK(state.cop0.epc == 0x80016000u);
+
+    jojo::reset_psx_r3000a(state, 0x80017000u);
+    state.cop0.status = 1u | (1u << 10u);
+    state.cop0.cause = 1u << 10u;
+    state.gpr[2] = 0x12345678u;
+    const auto interrupt = jojo::step_psx_r3000a(state, encode_i(0x09, 2, 2, 1u));
+    CHECK(interrupt.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(interrupt.exception_code == jojo::PsxR3000aExceptionCode::interrupt);
+    CHECK(state.gpr[2] == 0x12345678u);
+    CHECK(state.cop0.epc == 0x80017000u);
+    CHECK(state.pc == 0x80000080u);
 }
 
 static void test_or_combines_register_bits() {
@@ -387,9 +427,13 @@ static void test_signed_unsigned_subword_loads_and_byte_store() {
 
     jojo::reset_psx_r3000a(state, 0x80010600u);
     state.gpr[2] = 0x80001001u;
-    CHECK(jojo::step_psx_r3000a(state, encode_i(0x21, 2, 3, 0u), bus).reason ==
-          jojo::PsxR3000aStepReason::memory_fault);
-    CHECK(state.pc == 0x80010600u);
+    const auto misaligned_lh = jojo::step_psx_r3000a(
+        state, encode_i(0x21, 2, 3, 0u), bus);
+    CHECK(misaligned_lh.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(misaligned_lh.exception_code == jojo::PsxR3000aExceptionCode::address_error_load);
+    CHECK(state.cop0.bad_vaddr == 0x80001001u);
+    CHECK(state.cop0.epc == 0x80010600u);
+    CHECK(state.pc == 0x80000080u);
 }
 
 static void test_scratchpad_storage_and_segment_aliases() {
@@ -597,8 +641,11 @@ static void test_zero_comparison_branches_preserve_delay_slots() {
     CHECK(state.pc == 0x00006004u);
     CHECK(state.next_pc == 0x00006008u);
 
-    CHECK(jojo::step_psx_r3000a(state, encode_i(0x06, 2, 1, 0u)).reason ==
-          jojo::PsxR3000aStepReason::unsupported_instruction);
+    const auto reserved_blez = jojo::step_psx_r3000a(state, encode_i(0x06, 2, 1, 0u));
+    CHECK(reserved_blez.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(reserved_blez.exception_code == jojo::PsxR3000aExceptionCode::reserved_instruction);
+    CHECK(state.cop0.epc == 0x00006000u);
+    CHECK((state.cop0.cause & 0x80000000u) != 0u);
 }
 
 static void test_regimm_branches_link_unconditionally_and_preserve_delay_slots() {
@@ -634,8 +681,13 @@ static void test_regimm_branches_link_unconditionally_and_preserve_delay_slots()
     CHECK(state.pc == 0x0000a004u);
     CHECK(state.next_pc == 0x00009ff8u);
 
-    CHECK(jojo::step_psx_r3000a(state, encode_i(0x01, 2, 0x02, 0u)).reason ==
-          jojo::PsxR3000aStepReason::unsupported_instruction);
+    const auto reserved_regimm = jojo::step_psx_r3000a(
+        state, encode_i(0x01, 2, 0x02, 0u));
+    CHECK(reserved_regimm.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(reserved_regimm.exception_code ==
+          jojo::PsxR3000aExceptionCode::reserved_instruction);
+    CHECK(state.cop0.epc == 0x0000a000u);
+    CHECK((state.cop0.cause & 0x80000000u) != 0u);
 }
 
 static void test_main_ram_is_two_megabytes_and_zero_initialized() {
@@ -715,10 +767,12 @@ static void test_sh_rejects_odd_address_without_advancing_pipeline() {
     CHECK(jojo::psx_bus_write_u32(bus, 0x80001000u, 0xaabbccddu) == jojo::PsxBusAccessReason::ok);
 
     const auto result = jojo::step_psx_r3000a(state, encode_i(0x29, 2, 3, 0u), bus);
-    CHECK(result.reason == jojo::PsxR3000aStepReason::memory_fault);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(result.exception_code == jojo::PsxR3000aExceptionCode::address_error_store);
     CHECK(jojo::psx_bus_read_u32(bus, 0x80001000u).value == 0xaabbccddu);
-    CHECK(state.pc == 0x8003c66cu);
-    CHECK(state.next_pc == 0x8003c670u);
+    CHECK(state.cop0.bad_vaddr == 0x80001001u);
+    CHECK(state.cop0.epc == 0x8003c66cu);
+    CHECK(state.pc == 0x80000080u);
 }
 
 static void test_lhu_reads_unsigned_halfword_with_load_delay() {
@@ -747,10 +801,12 @@ static void test_lhu_rejects_odd_address_without_advancing_pipeline() {
     state.gpr[3] = 0x12345678u;
 
     const auto result = jojo::step_psx_r3000a(state, encode_i(0x25, 2, 3, 0u), bus);
-    CHECK(result.reason == jojo::PsxR3000aStepReason::memory_fault);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(result.exception_code == jojo::PsxR3000aExceptionCode::address_error_load);
     CHECK(state.gpr[3] == 0x12345678u);
-    CHECK(state.pc == 0x8003c648u);
-    CHECK(state.next_pc == 0x8003c64cu);
+    CHECK(state.cop0.bad_vaddr == 0x80001001u);
+    CHECK(state.cop0.epc == 0x8003c648u);
+    CHECK(state.pc == 0x80000080u);
 }
 
 static void test_lw_uses_signed_offset_and_defers_register_update() {
@@ -791,29 +847,32 @@ static void test_load_delay_slot_write_to_same_register_wins() {
     CHECK(state.gpr[3] == 7u);
 }
 
-static void test_lw_memory_fault_does_not_advance_or_modify_target() {
+static void test_lw_address_error_enters_exception_without_modifying_target() {
     jojo::PsxBus bus{};
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x80010050u);
     state.gpr[2] = 0x80001002u;
     state.gpr[3] = 0x12345678u;
     const auto result = jojo::step_psx_r3000a(state, encode_i(0x23, 2, 3, 0u), bus);
-    CHECK(result.reason == jojo::PsxR3000aStepReason::memory_fault);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(result.exception_code == jojo::PsxR3000aExceptionCode::address_error_load);
     CHECK(state.gpr[3] == 0x12345678u);
-    CHECK(state.pc == 0x80010050u);
-    CHECK(state.next_pc == 0x80010054u);
+    CHECK(state.cop0.bad_vaddr == 0x80001002u);
+    CHECK(state.cop0.epc == 0x80010050u);
+    CHECK(state.pc == 0x80000080u);
 }
 
 int main() {
     test_lui_and_addiu_build_boot_addresses();
     test_addiu_sign_extends_immediate();
     test_addi_sign_extends_and_advances();
-    test_addi_overflow_stops_without_corrupting_state();
+    test_addi_overflow_enters_cop0_exception_vector();
     test_sltu_uses_unsigned_comparison();
     test_signed_add_sub_results_and_overflow_stop();
     test_cop0_exception_entry_tracks_branch_delay_and_status_stack();
     test_cop0_interrupt_mask_eligibility();
     test_cop0_moves_load_delay_and_rfe_status_restore();
+    test_syscall_break_and_masked_interrupt_enter_cop0();
     test_or_combines_register_bits();
     test_srl_zero_fills_high_bits();
     test_arithmetic_and_variable_shifts_use_r3000a_rules();
@@ -844,7 +903,7 @@ int main() {
     test_lw_uses_signed_offset_and_defers_register_update();
     test_lw_delay_slot_reads_old_value_then_loaded_value_becomes_visible();
     test_load_delay_slot_write_to_same_register_wins();
-    test_lw_memory_fault_does_not_advance_or_modify_target();
+    test_lw_address_error_enters_exception_without_modifying_target();
     if (failures) return 1;
     std::cout << "R3000A boot integer and RAM load/store assertions passed\n";
     return 0;

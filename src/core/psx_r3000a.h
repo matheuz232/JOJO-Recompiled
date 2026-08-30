@@ -147,6 +147,10 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
 [[nodiscard]] inline PsxR3000aStepResult step_psx_r3000a(
     PsxR3000aState& state, std::uint32_t instruction) noexcept {
     const std::uint32_t instruction_pc = state.pc;
+    if (psx_r3000a_interrupt_pending(state)) {
+        return raise_psx_r3000a_exception(
+            state, PsxR3000aExceptionCode::interrupt, instruction_pc, instruction);
+    }
     const std::uint32_t sequential_pc = state.next_pc;
     std::uint32_t following_pc = sequential_pc + 4u;
 
@@ -259,6 +263,12 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             creates_branch_delay_slot = true;
             break;
         }
+        case 0x0cu: // SYSCALL
+            return raise_psx_r3000a_exception(
+                state, PsxR3000aExceptionCode::syscall, instruction_pc, instruction);
+        case 0x0du: // BREAK
+            return raise_psx_r3000a_exception(
+                state, PsxR3000aExceptionCode::breakpoint, instruction_pc, instruction);
         case 0x10u: // MFHI
             write_gpr(rd, state.hi);
             supported = true;
@@ -320,7 +330,8 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         case 0x20u: { // ADD
             const auto sum = signed_value(state.gpr[rs]) + signed_value(state.gpr[rt]);
             if (sum < -0x80000000ll || sum > 0x7fffffffll) {
-                return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, instruction};
+                return raise_psx_r3000a_exception(
+                    state, PsxR3000aExceptionCode::overflow, instruction_pc, instruction);
             }
             write_gpr(rd, static_cast<std::uint32_t>(sum));
             supported = true;
@@ -333,7 +344,8 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         case 0x22u: { // SUB
             const auto difference = signed_value(state.gpr[rs]) - signed_value(state.gpr[rt]);
             if (difference < -0x80000000ll || difference > 0x7fffffffll) {
-                return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, instruction};
+                return raise_psx_r3000a_exception(
+                    state, PsxR3000aExceptionCode::overflow, instruction_pc, instruction);
             }
             write_gpr(rd, static_cast<std::uint32_t>(difference));
             supported = true;
@@ -432,7 +444,8 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             : static_cast<std::int64_t>(raw_immediate) - 0x10000ll;
         const std::int64_t sum = lhs + rhs;
         if (sum < -0x80000000ll || sum > 0x7fffffffll) {
-            return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, instruction};
+            return raise_psx_r3000a_exception(
+                state, PsxR3000aExceptionCode::overflow, instruction_pc, instruction);
         }
         write_gpr(rt, static_cast<std::uint32_t>(sum));
         supported = true;
@@ -490,6 +503,11 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
 
 [[nodiscard]] inline PsxR3000aStepResult step_psx_r3000a(
     PsxR3000aState& state, std::uint32_t instruction, PsxBus& bus) noexcept {
+    const std::uint32_t instruction_pc = state.pc;
+    if (psx_r3000a_interrupt_pending(state)) {
+        return raise_psx_r3000a_exception(
+            state, PsxR3000aExceptionCode::interrupt, instruction_pc, instruction);
+    }
     const auto op = static_cast<std::uint8_t>(instruction >> 26u);
     if (op != 0x20u && op != 0x21u && op != 0x22u && op != 0x23u &&
         op != 0x24u && op != 0x25u && op != 0x26u && op != 0x28u &&
@@ -497,7 +515,6 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         return step_psx_r3000a(state, instruction);
     }
 
-    const std::uint32_t instruction_pc = state.pc;
     const std::uint32_t sequential_pc = state.next_pc;
     const auto rs = static_cast<std::uint8_t>((instruction >> 21u) & 0x1fu);
     const auto rt = static_cast<std::uint8_t>((instruction >> 16u) & 0x1fu);
@@ -515,6 +532,11 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             store_reason = psx_bus_write_u32(bus, address, state.gpr[rt]);
         }
         if (store_reason != PsxBusAccessReason::ok) {
+            if (store_reason == PsxBusAccessReason::misaligned) {
+                return raise_psx_r3000a_exception(
+                    state, PsxR3000aExceptionCode::address_error_store,
+                    instruction_pc, instruction, true, address);
+            }
             return {PsxR3000aStepReason::memory_fault, instruction_pc, instruction};
         }
 
@@ -609,6 +631,11 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
     }
 
     if (load_reason != PsxBusAccessReason::ok) {
+        if (load_reason == PsxBusAccessReason::misaligned) {
+            return raise_psx_r3000a_exception(
+                state, PsxR3000aExceptionCode::address_error_load,
+                instruction_pc, instruction, true, address);
+        }
         return {PsxR3000aStepReason::memory_fault, instruction_pc, instruction};
     }
 
