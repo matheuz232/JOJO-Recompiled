@@ -16,6 +16,7 @@ enable_testing()
 add_library(jojo_core STATIC
   src/core/version.cpp
   src/core/settings.cpp
+  src/core/presentation.cpp
   src/core/input.cpp
   src/core/disc_image.cpp
   src/core/disc_media.cpp
