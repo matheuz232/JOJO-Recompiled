@@ -489,7 +489,8 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
     }
 
     if (!supported) {
-        return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, instruction};
+        return raise_psx_r3000a_exception(
+            state, PsxR3000aExceptionCode::reserved_instruction, instruction_pc, instruction);
     }
 
     complete_psx_pending_load(state, written_register);
