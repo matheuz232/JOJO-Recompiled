@@ -66,7 +66,15 @@ struct PsxRuntime {
     return Result<void>::success();
 }
 
+[[nodiscard]] inline bool is_psx_bios_vector(std::uint32_t pc) noexcept {
+    return pc == 0x000000a0u || pc == 0x000000b0u || pc == 0x000000c0u;
+}
+
 [[nodiscard]] inline PsxR3000aStepResult step_psx_runtime(PsxRuntime& runtime) noexcept {
+    if (is_psx_bios_vector(runtime.cpu.pc)) {
+        return {PsxR3000aStepReason::unsupported_instruction, runtime.cpu.pc, 0u};
+    }
+
     const auto fetched = psx_bus_read_u32(runtime.bus, runtime.cpu.pc);
     if (fetched.reason != PsxBusAccessReason::ok) {
         return {PsxR3000aStepReason::memory_fault, runtime.cpu.pc, 0u};
