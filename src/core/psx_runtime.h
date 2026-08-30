@@ -78,13 +78,26 @@ struct PsxRuntime {
 }
 
 [[nodiscard]] inline PsxR3000aStepResult step_psx_runtime(PsxRuntime& runtime) noexcept {
-    if (is_psx_bios_vector(runtime.cpu.pc)) {
-        return {PsxR3000aStepReason::unsupported_instruction, runtime.cpu.pc, 0u};
+    const auto instruction_pc = runtime.cpu.pc;
+    if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x39u) {
+        runtime.bios.heap_initialized = true;
+        runtime.bios.heap_base = runtime.cpu.gpr[4];
+        runtime.bios.heap_size = runtime.cpu.gpr[5];
+
+        const auto return_pc = runtime.cpu.gpr[31];
+        runtime.cpu.pc = return_pc;
+        runtime.cpu.next_pc = return_pc + 4u;
+        runtime.cpu.gpr[0] = 0u;
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
 
-    const auto fetched = psx_bus_read_u32(runtime.bus, runtime.cpu.pc);
+    if (is_psx_bios_vector(instruction_pc)) {
+        return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, 0u};
+    }
+
+    const auto fetched = psx_bus_read_u32(runtime.bus, instruction_pc);
     if (fetched.reason != PsxBusAccessReason::ok) {
-        return {PsxR3000aStepReason::memory_fault, runtime.cpu.pc, 0u};
+        return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
     }
     return step_psx_r3000a(runtime.cpu, fetched.value, runtime.bus);
 }
