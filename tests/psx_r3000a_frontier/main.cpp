@@ -31,8 +31,27 @@ static void test_ori_zero_extends_immediate_and_advances() {
     CHECK(cpu.gpr[3] == 0x1234ffffu);
 }
 
+static void test_andi_zero_extends_immediate_and_advances() {
+    jojo::PsxR3000aState cpu{};
+    jojo::reset_psx_r3000a(cpu, 0x8003c948u);
+    cpu.gpr[3] = 0x89abcdefu;
+
+    const auto result = jojo::step_psx_r3000a(cpu, encode_i(0x0c, 3, 19, 0xffffu));
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.gpr[19] == 0x0000cdefu);
+    CHECK(cpu.pc == 0x8003c94cu);
+    CHECK(cpu.next_pc == 0x8003c950u);
+
+    jojo::reset_psx_r3000a(cpu, 0x80001000u);
+    cpu.gpr[2] = 0xffff0000u;
+    CHECK(jojo::step_psx_r3000a(cpu, encode_i(0x0c, 2, 3, 0x8001u)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.gpr[3] == 0u);
+}
+
 int main() {
     test_ori_zero_extends_immediate_and_advances();
+    test_andi_zero_extends_immediate_and_advances();
     if (failures) return 1;
     std::cout << "R3000A commercial frontier assertions passed\n";
     return 0;
