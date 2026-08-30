@@ -180,3 +180,7 @@ add_test(NAME jojo_sh4_fpu_disable_tests COMMAND jojo_sh4_fpu_disable_tests)
 add_executable(jojo_native_backend_tests tests/test_native_backend.cpp)
 target_link_libraries(jojo_native_backend_tests PRIVATE jojo_core)
 add_test(NAME jojo_native_backend_tests COMMAND jojo_native_backend_tests)
+
+add_executable(jojo_presentation_tests tests/test_presentation.cpp)
+target_link_libraries(jojo_presentation_tests PRIVATE jojo_core)
+add_test(NAME jojo_presentation_tests COMMAND jojo_presentation_tests)
