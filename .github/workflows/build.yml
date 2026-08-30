@@ -38,6 +38,12 @@ jobs:
         run: cmake --build build/psx_dma_control --parallel 2
       - name: Test PSX DPCR contract
         run: ./build/psx_dma_control/jojo_psx_dma_control_tests
+      - name: Configure PSX Timer 1 mode contract
+        run: cmake -S tests/psx_timer1_mode -B build/psx_timer1_mode -DCMAKE_BUILD_TYPE=Release
+      - name: Build PSX Timer 1 mode contract
+        run: cmake --build build/psx_timer1_mode --parallel 2
+      - name: Test PSX Timer 1 mode contract
+        run: ./build/psx_timer1_mode/jojo_psx_timer1_mode_tests
       - name: Configure R3000A frontier contract
         run: cmake -S tests/psx_r3000a_frontier -B build/psx_r3000a_frontier -DCMAKE_BUILD_TYPE=Release
       - name: Build R3000A frontier contract
@@ -82,6 +88,12 @@ jobs:
         run: cmake --build build/psx_dma_control --config Release --parallel 2
       - name: Test PSX DPCR contract
         run: .\build\psx_dma_control\Release\jojo_psx_dma_control_tests.exe
+      - name: Configure PSX Timer 1 mode contract
+        run: cmake -S tests/psx_timer1_mode -B build/psx_timer1_mode -G "Visual Studio 17 2022" -A x64
+      - name: Build PSX Timer 1 mode contract
+        run: cmake --build build/psx_timer1_mode --config Release --parallel 2
+      - name: Test PSX Timer 1 mode contract
+        run: .\build\psx_timer1_mode\Release\jojo_psx_timer1_mode_tests.exe
       - name: Configure R3000A frontier contract
         run: cmake -S tests/psx_r3000a_frontier -B build/psx_r3000a_frontier -G "Visual Studio 17 2022" -A x64
       - name: Build R3000A frontier contract
