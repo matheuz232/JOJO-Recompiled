@@ -48,8 +48,9 @@ Result<std::uint16_t> read_u16(std::span<const std::uint8_t> bytes, std::size_t&
     if (offset + 2 > bytes.size()) {
         return Result<std::uint16_t>::failure(ErrorCode::unsupported_format, "network packet is truncated while reading u16");
     }
-    const auto value = static_cast<std::uint16_t>(bytes[offset]) |
-        static_cast<std::uint16_t>(static_cast<std::uint16_t>(bytes[offset + 1]) << 8);
+    const auto low = static_cast<std::uint16_t>(bytes[offset]);
+    const auto high = static_cast<std::uint16_t>(bytes[offset + 1]);
+    const auto value = static_cast<std::uint16_t>(low | static_cast<std::uint16_t>(high << 8u));
     offset += 2;
     return Result<std::uint16_t>::success(value);
 }
