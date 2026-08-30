@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <iterator>
 #include <span>
 #include <utility>
 
@@ -95,6 +96,7 @@ Result<void> RollbackSession::submit_remote_input(std::uint64_t frame, RollbackI
     remote_inputs_[frame] = remote;
     const auto restored = simulation_.load_state(frame_it->second.snapshot_before);
     if (!restored) {
+        (void)simulation_.load_state(original_state);
         remote_inputs_ = original_remote_inputs;
         return Result<void>::failure(restored.error, restored.detail);
     }
