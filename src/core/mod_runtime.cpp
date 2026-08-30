@@ -6,6 +6,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <system_error>
 
 namespace jojo {
 namespace {
@@ -235,20 +236,18 @@ Result<ModCatalog> discover_mods(const std::filesystem::path& mods_root) {
             continue;
         }
         const auto manifest_path = it->path() / "mod.ini";
-        if (!std::filesystem::exists(manifest_path, ec)) {
-            if (ec) {
-                return Result<ModCatalog>::failure(
-                    ErrorCode::io_error,
-                    "failed to inspect mod manifest: " + ec.message());
-            }
-            continue;
-        }
         const auto manifest_status = std::filesystem::symlink_status(manifest_path, ec);
         if (ec) {
+            if (ec == std::errc::no_such_file_or_directory ||
+                ec == std::errc::not_a_directory) {
+                ec.clear();
+                continue;
+            }
             return Result<ModCatalog>::failure(
                 ErrorCode::io_error,
                 "failed to inspect mod manifest: " + ec.message());
         }
+        if (!std::filesystem::exists(manifest_status)) continue;
         if (std::filesystem::is_symlink(manifest_status)) {
             return Result<ModCatalog>::failure(
                 ErrorCode::invalid_argument,

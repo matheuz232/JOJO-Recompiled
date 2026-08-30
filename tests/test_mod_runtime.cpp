@@ -127,6 +127,23 @@ int main() {
     const auto symlink_manifest_target = std::filesystem::temp_directory_path() / "jojo_mod_symlink_manifest_target.ini";
     std::filesystem::remove_all(symlink_manifest_root, ec);
     std::filesystem::remove(symlink_manifest_target, ec);
+
+    const auto dangling_manifest_root = std::filesystem::temp_directory_path() / "jojo_mod_dangling_manifest_tests";
+    std::filesystem::remove_all(dangling_manifest_root, ec);
+    std::filesystem::create_directories(dangling_manifest_root / "linked", ec);
+    std::error_code dangling_symlink_ec;
+    std::filesystem::create_symlink(
+        dangling_manifest_root / "missing.ini",
+        dangling_manifest_root / "linked" / "mod.ini",
+        dangling_symlink_ec);
+    if (!dangling_symlink_ec) {
+        const auto dangling_manifest_catalog = discover_mods(dangling_manifest_root);
+        CHECK(!dangling_manifest_catalog);
+        if (!dangling_manifest_catalog) {
+            CHECK(dangling_manifest_catalog.detail.find("symlink") != std::string::npos);
+        }
+    }
+    std::filesystem::remove_all(dangling_manifest_root, ec);
     std::filesystem::create_directories(symlink_manifest_root / "linked", ec);
     write_text(symlink_manifest_target, data_manifest("linked.manifest"));
     std::error_code manifest_symlink_ec;
