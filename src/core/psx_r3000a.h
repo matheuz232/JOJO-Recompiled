@@ -155,6 +155,10 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
     } else if (op == 0x0fu) { // LUI
         write_gpr(rt, (instruction & 0xffffu) << 16u);
         supported = true;
+    } else if (op == 0x02u) { // J
+        const auto target = instruction & 0x03ffffffu;
+        following_pc = ((instruction_pc + 4u) & 0xf0000000u) | (target << 2u);
+        supported = true;
     } else if (op == 0x03u) { // JAL
         const auto target = instruction & 0x03ffffffu;
         write_gpr(31u, instruction_pc + 8u);
