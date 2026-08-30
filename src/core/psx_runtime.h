@@ -88,6 +88,17 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
 
 [[nodiscard]] inline PsxR3000aStepResult step_psx_runtime(PsxRuntime& runtime) noexcept {
     const auto instruction_pc = runtime.cpu.pc;
+    if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x49u) {
+        const auto write_reason = psx_bus_write_u32(
+            runtime.bus, PsxBus::gpu_gp0_address, runtime.cpu.gpr[4]);
+        if (write_reason != PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
+        runtime.cpu.gpr[2] = 0u;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
     if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x39u) {
         runtime.bios.heap_initialized = true;
         runtime.bios.heap_base = runtime.cpu.gpr[4];
