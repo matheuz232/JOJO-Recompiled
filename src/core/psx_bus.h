@@ -11,6 +11,11 @@ enum class PsxBusAccessReason {
     unmapped,
 };
 
+struct PsxBusReadU16Result {
+    PsxBusAccessReason reason{PsxBusAccessReason::ok};
+    std::uint16_t value{};
+};
+
 struct PsxBusReadU32Result {
     PsxBusAccessReason reason{PsxBusAccessReason::ok};
     std::uint32_t value{};
@@ -39,6 +44,22 @@ struct PsxBus {
     return false;
 }
 
+[[nodiscard]] inline PsxBusAccessReason psx_bus_ram_offset_u16(std::uint32_t address,
+                                                                std::size_t& offset) noexcept {
+    if ((address & 1u) != 0u) return PsxBusAccessReason::misaligned;
+
+    std::uint32_t physical = 0;
+    if (!psx_bus_virtual_to_physical(address, physical)) {
+        return PsxBusAccessReason::unmapped;
+    }
+    if (physical >= PsxBus::default_ram_mirror_window) {
+        return PsxBusAccessReason::unmapped;
+    }
+
+    offset = static_cast<std::size_t>(physical & (PsxBus::main_ram_size - 1u));
+    return PsxBusAccessReason::ok;
+}
+
 [[nodiscard]] inline PsxBusAccessReason psx_bus_ram_offset(std::uint32_t address,
                                                             std::size_t& offset) noexcept {
     if ((address & 3u) != 0u) return PsxBusAccessReason::misaligned;
@@ -53,6 +74,18 @@ struct PsxBus {
 
     offset = static_cast<std::size_t>(physical & (PsxBus::main_ram_size - 1u));
     return PsxBusAccessReason::ok;
+}
+
+[[nodiscard]] inline PsxBusReadU16Result psx_bus_read_u16(const PsxBus& bus,
+                                                           std::uint32_t address) noexcept {
+    std::size_t offset = 0;
+    const auto reason = psx_bus_ram_offset_u16(address, offset);
+    if (reason != PsxBusAccessReason::ok) return {reason, 0u};
+
+    const auto value = static_cast<std::uint16_t>(
+        static_cast<std::uint16_t>(bus.ram[offset + 0u]) |
+        static_cast<std::uint16_t>(static_cast<std::uint16_t>(bus.ram[offset + 1u]) << 8u));
+    return {PsxBusAccessReason::ok, value};
 }
 
 [[nodiscard]] inline PsxBusReadU32Result psx_bus_read_u32(const PsxBus& bus,
