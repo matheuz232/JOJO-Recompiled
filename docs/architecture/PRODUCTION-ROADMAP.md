@@ -138,19 +138,20 @@ Completion evidence is tracked in [`../superpowers/plans/2026-08-30-training-lab
 
 M7 completion closes the portable **training-laboratory runtime contract**. It does **not** claim that a commercial revision already supplies real character phase, combat, collision or complete runtime snapshot data to the adapter. Those remain real-game integration work requiring legally supplied media for end-to-end proof.
 
-### M8 — Rollback networking core
+### M8 — Rollback networking core — Complete (100%)
 
-The simulation contract is intentionally designed before matchmaking:
+Completion evidence is tracked in [`../superpowers/plans/2026-08-30-rollback-networking-core.md`](../superpowers/plans/2026-08-30-rollback-networking-core.md) and [`../superpowers/plans/2026-08-30-rollback-networking-core-verification.md`](../superpowers/plans/2026-08-30-rollback-networking-core-verification.md).
 
-- deterministic `step_frame(local, remote)`;
-- snapshot save/restore;
-- state hashing/desync detection;
-- deterministic RNG ownership;
-- side-effect suppression during rollback re-simulation.
+- [x] Deterministic local/remote frame-input contract with snapshot capture and restore around simulated frames.
+- [x] Latest-known remote-input prediction, late-input correction and bounded rollback/re-simulation with side effects suppressed during replay.
+- [x] SHA-256 state hashing with deterministic local hash lookup and earliest-frame desync detection against remote reports.
+- [x] Fixed integer-only deterministic RNG with explicit restorable state ownership.
+- [x] Versioned little-endian datagram protocol suitable for low-latency UDP input exchange, with malformed/truncated/oversized packet rejection.
+- [x] Input/ping/pong traffic remains unreliable while session hello/accept/disconnect alone use acknowledgement/retransmission reliability driven by caller-supplied monotonic network time.
+- [x] RTT, jitter, sent/received/lost packet counts, loss percentage, predicted frames, rollback depth and connected/reconnecting/disconnected telemetry.
+- [x] Linux portable-core and Windows x64/MSVC build/test coverage, including Windows executable artifact upload.
 
-Transport targets low-latency UDP input exchange with reliability only for control/session messages. Network telemetry tracks RTT, jitter, packet loss, predicted frames, rollback depth and disconnect state.
-
-No implementation may promise zero latency: physical RTT, jitter and packet loss are external constraints. The product target is minimum avoidable local latency and graceful behavior under real-world network conditions.
+M8 completion closes the reusable **rollback/networking core contract**. The wire layer is intentionally UDP-oriented and platform-socket independent so platform hosts can exchange datagrams without allowing networking APIs to own gameplay state. It does **not** claim public matchmaking, relay/NAT traversal, production socket threading, account services, encryption/key exchange or a commercial revision's full deterministic gameplay-state adapter. No implementation promises zero latency: physical RTT, jitter and packet loss remain external constraints.
 
 ### M9 — Online product modes
 
