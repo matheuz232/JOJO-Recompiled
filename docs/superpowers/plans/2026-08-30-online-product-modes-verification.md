@@ -20,9 +20,30 @@ M9 implements the reusable portable Online product/orchestration contract over t
 - First GREEN Windows artifact: `JOJO-Recompiled-Windows-x64`, artifact `9734276042`, digest `sha256:9f6fa6ce90667877cad9283983cadba2907c745521d55900953ba6f9bec1ed4d`.
 - Temporary `.github/workflows/m9-red.yml` was removed after the RED proof at commit `85c305f1b58edca937a9265b8e779dd9b5127b81`; the normal build workflow is the permanent verification path.
 
+## Hardening and cross-milestone regression fixes
+
+Final full-suite hardening intentionally looked for failures beyond the happy-path M9 contract. Two real defects were found and retained as permanent regression coverage.
+
+### Invalid OnlineMode boundary
+
+- Hardening RED run `33319151316` at `2afdfe884ec8064a6ea340e36cffd379684533f5`: the repository built, then CTest failed exactly `jojo_online_hardening_tests` because `make_mod_session_policy()` accepted `static_cast<OnlineMode>(255)`.
+- Root cause: the function special-cased Ranked/Casual and then switched on mod-policy kind, allowing an invalid mode to fall into a valid policy path.
+- Fix commit `5e64311d726bded84bdfed31a6dde1eca124ed4a` rejects any value outside Casual/Ranked/Direct/Custom before policy mapping.
+- GREEN run `33319232937` passed complete Linux and Windows/MSVC configure/build/CTest and Windows executable upload.
+
+### Dreamcast boot SLEEP propagation
+
+- Full-build review exposed an existing `-Wswitch` warning: `Sh4ReferenceStopReason::sleep` existed in the SH-4 executor but the Dreamcast boot result had no corresponding stop reason.
+- Compile RED run `33319305205` at `20385670d1018281d7fe902642287799ebdfee5d`: the new permanent boot-runner regression test failed to compile exactly because `DreamcastBootStopReason::sleep` did not exist.
+- Commit `86d90fdf1f225ad7f6a804a39dacc20101c84424` exposed the public boot `sleep` stop reason. Run `33319359352` then compiled but failed the three sleep assertions and still showed that the executor sleep value was not mapped by the boot-runner switch.
+- Commit `3f9fc964e74e50812b9be2e10513ec6f09b60114` added the explicit `Sh4ReferenceStopReason::sleep -> DreamcastBootStopReason::sleep` mapping. Its run `33319372548` still failed the test, which isolated a second issue in the test premise rather than the production privilege model: SH-4 `SLEEP` is privileged and the synthetic test had entered with `SR.MD=0`.
+- Commit `fce647cfc96061336d618c3a6638430cd50d1264` corrected the regression test to execute `SLEEP` with `SR.MD=1`, preserving the executor's existing privileged-instruction rule instead of weakening it.
+- Full hardening GREEN run `33319575723` at `fce647cfc96061336d618c3a6638430cd50d1264`: Linux configured, built and passed all 53 CTests; Windows x64/MSVC configured, built Release, passed CTest and uploaded the executable.
+- Hardening GREEN Windows artifact: `JOJO-Recompiled-Windows-x64`, artifact `9734527244`, digest `sha256:b8c9653cb7277a75ffbca4c979dc7213dc113b67db349fe4c5d23b793a1e6ea5`.
+
 ## Permanent test coverage
 
-`tests/test_online.cpp` proves:
+`tests/test_online.cpp` and `tests/test_online_hardening.cpp` prove:
 
 1. stable four-mode Online menu order and non-empty product labels;
 2. match-rule and network-setting boundary validation;
@@ -34,10 +55,13 @@ M9 implements the reusable portable Online product/orchestration contract over t
 8. accessible signal tokens/text and connected/reconnecting/disconnected/voluntary-left lifecycle distinctions;
 9. bounded match history, duplicate-ID rejection, invalid-round rejection and oldest-entry eviction;
 10. deterministic replay bytes, round-trip parsing, 64-hex state hashes and strictly increasing frame indexes;
-11. malformed replay magic/version/mode/reserved bytes, truncation and trailing bytes are rejected.
+11. malformed replay magic/version/mode/reserved bytes, truncation and trailing bytes are rejected;
+12. invalid `OnlineMode` enum values are rejected before any valid mod-policy path can be selected.
+
+The existing `tests/test_dreamcast_boot_runner.cpp` additionally retains the cross-milestone regression proving that a privileged SH-4 `SLEEP` stops the boot runner as `DreamcastBootStopReason::sleep`, preserves `state.sleeping`/the sleep system event, and does not execute the following instruction as normal continuation.
 
 ## Readiness boundary
 
 M9 closes the portable Online product model and service-adapter contract. It does **not** claim that a public account service, production matchmaking fleet, NAT traversal/relay, encryption/key exchange, production socket threading or commercial-game Online UI rendering are already live. Those are host/backend and real-game integration responsibilities outside this portable milestone.
 
-The final exact branch-head Linux + Windows/MSVC CI, protected PR merge, and fresh post-merge `main` CI/artifact remain mandatory integration gates. Their final IDs are recorded in the PR/integration evidence after those gates execute.
+A final exact branch-head Linux + Windows/MSVC CI, protected PR merge, and fresh post-merge `main` CI/artifact remain mandatory integration gates. The final branch and integration IDs are recorded in the PR after those gates execute.
