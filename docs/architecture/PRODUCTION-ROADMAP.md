@@ -10,9 +10,15 @@ Graphics, controls, audio, mods, training tools and online options belong to the
 
 The repository must never contain game images, extracted copyrighted assets, generated game data, or user save/configuration files.
 
+## Product readiness gate
+
+**Overall product status: IN PROGRESS.** A milestone marked `Scoped contract complete` means its reusable engineering contract is implemented and verified; it does **not** mean the commercial game or the complete end-user product is ready.
+
+The project may only claim **overall 100% / production-ready** after end-to-end evidence from a legally supplied supported game copy proves that the single Windows executable can convert the media, boot the commercial game, render real gameplay, produce real audio, accept real player input, expose the required in-game settings/mod/training/Online UI, persist saves/configuration/replays, and complete real network sessions through deployed services where those modes require them. CI-only models, fake progress, placeholder backends, mock-only networking and UI that is not connected to the actual runtime do not satisfy this gate.
+
 ## Milestones
 
-### M1 — Production foundation — Complete (100%)
+### M1 — Production foundation — Scoped contract complete
 
 Completion evidence is tracked in [`../superpowers/plans/2026-08-28-production-foundation.md`](../superpowers/plans/2026-08-28-production-foundation.md).
 
@@ -26,7 +32,7 @@ Completion evidence is tracked in [`../superpowers/plans/2026-08-28-production-f
 
 M1 completion does **not** imply that the commercial game is playable or that the native backend is ready; those remain later milestones.
 
-### M2 — Disc filesystem + game revision identification — Complete (100%)
+### M2 — Disc filesystem + game revision identification — Scoped contract complete
 
 Completion evidence is tracked in [`../superpowers/plans/2026-08-28-disc-filesystem.md`](../superpowers/plans/2026-08-28-disc-filesystem.md) and [`../superpowers/plans/2026-08-28-track-media.md`](../superpowers/plans/2026-08-28-track-media.md).
 
@@ -39,11 +45,11 @@ Completion evidence is tracked in [`../superpowers/plans/2026-08-28-disc-filesys
 
 M2 completion covers the safe media, filesystem and revision-profile infrastructure. Commercial revision fingerprints are intentionally **not** guessed or copied from game data: until signatures are independently verified from legally supplied media, that media remains an explicit `unknown_revision`. M2 completion does **not** imply that a commercial revision is enabled, that the native backend is ready, or that the game boots.
 
-### M3 — Native recompiler backend — Complete (100%)
+### M3 — Native recompiler backend — Scoped contract complete
 
 Completion evidence is tracked in [`../superpowers/plans/2026-08-29-playable-backend-path.md`](../superpowers/plans/2026-08-29-playable-backend-path.md).
 
-#### M3.1 — Dreamcast executable loader + deterministic memory map — Complete (100%)
+#### M3.1 — Dreamcast executable loader + deterministic memory map — Scoped contract complete
 
 - [x] Analyze the supported plain GD-ROM boot executable before loading it.
 - [x] Load executable bytes deterministically at `0x8C010000` into a zero-initialized 16 MiB main-RAM backing store.
@@ -52,7 +58,7 @@ Completion evidence is tracked in [`../superpowers/plans/2026-08-29-playable-bac
 - [x] Reject unsupported MIL-CD/unknown encodings before memory preparation instead of guessing normalization.
 - [x] Linux and Windows/MSVC build/test coverage for the complete M3.1 contract.
 
-#### M3.2 — Deterministic native runtime + versioned compiled-code cache — Complete (100%)
+#### M3.2 — Deterministic native runtime + versioned compiled-code cache — Scoped contract complete
 
 - [x] Compile eligible straight-line SH-4 CFG/IR blocks into executable x86-64 machine code; blocks without a dedicated machine-code lowering remain an explicit reference fallback.
 - [x] Execute generated code from RX memory using the correct Windows x64 or SysV x64 calling convention.
@@ -73,7 +79,7 @@ M3 criteria:
 
 M3 completion closes the **backend architecture contract defined by this roadmap**. It does **not** claim that every SH-4 IR operation already has a dedicated x86-64 machine-code lowering: blocks without one remain explicit and observable reference fallbacks. It also does **not** mark a commercial installation `native-ready`, prove real-game boot, render a real frame/menu, or provide functional game input. Those require the following device/integration milestones and end-to-end evidence with legally supplied game data.
 
-### M4 — Renderer, presentation and aspect correction — Complete (100%)
+### M4 — Renderer, presentation and aspect correction — Scoped contract complete
 
 Completion evidence is tracked in [`../superpowers/plans/2026-08-30-presentation-renderer.md`](../superpowers/plans/2026-08-30-presentation-renderer.md).
 
@@ -87,7 +93,7 @@ Completion evidence is tracked in [`../superpowers/plans/2026-08-30-presentation
 
 M4 completion closes the **host presentation/aspect/quality contract defined above**. It does **not** claim that Dreamcast PVR2 scene rendering is complete, that a commercial revision boots, that a real frame/menu is visible, or that game input/audio are functional. Those remain device/integration work and are still required before conversion output can become `native-ready`.
 
-### M5 — In-game settings + input — Complete (100%)
+### M5 — In-game settings + input — Scoped contract complete
 
 Completion evidence is tracked in [`../superpowers/plans/2026-08-30-ingame-settings-input.md`](../superpowers/plans/2026-08-30-ingame-settings-input.md) and [`../superpowers/plans/2026-08-30-ingame-settings-input-verification.md`](../superpowers/plans/2026-08-30-ingame-settings-input-verification.md).
 
@@ -102,7 +108,7 @@ Completion evidence is tracked in [`../superpowers/plans/2026-08-30-ingame-setti
 
 M5 completion closes the reusable **settings/menu/input runtime contract**. It does **not** claim that a commercial revision currently reaches a rendered native settings screen, that Dreamcast Maple input has been wired into original game code, that AICA audio playback is complete, or that a converted commercial installation is `native-ready`. Those remain real-game/device integration work requiring legally supplied media for end-to-end evidence.
 
-### M6 — Mod runtime — Complete (100%)
+### M6 — Mod runtime — Scoped contract complete
 
 Completion evidence is tracked in [`../superpowers/plans/2026-08-30-mod-runtime.md`](../superpowers/plans/2026-08-30-mod-runtime.md).
 
@@ -123,7 +129,7 @@ The completed portable contract includes:
 
 M6 completion closes the reusable mod-runtime contract. It does **not** claim that commercial game assets are already routed through overlays, that in-game mod controls exist, that native plugins are sandboxed, or that the converted installation is `native-ready`.
 
-### M7 — Training laboratory — Complete (100%)
+### M7 — Training laboratory — Scoped contract complete
 
 Completion evidence is tracked in [`../superpowers/plans/2026-08-30-training-laboratory.md`](../superpowers/plans/2026-08-30-training-laboratory.md) and [`../superpowers/plans/2026-08-30-training-laboratory-verification.md`](../superpowers/plans/2026-08-30-training-laboratory-verification.md).
 
@@ -138,7 +144,7 @@ Completion evidence is tracked in [`../superpowers/plans/2026-08-30-training-lab
 
 M7 completion closes the portable **training-laboratory runtime contract**. It does **not** claim that a commercial revision already supplies real character phase, combat, collision or complete runtime snapshot data to the adapter. Those remain real-game integration work requiring legally supplied media for end-to-end proof.
 
-### M8 — Rollback networking core — Complete (100%)
+### M8 — Rollback networking core — Scoped contract complete
 
 Completion evidence is tracked in [`../superpowers/plans/2026-08-30-rollback-networking-core.md`](../superpowers/plans/2026-08-30-rollback-networking-core.md) and [`../superpowers/plans/2026-08-30-rollback-networking-core-verification.md`](../superpowers/plans/2026-08-30-rollback-networking-core-verification.md).
 
@@ -153,11 +159,13 @@ Completion evidence is tracked in [`../superpowers/plans/2026-08-30-rollback-net
 
 M8 completion closes the reusable **rollback/networking core contract**. The wire layer is intentionally UDP-oriented and platform-socket independent so platform hosts can exchange datagrams without allowing networking APIs to own gameplay state. It does **not** claim public matchmaking, relay/NAT traversal, production socket threading, account services, encryption/key exchange or a commercial revision's full deterministic gameplay-state adapter. No implementation promises zero latency: physical RTT, jitter and packet loss remain external constraints.
 
-### M9 — Online product modes — Complete (100%)
+### M9 — Online product modes — In progress
 
-Completion evidence is tracked in [`../superpowers/plans/2026-08-30-online-product-modes.md`](../superpowers/plans/2026-08-30-online-product-modes.md) and [`../superpowers/plans/2026-08-30-online-product-modes-verification.md`](../superpowers/plans/2026-08-30-online-product-modes-verification.md).
+Verification of the portable core is tracked in [`../superpowers/plans/2026-08-30-online-product-modes.md`](../superpowers/plans/2026-08-30-online-product-modes.md) and [`../superpowers/plans/2026-08-30-online-product-modes-verification.md`](../superpowers/plans/2026-08-30-online-product-modes-verification.md).
 
-- [x] Stable in-game Online product model for Casual, Ranked, Direct 1v1 and Custom match modes.
+Portable Online core already implemented and verified:
+
+- [x] Stable Online product model for Casual, Ranked, Direct 1v1 and Custom match modes.
 - [x] Match rules plus rollback/input-delay/telemetry settings with deterministic validation boundaries.
 - [x] Ranked and custom/direct mod legality delegates to the existing M6 policy; gameplay-changing mods are rejected from Ranked and exact mod-set compatibility is supported.
 - [x] Backend-independent matchmaking orchestration plus validated Direct room descriptors and invite-code joining.
@@ -167,7 +175,17 @@ Completion evidence is tracked in [`../superpowers/plans/2026-08-30-online-produ
 - [x] Every connection indicator exposes a non-color signal token plus text, with connected, reconnecting, disconnected and voluntary-left states kept distinct.
 - [x] Linux portable-core and Windows x64/MSVC build/test coverage, including Windows executable artifact upload.
 
-M9 completion closes the reusable **Online product/orchestration contract**. Public account services, a production matchmaking fleet, relay/NAT traversal, encryption/key exchange, production socket threading and commercial-game Online UI rendering are intentionally outside this portable milestone and are not claimed as live.
+Required before **M9 itself** may be called complete:
+
+- [ ] Wire a real Windows socket transport to the M8 datagram protocol and prove two-process packet exchange instead of mock-only backend calls.
+- [ ] Implement and test a real session backend for Direct/Custom room creation/joining; no placeholder invite flow.
+- [ ] Implement real Casual/Ranked matchmaking service integration, with explicit service-unavailable behavior and no fabricated matches.
+- [ ] Connect Online settings, connection indicators, profile/history/replay controls and all four modes to the actual in-game UI/runtime path.
+- [ ] Persist profile/history/network settings/replays through the end-user executable rather than keeping them as model-only objects.
+- [ ] Connect live rollback sessions to the commercial game's deterministic state adapter once the commercial runtime is actually bootable.
+- [ ] Pass an end-to-end Windows test with two real processes/hosts exchanging packets and completing a session through the same production path used by `JOJO-Recompiled.exe`.
+
+Until those unchecked items are real, the M9 core is useful engineering infrastructure but **M9 is not 100% and Online is not claimed live**.
 
 ## Architectural rules
 
