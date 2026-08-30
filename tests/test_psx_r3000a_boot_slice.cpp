@@ -97,6 +97,53 @@ static void test_signed_add_sub_results_and_overflow_stop() {
     CHECK(state.gpr[5] == 0xcafebabeu);
 }
 
+static void test_cop0_exception_entry_tracks_branch_delay_and_status_stack() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80011000u);
+    state.cop0.status = 0x0000003fu;
+    state.gpr[2] = 1u;
+    state.gpr[3] = 2u;
+
+    CHECK(jojo::step_psx_r3000a(state, encode_i(0x04, 2, 3, 1u)).reason ==
+          jojo::PsxR3000aStepReason::ok); // untaken BEQ still has a delay slot
+    CHECK(state.current_instruction_is_branch_delay_slot);
+    CHECK(state.branch_pc == 0x80011000u);
+
+    const auto result = jojo::raise_psx_r3000a_exception(
+        state, jojo::PsxR3000aExceptionCode::syscall, state.pc, 0x0000000cu);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(result.exception_code == jojo::PsxR3000aExceptionCode::syscall);
+    CHECK(state.cop0.epc == 0x80011000u);
+    CHECK((state.cop0.cause & 0x80000000u) != 0u);
+    CHECK(((state.cop0.cause >> 2u) & 0x1fu) == 8u);
+    CHECK((state.cop0.status & 0x3fu) == 0x3cu);
+    CHECK(state.pc == 0x80000080u);
+    CHECK(state.next_pc == 0x80000084u);
+    CHECK(!state.current_instruction_is_branch_delay_slot);
+
+    jojo::reset_psx_r3000a(state, 0x80012000u);
+    state.cop0.status = 1u << 22u; // BEV
+    const auto bootstrap = jojo::raise_psx_r3000a_exception(
+        state, jojo::PsxR3000aExceptionCode::overflow, state.pc, 0u);
+    CHECK(bootstrap.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(state.cop0.epc == 0x80012000u);
+    CHECK((state.cop0.cause & 0x80000000u) == 0u);
+    CHECK(state.pc == 0xbfc00180u);
+}
+
+static void test_cop0_interrupt_mask_eligibility() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80013000u);
+    state.cop0.status = 1u | (1u << 10u);
+    state.cop0.cause = 1u << 10u;
+    CHECK(jojo::psx_r3000a_interrupt_pending(state));
+
+    state.cop0.status &= ~1u;
+    CHECK(!jojo::psx_r3000a_interrupt_pending(state));
+    state.cop0.status = 1u | (1u << 11u);
+    CHECK(!jojo::psx_r3000a_interrupt_pending(state));
+}
+
 static void test_or_combines_register_bits() {
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x80010058u);
@@ -718,6 +765,8 @@ int main() {
     test_addi_overflow_stops_without_corrupting_state();
     test_sltu_uses_unsigned_comparison();
     test_signed_add_sub_results_and_overflow_stop();
+    test_cop0_exception_entry_tracks_branch_delay_and_status_stack();
+    test_cop0_interrupt_mask_eligibility();
     test_or_combines_register_bits();
     test_srl_zero_fills_high_bits();
     test_arithmetic_and_variable_shifts_use_r3000a_rules();
