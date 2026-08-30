@@ -18,7 +18,16 @@ On first run the executable accepts a supported image of the user's own copy, va
 
 The final product must preserve the original offline game content and local two-player experience. Player 1 and Player 2 may each use independently selected local input devices. Keyboard, XInput controllers and supported generic HID gamepads remain valid host input sources. USB cable, Bluetooth and wireless dongles are transport details and must not change the logical binding model.
 
-Host-side graphics and compatibility improvements may be exposed when they are real and wired to the runtime: resolution, aspect/presentation policy, filtering, anti-aliasing, window mode, V-Sync, UI scale and related presentation options.
+Host-side graphics and compatibility improvements remain in scope only when they are real and wired to the commercial runtime. The required retained improvements are:
+
+- selectable output resolution, from the supported low-resolution modes through high-resolution/8K host output where the renderer/device supports it;
+- selectable presentation/aspect formats including 4:3, 16:9, 16:10, 21:9 and 32:9 without non-uniform stretching;
+- texture filtering, anti-aliasing, window mode, V-Sync and UI/presentation scaling when they affect real rendered game output;
+- a real 60 FPS mode/patch for the commercial game runtime.
+
+Resolution/aspect work that exists only as a settings or presentation model is not sufficient for product completion. Likewise, the 60 FPS requirement is not considered implemented merely because a frame-rate option exists. It must be proven against the real commercial runtime with correct game speed, input cadence, animation/timing behavior and audio synchronization. If the original game logic contains timing assumptions that would run gameplay at the wrong speed when presentation cadence is changed, the patch must correct those assumptions rather than simply presenting duplicate/interpolated frames while claiming native 60 FPS.
+
+At the time this design was amended, the repository already had explicit resolution/aspect presentation models, but no verified 60 FPS implementation had been located. Therefore 60 FPS is a mandatory retained requirement, not a pre-existing completed feature.
 
 ## Explicitly out of scope
 
@@ -48,6 +57,8 @@ The rebuild preserves reusable work that serves the offline commercial runtime a
 - Dreamcast bus, interrupt, ASIC and PVR2 device work that is required for real boot/runtime behavior.
 - Deterministic runtime infrastructure when used for correctness, save-state integrity or reproducible debugging independent of Online.
 - Presentation/renderer host work.
+- Resolution and aspect-ratio presentation infrastructure.
+- The requirement for a verified 60 FPS commercial-runtime patch.
 - Two-player input model and Windows controller host.
 - Core settings that are actually wired to the shipping runtime.
 - General-purpose hashing/semantic-version utilities only when still used by retained components.
@@ -65,6 +76,18 @@ Bindings must persist without tying identity to the physical transport type. Dis
 
 The final acceptance test must include a real local versus match with two simultaneously active player inputs through the production executable.
 
+## Resolution, aspect ratio and 60 FPS acceptance
+
+These three retained improvements are part of the final product, not optional experiments.
+
+Resolution passes only when changing the selected output resolution changes the actual shipping renderer output while preserving correct gameplay and UI presentation.
+
+Aspect-ratio support passes only when 4:3 and the supported widescreen/ultrawide formats render through the commercial game path without arbitrary horizontal stretching. Any expanded field of view or camera correction must be derived from the real runtime/camera behavior and validated against gameplay scenes and UI.
+
+60 FPS passes only when the commercial game produces a sustained 60 gameplay updates/frames-per-second mode where intended, while maintaining correct game speed and deterministic timing. A 60 Hz swap chain by itself does not pass. Frame duplication by itself does not pass. Interpolation may be an optional presentation technique but cannot be labeled as the 60 FPS gameplay patch unless the underlying simulation/game update behavior also meets the requirement.
+
+The final release evidence for 60 FPS must include runtime frame/update counters or equivalent instrumentation from the production path plus observed validation that gameplay speed and audio remain synchronized.
+
 ## Removal strategy
 
 Removal is dependency-driven rather than file-name driven.
@@ -77,7 +100,8 @@ Removal is dependency-driven rather than file-name driven.
 6. Remove training code and tests.
 7. Remove now-unused utility code only after dependency checks prove it is no longer required.
 8. Update CMake, README, architecture docs and CI so removed features are neither built nor advertised.
-9. Do not delete shared runtime/CPU/device code merely because a removed subsystem once consumed it.
+9. Preserve resolution/aspect infrastructure and do not remove any shared timing/runtime code needed to implement the verified 60 FPS requirement.
+10. Do not delete shared runtime/CPU/device code merely because a removed subsystem once consumed it.
 
 ## Rebuilt milestone structure
 
@@ -91,13 +115,13 @@ A supported user image is accepted, parsed and identified without guessed commer
 
 The real supported game executable reaches a verified boot path through the production runtime. Unsupported SH-4 operations, MMIO accesses or devices fail explicitly during development rather than being cosmetically ignored.
 
-### R3 — Real video output
+### R3 — Real video output + host graphics patches
 
-The commercial game produces real visible frames through the shipping renderer/presentation path. Resolution/aspect/filtering/MSAA options count only when changing real output.
+The commercial game produces real visible frames through the shipping renderer/presentation path. Resolution/aspect/filtering/MSAA options count only when changing real output. The retained 4:3/widescreen/ultrawide presentation behavior must be proven on actual game scenes. The 60 FPS mode/patch must operate on the commercial runtime with correct gameplay timing; a 60 Hz presentation surface alone is insufficient.
 
 ### R4 — Real audio and local input
 
-The commercial game produces real game audio and accepts Player 1 and Player 2 input through the production executable. Two-controller local play is mandatory.
+The commercial game produces real game audio and accepts Player 1 and Player 2 input through the production executable. Two-controller local play is mandatory. Audio must remain synchronized with the verified 60 FPS runtime mode.
 
 ### R5 — Original offline content completion
 
@@ -105,11 +129,11 @@ All normal offline menus, characters, stages, matches and progression/content ex
 
 ### R6 — Persistence and host settings
 
-Required game saves/configuration plus retained host settings survive restart and apply to the real runtime.
+Required game saves/configuration plus retained host settings survive restart and apply to the real runtime, including selected resolution, aspect/presentation mode and the 60 FPS setting when enabled.
 
 ### R7 — Release hardening
 
-A clean Windows environment can perform first-run conversion, relaunch the game and complete representative single-player and local two-player sessions through the same artifact that will be shipped.
+A clean Windows environment can perform first-run conversion, relaunch the game and complete representative single-player and local two-player sessions through the same artifact that will be shipped. The release validation includes representative checks for native output resolution, widescreen/aspect handling and real 60 FPS gameplay timing.
 
 Only R1-R7 together may justify an overall `100%` or `production-ready` claim.
 
@@ -122,6 +146,8 @@ Portable unit tests remain appropriate for parsers, CPU semantics, state transit
 Every rebuilt release gate must add at least one production-path test or captured execution result that exercises the same component wiring used by `JOJO-Recompiled.exe`.
 
 Mocks may be used for unit isolation but cannot satisfy a release gate by themselves. Placeholder backends, fake progress, no-op menu items and synthetic success returns are forbidden in shipping code.
+
+Resolution/aspect tests must cover real presentation calculations and later production rendering. 60 FPS tests must distinguish simulation/update cadence from presentation refresh rate so a 60 Hz display path cannot accidentally satisfy the gameplay requirement.
 
 ## Failure policy
 
@@ -154,6 +180,8 @@ This scope reduction is complete only when:
 - the shipping executable contains no Online/Mods/Training UI or production linkage;
 - network-only libraries are not linked into the product;
 - local Player 1/Player 2 input remains built and tested;
+- resolution and aspect-ratio infrastructure remains active and is not lost during cleanup;
+- 60 FPS remains an explicit unfulfilled product requirement until real commercial-runtime evidence proves it;
 - documentation no longer advertises removed features as product goals;
 - CI is green after removal; and
-- the roadmap's only final `100%` gate is full offline commercial-game functionality plus local two-player play through the real Windows executable.
+- the roadmap's only final `100%` gate is full offline commercial-game functionality plus local two-player play, retained graphics/aspect improvements and verified real 60 FPS behavior through the real Windows executable.
