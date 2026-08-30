@@ -16,6 +16,8 @@ struct PsxBiosState {
     bool heap_initialized{};
     std::uint32_t heap_base{};
     std::uint32_t heap_size{};
+    bool entry_interrupt_hook_installed{};
+    std::uint32_t entry_interrupt_hook_address{};
 };
 
 struct PsxRuntime {
@@ -77,17 +79,27 @@ struct PsxRuntime {
     return pc == 0x000000a0u || pc == 0x000000b0u || pc == 0x000000c0u;
 }
 
+inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
+    const auto return_pc = runtime.cpu.gpr[31];
+    runtime.cpu.pc = return_pc;
+    runtime.cpu.next_pc = return_pc + 4u;
+    runtime.cpu.gpr[0] = 0u;
+}
+
 [[nodiscard]] inline PsxR3000aStepResult step_psx_runtime(PsxRuntime& runtime) noexcept {
     const auto instruction_pc = runtime.cpu.pc;
     if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x39u) {
         runtime.bios.heap_initialized = true;
         runtime.bios.heap_base = runtime.cpu.gpr[4];
         runtime.bios.heap_size = runtime.cpu.gpr[5];
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
 
-        const auto return_pc = runtime.cpu.gpr[31];
-        runtime.cpu.pc = return_pc;
-        runtime.cpu.next_pc = return_pc + 4u;
-        runtime.cpu.gpr[0] = 0u;
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x19u) {
+        runtime.bios.entry_interrupt_hook_installed = true;
+        runtime.bios.entry_interrupt_hook_address = runtime.cpu.gpr[4];
+        return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
 
