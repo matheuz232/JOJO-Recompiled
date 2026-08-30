@@ -26,12 +26,14 @@ struct PsxBus {
     static constexpr std::uint32_t default_ram_mirror_window = 8u * 1024u * 1024u;
     static constexpr std::uint32_t interrupt_status_address = 0x1f801070u;
     static constexpr std::uint32_t interrupt_mask_address = 0x1f801074u;
+    static constexpr std::uint32_t dma_control_address = 0x1f8010f0u;
     static constexpr std::uint16_t interrupt_status_valid_bits = 0x07ffu;
     static constexpr std::uint16_t interrupt_mask_valid_bits = 0x07ffu;
 
     std::vector<std::uint8_t> ram = std::vector<std::uint8_t>(main_ram_size, 0u);
     std::uint16_t interrupt_status{};
     std::uint16_t interrupt_mask{};
+    std::uint32_t dma_control{};
 };
 
 [[nodiscard]] inline bool psx_bus_virtual_to_physical(std::uint32_t address,
@@ -106,6 +108,10 @@ struct PsxBus {
 
 [[nodiscard]] inline PsxBusReadU32Result psx_bus_read_u32(const PsxBus& bus,
                                                            std::uint32_t address) noexcept {
+    if (address == PsxBus::dma_control_address) {
+        return {PsxBusAccessReason::ok, bus.dma_control};
+    }
+
     std::size_t offset = 0;
     const auto reason = psx_bus_ram_offset(address, offset);
     if (reason != PsxBusAccessReason::ok) return {reason, 0u};
@@ -143,6 +149,11 @@ struct PsxBus {
 [[nodiscard]] inline PsxBusAccessReason psx_bus_write_u32(PsxBus& bus,
                                                            std::uint32_t address,
                                                            std::uint32_t value) noexcept {
+    if (address == PsxBus::dma_control_address) {
+        bus.dma_control = value;
+        return PsxBusAccessReason::ok;
+    }
+
     std::size_t offset = 0;
     const auto reason = psx_bus_ram_offset(address, offset);
     if (reason != PsxBusAccessReason::ok) return reason;
