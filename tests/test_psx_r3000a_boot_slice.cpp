@@ -67,6 +67,17 @@ static void test_or_combines_register_bits() {
     CHECK(state.pc == 0x8001005cu);
 }
 
+static void test_srl_zero_fills_high_bits() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010068u);
+    state.gpr[3] = 0x80000003u;
+
+    const auto result = jojo::step_psx_r3000a(state, encode_r(0, 3, 4, 1, 0x02));
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(state.gpr[4] == 0x40000001u);
+    CHECK(state.pc == 0x8001006cu);
+}
+
 static void test_bne_taken_preserves_delay_slot() {
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x3000u);
@@ -212,6 +223,7 @@ int main() {
     test_addiu_sign_extends_immediate();
     test_sltu_uses_unsigned_comparison();
     test_or_combines_register_bits();
+    test_srl_zero_fills_high_bits();
     test_bne_taken_preserves_delay_slot();
     test_main_ram_is_two_megabytes_and_zero_initialized();
     test_ram_kuseg_kseg0_kseg1_and_default_8mb_window_alias_storage();
