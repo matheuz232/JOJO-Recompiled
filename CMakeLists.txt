@@ -25,11 +25,6 @@ add_library(jojo_core STATIC
   src/core/presentation.cpp
   src/core/input.cpp
   src/core/settings_menu.cpp
-  src/core/training.cpp
-  src/core/rollback.cpp
-  src/core/network_protocol.cpp
-  src/core/online.cpp
-  src/core/replay.cpp
   src/core/disc_image.cpp
   src/core/disc_media.cpp
   src/core/iso9660.cpp
@@ -57,11 +52,6 @@ add_library(jojo_core STATIC
   src/core/device_id.cpp
   src/core/semver.cpp
   src/core/sha256.cpp
-  src/core/mod_runtime.cpp
-  src/core/mod_resolver.cpp
-  src/core/mod_content.cpp
-  src/core/mod_policy.cpp
-  src/core/native_mod_loader.cpp
 )
 target_include_directories(jojo_core PUBLIC src)
 if(CMAKE_DL_LIBS)
@@ -74,17 +64,12 @@ if(WIN32)
   target_compile_definitions(jojo_win32_input_host PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
   target_link_libraries(jojo_win32_input_host PUBLIC jojo_core setupapi hid user32)
 
-  add_library(jojo_win32_network_host STATIC
-    src/platform/windows/udp_transport_win32.cpp)
-  target_compile_definitions(jojo_win32_network_host PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
-  target_link_libraries(jojo_win32_network_host PUBLIC jojo_core ws2_32)
-
   add_executable(jojo_recompiled WIN32
     src/app_win32/main.cpp
     src/app_win32/presentation_host.cpp)
   set_target_properties(jojo_recompiled PROPERTIES OUTPUT_NAME "JOJO-Recompiled")
   target_compile_definitions(jojo_recompiled PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
-  target_link_libraries(jojo_recompiled PRIVATE jojo_core jojo_win32_input_host jojo_win32_network_host shell32 ole32 uuid d3d11 dxgi)
+  target_link_libraries(jojo_recompiled PRIVATE jojo_core jojo_win32_input_host shell32 ole32 uuid d3d11 dxgi)
 
   add_executable(jojo_win32_presentation_tests
     tests/test_win32_presentation.cpp
@@ -97,11 +82,6 @@ if(WIN32)
   target_compile_definitions(jojo_win32_input_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
   target_link_libraries(jojo_win32_input_tests PRIVATE jojo_win32_input_host)
   add_test(NAME jojo_win32_input_tests COMMAND jojo_win32_input_tests)
-
-  add_executable(jojo_win32_udp_transport_tests tests/test_win32_udp_transport.cpp)
-  target_compile_definitions(jojo_win32_udp_transport_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
-  target_link_libraries(jojo_win32_udp_transport_tests PRIVATE jojo_win32_network_host)
-  add_test(NAME jojo_win32_udp_transport_tests COMMAND jojo_win32_udp_transport_tests)
 endif()
 
 add_executable(jojo_tests tests/test_main.cpp)
@@ -249,62 +229,6 @@ add_executable(jojo_sha256_tests tests/test_sha256.cpp)
 target_link_libraries(jojo_sha256_tests PRIVATE jojo_core)
 add_test(NAME jojo_sha256_tests COMMAND jojo_sha256_tests)
 
-add_executable(jojo_mod_runtime_tests tests/test_mod_runtime.cpp)
-target_link_libraries(jojo_mod_runtime_tests PRIVATE jojo_core)
-add_test(NAME jojo_mod_runtime_tests COMMAND jojo_mod_runtime_tests)
-
 add_executable(jojo_m5_settings_input_tests tests/test_m5_settings_input.cpp)
 target_link_libraries(jojo_m5_settings_input_tests PRIVATE jojo_core)
 add_test(NAME jojo_m5_settings_input_tests COMMAND jojo_m5_settings_input_tests)
-
-add_executable(jojo_training_tests tests/test_training.cpp)
-target_link_libraries(jojo_training_tests PRIVATE jojo_core)
-add_test(NAME jojo_training_tests COMMAND jojo_training_tests)
-
-add_executable(jojo_rollback_tests tests/test_rollback.cpp)
-target_link_libraries(jojo_rollback_tests PRIVATE jojo_core)
-add_test(NAME jojo_rollback_tests COMMAND jojo_rollback_tests)
-
-add_executable(jojo_online_tests tests/test_online.cpp)
-target_link_libraries(jojo_online_tests PRIVATE jojo_core)
-add_test(NAME jojo_online_tests COMMAND jojo_online_tests)
-
-add_executable(jojo_online_hardening_tests tests/test_online_hardening.cpp)
-target_link_libraries(jojo_online_hardening_tests PRIVATE jojo_core)
-add_test(NAME jojo_online_hardening_tests COMMAND jojo_online_hardening_tests)
-
-add_executable(jojo_mod_policy_tests tests/test_mod_policy.cpp)
-target_link_libraries(jojo_mod_policy_tests PRIVATE jojo_core)
-add_test(NAME jojo_mod_policy_tests COMMAND jojo_mod_policy_tests)
-
-function(add_jojo_native_mod_fixture target mod_id)
-  add_library(${target} SHARED tests/fixtures/test_native_mod.cpp)
-  target_include_directories(${target} PRIVATE src)
-  target_compile_definitions(${target} PRIVATE JOJO_TEST_NATIVE_MOD_ID=\"${mod_id}\")
-endfunction()
-
-add_jojo_native_mod_fixture(jojo_native_mod_fixture_first native.first)
-add_jojo_native_mod_fixture(jojo_native_mod_fixture_second native.second)
-add_jojo_native_mod_fixture(jojo_native_mod_fixture_failure native.failure)
-target_compile_definitions(jojo_native_mod_fixture_failure PRIVATE JOJO_TEST_NATIVE_MOD_LOAD_RESULT=7)
-add_jojo_native_mod_fixture(jojo_native_mod_fixture_bad_abi native.badabi)
-target_compile_definitions(jojo_native_mod_fixture_bad_abi PRIVATE JOJO_TEST_NATIVE_MOD_ABI=2)
-add_jojo_native_mod_fixture(jojo_native_mod_fixture_no_export native.noexport)
-target_compile_definitions(jojo_native_mod_fixture_no_export PRIVATE JOJO_TEST_NATIVE_MOD_NO_EXPORT=1)
-
-add_executable(jojo_native_mod_loader_tests tests/test_native_mod_loader.cpp)
-target_link_libraries(jojo_native_mod_loader_tests PRIVATE jojo_core)
-add_dependencies(jojo_native_mod_loader_tests
-  jojo_native_mod_fixture_first
-  jojo_native_mod_fixture_second
-  jojo_native_mod_fixture_failure
-  jojo_native_mod_fixture_bad_abi
-  jojo_native_mod_fixture_no_export)
-add_test(
-  NAME jojo_native_mod_loader_tests
-  COMMAND jojo_native_mod_loader_tests
-    "$<TARGET_FILE:jojo_native_mod_fixture_first>"
-    "$<TARGET_FILE:jojo_native_mod_fixture_second>"
-    "$<TARGET_FILE:jojo_native_mod_fixture_failure>"
-    "$<TARGET_FILE:jojo_native_mod_fixture_bad_abi>"
-    "$<TARGET_FILE:jojo_native_mod_fixture_no_export>")
