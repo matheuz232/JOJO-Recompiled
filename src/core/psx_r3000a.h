@@ -83,6 +83,10 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             write_gpr(rd, state.gpr[rt] >> shamt);
             supported = true;
             break;
+        case 0x08u: // JR
+            following_pc = state.gpr[rs];
+            supported = true;
+            break;
         case 0x21u: // ADDU
             write_gpr(rd, state.gpr[rs] + state.gpr[rt]);
             supported = true;
