@@ -159,6 +159,82 @@ static void test_immediate_logical_and_comparison_operations() {
     CHECK(state.gpr[7] == 1u);
 }
 
+static void test_hi_lo_moves_and_multiply_results() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010300u);
+    state.gpr[2] = 0x12345678u;
+    state.gpr[3] = 0x89abcdefu;
+
+    CHECK(jojo::step_psx_r3000a(state, encode_r(2, 0, 0, 0, 0x11)).reason ==
+          jojo::PsxR3000aStepReason::ok); // MTHI
+    CHECK(jojo::step_psx_r3000a(state, encode_r(3, 0, 0, 0, 0x13)).reason ==
+          jojo::PsxR3000aStepReason::ok); // MTLO
+    CHECK(jojo::step_psx_r3000a(state, encode_r(0, 0, 4, 0, 0x10)).reason ==
+          jojo::PsxR3000aStepReason::ok); // MFHI
+    CHECK(jojo::step_psx_r3000a(state, encode_r(0, 0, 5, 0, 0x12)).reason ==
+          jojo::PsxR3000aStepReason::ok); // MFLO
+    CHECK(state.gpr[4] == 0x12345678u);
+    CHECK(state.gpr[5] == 0x89abcdefu);
+
+    state.gpr[6] = 0xfffffffeu;
+    state.gpr[7] = 3u;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(6, 7, 0, 0, 0x18)).reason ==
+          jojo::PsxR3000aStepReason::ok); // MULT -2 * 3
+    CHECK(state.hi == 0xffffffffu);
+    CHECK(state.lo == 0xfffffffau);
+
+    state.gpr[6] = 0xffffffffu;
+    state.gpr[7] = 2u;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(6, 7, 0, 0, 0x19)).reason ==
+          jojo::PsxR3000aStepReason::ok); // MULTU
+    CHECK(state.hi == 1u);
+    CHECK(state.lo == 0xfffffffeu);
+}
+
+static void test_division_results_and_psx_edge_behavior() {
+    jojo::PsxR3000aState state{};
+    jojo::reset_psx_r3000a(state, 0x80010400u);
+
+    state.gpr[2] = 0xfffffff9u;
+    state.gpr[3] = 3u;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(2, 3, 0, 0, 0x1a)).reason ==
+          jojo::PsxR3000aStepReason::ok); // DIV -7 / 3
+    CHECK(state.lo == 0xfffffffeu);
+    CHECK(state.hi == 0xffffffffu);
+
+    state.gpr[2] = 0xfffffffeu;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(2, 3, 0, 0, 0x1b)).reason ==
+          jojo::PsxR3000aStepReason::ok); // DIVU
+    CHECK(state.lo == 0x55555554u);
+    CHECK(state.hi == 2u);
+
+    state.gpr[2] = 7u;
+    state.gpr[3] = 0u;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(2, 3, 0, 0, 0x1a)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(state.lo == 0xffffffffu);
+    CHECK(state.hi == 7u);
+
+    state.gpr[2] = 0xfffffff9u;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(2, 3, 0, 0, 0x1a)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(state.lo == 1u);
+    CHECK(state.hi == 0xfffffff9u);
+
+    state.gpr[2] = 0x89abcdefu;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(2, 3, 0, 0, 0x1b)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(state.lo == 0xffffffffu);
+    CHECK(state.hi == 0x89abcdefu);
+
+    state.gpr[2] = 0x80000000u;
+    state.gpr[3] = 0xffffffffu;
+    CHECK(jojo::step_psx_r3000a(state, encode_r(2, 3, 0, 0, 0x1a)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(state.lo == 0x80000000u);
+    CHECK(state.hi == 0u);
+}
+
 static void test_jr_preserves_delay_slot_then_uses_register_target() {
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x80035a34u);
@@ -458,6 +534,8 @@ int main() {
     test_arithmetic_and_variable_shifts_use_r3000a_rules();
     test_register_logical_and_signed_comparison_operations();
     test_immediate_logical_and_comparison_operations();
+    test_hi_lo_moves_and_multiply_results();
+    test_division_results_and_psx_edge_behavior();
     test_jr_preserves_delay_slot_then_uses_register_target();
     test_jalr_links_and_preserves_delay_slot();
     test_jalr_reads_target_before_writing_same_register_link();
