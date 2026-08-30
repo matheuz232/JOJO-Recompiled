@@ -24,10 +24,13 @@ struct PsxBusReadU32Result {
 struct PsxBus {
     static constexpr std::size_t main_ram_size = 2u * 1024u * 1024u;
     static constexpr std::uint32_t default_ram_mirror_window = 8u * 1024u * 1024u;
+    static constexpr std::uint32_t interrupt_status_address = 0x1f801070u;
     static constexpr std::uint32_t interrupt_mask_address = 0x1f801074u;
+    static constexpr std::uint16_t interrupt_status_valid_bits = 0x07ffu;
     static constexpr std::uint16_t interrupt_mask_valid_bits = 0x07ffu;
 
     std::vector<std::uint8_t> ram = std::vector<std::uint8_t>(main_ram_size, 0u);
+    std::uint16_t interrupt_status{};
     std::uint16_t interrupt_mask{};
 };
 
@@ -82,6 +85,10 @@ struct PsxBus {
 
 [[nodiscard]] inline PsxBusReadU16Result psx_bus_read_u16(const PsxBus& bus,
                                                            std::uint32_t address) noexcept {
+    if (address == PsxBus::interrupt_status_address) {
+        return {PsxBusAccessReason::ok,
+                static_cast<std::uint16_t>(bus.interrupt_status & PsxBus::interrupt_status_valid_bits)};
+    }
     if (address == PsxBus::interrupt_mask_address) {
         return {PsxBusAccessReason::ok,
                 static_cast<std::uint16_t>(bus.interrupt_mask & PsxBus::interrupt_mask_valid_bits)};
@@ -113,6 +120,12 @@ struct PsxBus {
 [[nodiscard]] inline PsxBusAccessReason psx_bus_write_u16(PsxBus& bus,
                                                            std::uint32_t address,
                                                            std::uint16_t value) noexcept {
+    if (address == PsxBus::interrupt_status_address) {
+        const auto write_bits = static_cast<std::uint16_t>(value & PsxBus::interrupt_status_valid_bits);
+        bus.interrupt_status = static_cast<std::uint16_t>(
+            bus.interrupt_status & write_bits & PsxBus::interrupt_status_valid_bits);
+        return PsxBusAccessReason::ok;
+    }
     if (address == PsxBus::interrupt_mask_address) {
         bus.interrupt_mask = static_cast<std::uint16_t>(value & PsxBus::interrupt_mask_valid_bits);
         return PsxBusAccessReason::ok;
