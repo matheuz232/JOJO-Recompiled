@@ -22,20 +22,35 @@ const char* step_reason_name(jojo::PsxR3000aStepReason reason) noexcept {
     return "unknown";
 }
 
-void print_instruction_class(const jojo::PsxRuntime& runtime, std::uint32_t pc) {
+void print_instruction_context(const jojo::PsxRuntime& runtime, std::uint32_t pc) {
     const auto fetched = jojo::psx_bus_read_u32(runtime.bus, pc);
     if (fetched.reason != jojo::PsxBusAccessReason::ok) {
         std::cout << "instruction_class=unavailable\n";
         return;
     }
 
-    const auto primary = static_cast<std::uint8_t>(fetched.value >> 26u);
+    const auto instruction = fetched.value;
+    const auto primary = static_cast<std::uint8_t>(instruction >> 26u);
+    const auto rs = static_cast<std::uint8_t>((instruction >> 21u) & 0x1fu);
+    const auto rt = static_cast<std::uint8_t>((instruction >> 16u) & 0x1fu);
+    const auto signed_immediate = static_cast<std::int32_t>(
+        static_cast<std::int16_t>(instruction & 0xffffu));
+    const auto effective_address = runtime.cpu.gpr[rs] +
+        static_cast<std::uint32_t>(signed_immediate);
+
     std::cout << std::hex << std::showbase;
+    std::cout << "instruction=" << instruction << '\n';
     std::cout << "primary_opcode=" << static_cast<unsigned>(primary) << '\n';
     if (primary == 0u) {
-        std::cout << "special_funct=" << static_cast<unsigned>(fetched.value & 0x3fu) << '\n';
+        std::cout << "special_funct=" << static_cast<unsigned>(instruction & 0x3fu) << '\n';
     }
+    std::cout << "rs=" << static_cast<unsigned>(rs) << '\n';
+    std::cout << "rt=" << static_cast<unsigned>(rt) << '\n';
+    std::cout << "rs_value=" << runtime.cpu.gpr[rs] << '\n';
+    std::cout << "rt_value=" << runtime.cpu.gpr[rt] << '\n';
+    std::cout << "effective_address=" << effective_address << '\n';
     std::cout << std::dec << std::noshowbase;
+    std::cout << "signed_immediate=" << signed_immediate << '\n';
 }
 
 }
@@ -105,7 +120,7 @@ int main(int argc, char** argv) {
             std::cout << "reason=" << step_reason_name(result.reason) << '\n';
             std::cout << std::hex << std::showbase << "stop_pc=" << instruction_pc << '\n';
             std::cout << std::dec << std::noshowbase;
-            print_instruction_class(runtime, instruction_pc);
+            print_instruction_context(runtime, instruction_pc);
             return 0;
         }
     }
@@ -114,6 +129,6 @@ int main(int argc, char** argv) {
     std::cout << "reason=limit\n";
     std::cout << std::hex << std::showbase << "stop_pc=" << runtime.cpu.pc << '\n';
     std::cout << std::dec << std::noshowbase;
-    print_instruction_class(runtime, runtime.cpu.pc);
+    print_instruction_context(runtime, runtime.cpu.pc);
     return 0;
 }
