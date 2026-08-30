@@ -36,11 +36,16 @@ inline void reset_psx_r3000a(PsxR3000aState& state, std::uint32_t entry_pc) noex
     std::uint32_t following_pc = sequential_pc + 4u;
 
     const auto op = static_cast<std::uint8_t>(instruction >> 26u);
+    const auto rs = static_cast<std::uint8_t>((instruction >> 21u) & 0x1fu);
+    const auto rt = static_cast<std::uint8_t>((instruction >> 16u) & 0x1fu);
     bool supported = false;
 
+    const auto branch_target = [&](std::uint16_t immediate) noexcept {
+        const auto displacement = static_cast<std::int32_t>(static_cast<std::int16_t>(immediate)) * 4;
+        return instruction_pc + 4u + static_cast<std::uint32_t>(displacement);
+    };
+
     if (op == 0u) {
-        const auto rs = static_cast<std::uint8_t>((instruction >> 21u) & 0x1fu);
-        const auto rt = static_cast<std::uint8_t>((instruction >> 16u) & 0x1fu);
         const auto rd = static_cast<std::uint8_t>((instruction >> 11u) & 0x1fu);
         const auto shamt = static_cast<std::uint8_t>((instruction >> 6u) & 0x1fu);
         const auto funct = static_cast<std::uint8_t>(instruction & 0x3fu);
@@ -58,17 +63,32 @@ inline void reset_psx_r3000a(PsxR3000aState& state, std::uint32_t entry_pc) noex
             if (rd != 0u) state.gpr[rd] = state.gpr[rs] - state.gpr[rt];
             supported = true;
             break;
+        case 0x2bu: // SLTU
+            if (rd != 0u) state.gpr[rd] = state.gpr[rs] < state.gpr[rt] ? 1u : 0u;
+            supported = true;
+            break;
         default:
             break;
         }
     } else if (op == 0x04u) { // BEQ
-        const auto rs = static_cast<std::uint8_t>((instruction >> 21u) & 0x1fu);
-        const auto rt = static_cast<std::uint8_t>((instruction >> 16u) & 0x1fu);
-        const auto immediate = static_cast<std::int16_t>(instruction & 0xffffu);
         if (state.gpr[rs] == state.gpr[rt]) {
-            const auto displacement = static_cast<std::int32_t>(immediate) * 4;
-            following_pc = instruction_pc + 4u + static_cast<std::uint32_t>(displacement);
+            following_pc = branch_target(static_cast<std::uint16_t>(instruction));
         }
+        supported = true;
+    } else if (op == 0x05u) { // BNE
+        if (state.gpr[rs] != state.gpr[rt]) {
+            following_pc = branch_target(static_cast<std::uint16_t>(instruction));
+        }
+        supported = true;
+    } else if (op == 0x09u) { // ADDIU
+        const auto signed_immediate = static_cast<std::int32_t>(
+            static_cast<std::int16_t>(instruction & 0xffffu));
+        if (rt != 0u) {
+            state.gpr[rt] = state.gpr[rs] + static_cast<std::uint32_t>(signed_immediate);
+        }
+        supported = true;
+    } else if (op == 0x0fu) { // LUI
+        if (rt != 0u) state.gpr[rt] = (instruction & 0xffffu) << 16u;
         supported = true;
     } else if (op == 0x03u) { // JAL
         const auto target = instruction & 0x03ffffffu;
