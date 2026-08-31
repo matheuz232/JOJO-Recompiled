@@ -65,7 +65,22 @@ int main() {
         CHECK(jojo::psx_bus_read_u32(runtime.bus, 0x00004d98u + i * 4u).value == patch[i]);
     }
 
+    // Next exact media frontier: B0(4Bh) StartCARD2. SCPH-1001 ends the
+    // routine with "jr ra" / "li v0,1" and starts the shared Pad/Card IRQ path.
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
+    runtime.cpu.gpr[9] = 0x4bu;
+    runtime.cpu.gpr[31] = 0x800450c8u;
+    runtime.cpu.gpr[2] = 0xdeadbeefu;
+    const auto start = jojo::step_psx_runtime(runtime);
+    CHECK(start.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.bios.card_started);
+    CHECK(runtime.bios.card_initialized);
+    CHECK(runtime.bios.early_card_irq_installed);
+    CHECK(runtime.cpu.gpr[2] == 1u);
+    CHECK(runtime.cpu.pc == 0x800450c8u);
+    CHECK(runtime.cpu.next_pc == 0x800450ccu);
+
     if (failures) return 1;
-    std::cout << "PSX card/GetB0Table frontier assertions passed\n";
+    std::cout << "PSX card/GetB0Table/StartCARD2 frontier assertions passed\n";
     return 0;
 }
