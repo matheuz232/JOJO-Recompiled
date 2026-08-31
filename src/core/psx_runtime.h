@@ -302,6 +302,11 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
 
+    if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x70u) {
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
     if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x72u) {
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
