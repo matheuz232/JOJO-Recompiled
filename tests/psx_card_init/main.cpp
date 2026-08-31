@@ -65,7 +65,7 @@ int main() {
         CHECK(jojo::psx_bus_read_u32(runtime.bus, 0x00004d98u + i * 4u).value == patch[i]);
     }
 
-    // Next exact media frontier: B0(4Bh) StartCARD2. SCPH-1001 ends the
+    // Exact media frontier: B0(4Bh) StartCARD2. SCPH-1001 ends the
     // routine with "jr ra" / "li v0,1" and starts the shared Pad/Card IRQ path.
     jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
     runtime.cpu.gpr[9] = 0x4bu;
@@ -80,7 +80,22 @@ int main() {
     CHECK(runtime.cpu.pc == 0x800450c8u);
     CHECK(runtime.cpu.next_pc == 0x800450ccu);
 
+    // Next exact media frontier: A0(70h) _bu_init(). The retail call is void;
+    // it completes backup-unit setup after InitCARD2/StartCARD2 and returns via RA.
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000a0u);
+    runtime.cpu.gpr[9] = 0x70u;
+    runtime.cpu.gpr[31] = 0x80044fe0u;
+    runtime.cpu.gpr[2] = 0x13579bdfu;
+    const auto bu_init = jojo::step_psx_runtime(runtime);
+    CHECK(bu_init.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.bios.card_initialized);
+    CHECK(runtime.bios.card_started);
+    CHECK(runtime.bios.early_card_irq_installed);
+    CHECK(runtime.cpu.gpr[2] == 0x13579bdfu);
+    CHECK(runtime.cpu.pc == 0x80044fe0u);
+    CHECK(runtime.cpu.next_pc == 0x80044fe4u);
+
     if (failures) return 1;
-    std::cout << "PSX card/GetB0Table/StartCARD2 frontier assertions passed\n";
+    std::cout << "PSX card/GetB0Table/StartCARD2/_bu_init frontier assertions passed\n";
     return 0;
 }
