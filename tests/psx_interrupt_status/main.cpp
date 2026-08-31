@@ -49,6 +49,7 @@ int main() {
     // Exact JoJo SLUS_010.60 sequence at 0x80050960:
     //   sw  $v0,0($v1)    ; $v1=I_STAT, $v0=FFFFFFFEh
     //   lw  $v0,4($v1)    ; I_MASK
+    //   nop                ; R3000A load-delay slot
     //   ori $v0,$v0,1
     //   sw  $v0,4($v1)
     // IRQCTRL is on-die MMIO and accepts full 32-bit stores. I_STAT only
@@ -73,10 +74,15 @@ int main() {
     CHECK(cpu.pending_load_register == 2u);
     CHECK((cpu.pending_load_value & 0x07ffu) == 0x0020u);
 
-    // Advance the load delay with the game's ORI, then write the enabled mask.
+    const auto load_delay_nop = jojo::step_psx_r3000a(cpu, 0x00000000u, bus);
+    CHECK(load_delay_nop.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.pc == 0x8005096cu);
+    CHECK(cpu.gpr[2] == cpu.pending_load_value || !cpu.pending_load_valid);
+    CHECK((cpu.gpr[2] & 0x07ffu) == 0x0020u);
+
     const auto ori_imask = jojo::step_psx_r3000a(cpu, encode_i(0x0d, 2, 2, 1u), bus);
     CHECK(ori_imask.reason == jojo::PsxR3000aStepReason::ok);
-    CHECK(cpu.gpr[2] == 0x0021u);
+    CHECK((cpu.gpr[2] & 0x07ffu) == 0x0021u);
 
     const auto sw_imask = jojo::step_psx_r3000a(cpu, encode_i(0x2b, 3, 2, 4u), bus);
     CHECK(sw_imask.reason == jojo::PsxR3000aStepReason::ok);
