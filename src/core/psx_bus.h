@@ -64,6 +64,7 @@ struct PsxBus {
     std::uint16_t timer1_current{};
     std::uint16_t timer1_mode{};
     std::uint32_t gpu_gp0_write_latch{};
+    std::uint32_t gpu_read_latch{};
     std::uint32_t gpu_status{gpu_status_reset};
 };
 
@@ -213,6 +214,9 @@ struct PsxBus {
     if (address == PsxBus::dma_interrupt_address) {
         return {PsxBusAccessReason::ok, psx_bus_dma_interrupt_value(bus)};
     }
+    if (address == PsxBus::gpu_gp0_address) {
+        return {PsxBusAccessReason::ok, bus.gpu_read_latch};
+    }
     if (address == PsxBus::gpu_gp1_address) {
         return {PsxBusAccessReason::ok, bus.gpu_status};
     }
@@ -344,6 +348,12 @@ struct PsxBus {
         const auto command = static_cast<std::uint8_t>(value >> 24u);
         if (command == 0x00u) {
             bus.gpu_status = PsxBus::gpu_status_reset;
+            return PsxBusAccessReason::ok;
+        }
+        if (command == 0x10u) {
+            const auto index = value & 0x00ffffffu;
+            if (index != 0x07u) return PsxBusAccessReason::unmapped;
+            bus.gpu_read_latch = 2u;
             return PsxBusAccessReason::ok;
         }
         if (command != 0x03u) return PsxBusAccessReason::unmapped;
