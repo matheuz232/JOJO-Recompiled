@@ -24,6 +24,7 @@ struct PsxBiosState {
     std::array<bool, 4> timer_vblank_irq_auto_ack{true, true, true, true};
     bool cdrom_irq_handlers_installed{true};
     bool c0_table_materialized{};
+    bool b0_table_materialized{};
     bool card_initialized{};
     bool card_started{};
     bool card_pad_enabled{};
@@ -142,6 +143,32 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     }
 
     runtime.bios.c0_table_materialized = true;
+    return true;
+}
+
+[[nodiscard]] inline bool materialize_scph1001_b0_card_patch_surface(PsxRuntime& runtime) noexcept {
+    if (runtime.bios.b0_table_materialized) return true;
+
+    constexpr std::uint32_t b0_table_address = 0x00000874u;
+    constexpr std::uint32_t change_clear_pad_address = 0x000043d0u;
+    constexpr std::uint32_t card_delay_patch_address = change_clear_pad_address + 0x09c8u;
+    constexpr std::array<std::uint32_t, 5> card_delay_patch_surface{
+        0x946f000au, 0x3c080000u, 0x01e2c025u, 0x37190012u, 0xa479000au,
+    };
+
+    if (psx_bus_write_u32(runtime.bus, b0_table_address + 0x5bu * 4u,
+                          change_clear_pad_address) != PsxBusAccessReason::ok) {
+        return false;
+    }
+    for (std::size_t i = 0; i < card_delay_patch_surface.size(); ++i) {
+        const auto address = card_delay_patch_address + static_cast<std::uint32_t>(i * 4u);
+        if (psx_bus_write_u32(runtime.bus, address, card_delay_patch_surface[i]) !=
+            PsxBusAccessReason::ok) {
+            return false;
+        }
+    }
+
+    runtime.bios.b0_table_materialized = true;
     return true;
 }
 
@@ -335,6 +362,16 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
             return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
         }
         runtime.cpu.gpr[2] = c0_table_address;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x57u) {
+        constexpr std::uint32_t b0_table_address = 0x00000874u;
+        if (!materialize_scph1001_b0_card_patch_surface(runtime)) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
+        runtime.cpu.gpr[2] = b0_table_address;
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
