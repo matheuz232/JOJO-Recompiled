@@ -205,6 +205,13 @@ struct PsxBus {
 [[nodiscard]] inline PsxBusReadU32Result psx_bus_read_u32(const PsxBus& bus,
                                                            std::uint32_t address) noexcept {
     if ((address & 3u) != 0u) return {PsxBusAccessReason::misaligned, 0u};
+    if (address == PsxBus::interrupt_mask_address) {
+        // Retail IRQCTRL is on-die MMIO. The low 11 I_MASK bits are defined;
+        // hardware measurements show the unused read lanes echoing BF800000h.
+        return {PsxBusAccessReason::ok,
+                0xbf800000u |
+                static_cast<std::uint32_t>(bus.interrupt_mask & PsxBus::interrupt_mask_valid_bits)};
+    }
     if (address == PsxBus::dma2_channel_control_address) {
         return {PsxBusAccessReason::ok, bus.dma2_channel_control};
     }
@@ -311,6 +318,16 @@ struct PsxBus {
                                                            std::uint32_t address,
                                                            std::uint32_t value) noexcept {
     if ((address & 3u) != 0u) return PsxBusAccessReason::misaligned;
+    if (address == PsxBus::interrupt_status_address) {
+        // Full-word IRQCTRL stores are valid. Only the low 11 I_STAT bits are
+        // implemented, with zero-to-acknowledge and one-to-preserve semantics.
+        return psx_bus_write_u16(bus, address, static_cast<std::uint16_t>(value));
+    }
+    if (address == PsxBus::interrupt_mask_address) {
+        // Upper bus lanes are ignored by the I_MASK register; its low 11 bits
+        // are the complete writable mask.
+        return psx_bus_write_u16(bus, address, static_cast<std::uint16_t>(value));
+    }
     if (address == PsxBus::dma2_channel_control_address) {
         // This frontier is configuration only. A start/busy write must not be
         // acknowledged until DMA2 transfer execution is implemented.
