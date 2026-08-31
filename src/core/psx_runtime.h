@@ -21,6 +21,10 @@ struct PsxBiosState {
     std::uint32_t entry_interrupt_hook_address{};
     bool pad_card_irq_completes{true};
     std::array<bool, 4> timer_vblank_irq_auto_ack{true, true, true, true};
+    // The retail BIOS initializes its CD-ROM interrupt handlers before handing
+    // control to the boot executable. _96_remove attempts to dequeue them but
+    // is ineffective because the BIOS SysDeqIntRP path is broken.
+    bool cdrom_irq_handlers_installed{true};
 };
 
 struct PsxRuntime {
@@ -106,6 +110,14 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
         runtime.bios.heap_initialized = true;
         runtime.bios.heap_base = runtime.cpu.gpr[4];
         runtime.bios.heap_size = runtime.cpu.gpr[5];
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x72u) {
+        // Retail BIOS behavior: _96_remove() is a void routine whose attempt
+        // to remove the CD-ROM priority-0 handlers fails through SysDeqIntRP.
+        // The installed-chain state therefore remains unchanged.
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
