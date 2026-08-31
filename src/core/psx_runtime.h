@@ -49,6 +49,8 @@ struct PsxRuntime {
     PsxR3000aState cpu{};
     PsxGteState gte{};
     PsxBiosState bios{};
+    std::uint64_t timer1_hblank_phase{};
+    std::uint16_t timer1_hblank_mode_snapshot{};
 };
 
 [[nodiscard]] inline bool materialize_scph1001_exception_control_blocks(
@@ -447,6 +449,40 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
     return true;
 }
 
+inline void advance_psx_timer1_hblank(PsxRuntime& runtime,
+                                      std::uint32_t cpu_clocks = 1u) noexcept {
+    constexpr std::uint16_t hblank_clock_select = 1u << 8u;
+    constexpr std::uint64_t cpu_clock_hz = 33'868'800u;
+    constexpr std::uint64_t video_clock_hz = 53'693'175u;
+    constexpr std::uint64_t video_clocks_per_scanline = 3'413u;
+    constexpr std::uint64_t hblank_period_scaled =
+        cpu_clock_hz * video_clocks_per_scanline;
+
+    const auto mode = static_cast<std::uint16_t>(
+        runtime.bus.timer1_mode & PsxBus::timer_mode_valid_bits);
+    if (mode != runtime.timer1_hblank_mode_snapshot) {
+        runtime.timer1_hblank_mode_snapshot = mode;
+        runtime.timer1_hblank_phase = 0u;
+    }
+    if ((mode & hblank_clock_select) == 0u || cpu_clocks == 0u) return;
+
+    runtime.timer1_hblank_phase +=
+        video_clock_hz * static_cast<std::uint64_t>(cpu_clocks);
+    while (runtime.timer1_hblank_phase >= hblank_period_scaled) {
+        runtime.timer1_hblank_phase -= hblank_period_scaled;
+        runtime.bus.timer1_current = static_cast<std::uint16_t>(
+            runtime.bus.timer1_current + 1u);
+    }
+}
+
+[[nodiscard]] inline PsxR3000aStepResult finish_psx_runtime_step(
+    PsxRuntime& runtime, PsxR3000aStepResult result) noexcept {
+    if (result.reason == PsxR3000aStepReason::ok) {
+        advance_psx_timer1_hblank(runtime);
+    }
+    return result;
+}
+
 [[nodiscard]] inline PsxR3000aStepResult step_psx_runtime(PsxRuntime& runtime) noexcept {
     const auto instruction_pc = runtime.cpu.pc;
 
@@ -645,16 +681,19 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
     }
 
     if ((fetched.value >> 26u) == 0x12u) {
-        return step_psx_gte_transfer(runtime, fetched.value);
+        return finish_psx_runtime_step(runtime,
+                                       step_psx_gte_transfer(runtime, fetched.value));
     }
 
     const auto stepped = step_psx_r3000a(runtime.cpu, fetched.value, runtime.bus);
     if (stepped.reason == PsxR3000aStepReason::exception &&
         stepped.exception_code == PsxR3000aExceptionCode::syscall &&
         handle_psx_syscall_exception(runtime)) {
-        return {PsxR3000aStepReason::ok, stepped.instruction_pc, stepped.instruction};
+        return finish_psx_runtime_step(
+            runtime,
+            {PsxR3000aStepReason::ok, stepped.instruction_pc, stepped.instruction});
     }
-    return stepped;
+    return finish_psx_runtime_step(runtime, stepped);
 }
 
 }
