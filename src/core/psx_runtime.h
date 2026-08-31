@@ -51,6 +51,29 @@ struct PsxRuntime {
     PsxBiosState bios{};
 };
 
+[[nodiscard]] inline bool materialize_scph1001_exception_control_blocks(
+    PsxRuntime& runtime) noexcept {
+    constexpr std::uint32_t table_of_tables_excb_address = 0x00000100u;
+    constexpr std::uint32_t excb_address = 0xa000e004u;
+    constexpr std::uint32_t excb_size = 4u * 8u;
+
+    if (psx_bus_write_u32(runtime.bus, table_of_tables_excb_address,
+                          excb_address) != PsxBusAccessReason::ok ||
+        psx_bus_write_u32(runtime.bus, table_of_tables_excb_address + 4u,
+                          excb_size) != PsxBusAccessReason::ok) {
+        return false;
+    }
+
+    for (std::uint32_t priority = 0; priority < 4u; ++priority) {
+        const auto entry = excb_address + priority * 8u;
+        if (psx_bus_write_u32(runtime.bus, entry, 0u) != PsxBusAccessReason::ok ||
+            psx_bus_write_u32(runtime.bus, entry + 4u, 0u) != PsxBusAccessReason::ok) {
+            return false;
+        }
+    }
+    return true;
+}
+
 [[nodiscard]] inline Result<void> load_psx_boot_executable(
     PsxRuntime& runtime,
     std::span<const std::uint8_t> file,
@@ -84,6 +107,11 @@ struct PsxRuntime {
     std::fill(runtime.bus.ram.begin(), runtime.bus.ram.end(), std::uint8_t{0});
     for (std::size_t i = 0; i < payload_size; ++i) {
         runtime.bus.ram[static_cast<std::size_t>(physical_offset) + i] = file[header_size + i];
+    }
+
+    if (!materialize_scph1001_exception_control_blocks(runtime)) {
+        return Result<void>::failure(ErrorCode::invalid_installation,
+                                     "Could not materialize SCPH-1001 exception control blocks");
     }
 
     runtime.bios.events.fill(PsxBiosEvent{});
