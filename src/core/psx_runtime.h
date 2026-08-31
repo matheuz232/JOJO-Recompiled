@@ -93,6 +93,31 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     runtime.cpu.gpr[0] = 0u;
 }
 
+[[nodiscard]] inline bool restore_scph1001_default_entry_interrupt(PsxRuntime& runtime) noexcept {
+    // Decoded from the user's SCPH1001.BIN. The retail kernel's ResetEntryInt
+    // at RAM 00000F2Ch stores 00006CF4h as EntryInt and returns that pointer.
+    // The 30h-byte jmp_buf at 00006CF4h contains ReturnFromException (00000F40h),
+    // the exception stack pointer 000085D4h, then FP/S0-S7/GP all zero.
+    constexpr std::uint32_t default_entry_address = 0x00006cf4u;
+    constexpr std::array<std::uint32_t, 12> default_exit_structure{
+        0x00000f40u, 0x000085d4u, 0u, 0u, 0u, 0u,
+        0u, 0u, 0u, 0u, 0u, 0u,
+    };
+
+    for (std::size_t i = 0; i < default_exit_structure.size(); ++i) {
+        const auto address = default_entry_address + static_cast<std::uint32_t>(i * 4u);
+        if (psx_bus_write_u32(runtime.bus, address, default_exit_structure[i]) !=
+            PsxBusAccessReason::ok) {
+            return false;
+        }
+    }
+
+    runtime.bios.entry_interrupt_hook_installed = false;
+    runtime.bios.entry_interrupt_hook_address = default_entry_address;
+    runtime.cpu.gpr[2] = default_entry_address;
+    return true;
+}
+
 [[nodiscard]] inline bool handle_psx_syscall_exception(PsxRuntime& runtime) noexcept {
     constexpr std::uint32_t branch_delay_bit = 0x80000000u;
     constexpr std::uint32_t previous_interrupt_enable = 1u << 2u;
@@ -158,6 +183,14 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
         // Retail BIOS behavior: _96_remove() is a void routine whose attempt
         // to remove the CD-ROM priority-0 handlers fails through SysDeqIntRP.
         // The installed-chain state therefore remains unchanged.
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x18u) {
+        if (!restore_scph1001_default_entry_interrupt(runtime)) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
