@@ -32,6 +32,12 @@ jobs:
         run: cmake --build build/psx_interrupt_status --parallel 2
       - name: Test PSX I_STAT contract
         run: ./build/psx_interrupt_status/jojo_psx_interrupt_status_tests
+      - name: Configure PSX CD-ROM host contract
+        run: cmake -S tests/psx_cdrom_host -B build/psx_cdrom_host -DCMAKE_BUILD_TYPE=Release
+      - name: Build PSX CD-ROM host contract
+        run: cmake --build build/psx_cdrom_host --parallel 2
+      - name: Test PSX CD-ROM host contract
+        run: ./build/psx_cdrom_host/jojo_psx_cdrom_host_tests
       - name: Configure PSX SysDeqIntRP contract
         run: cmake -S tests/psx_sysdeqintpr -B build/psx_sysdeqintpr -DCMAKE_BUILD_TYPE=Release
       - name: Build PSX SysDeqIntRP contract
@@ -106,6 +112,12 @@ jobs:
         run: cmake --build build/psx_interrupt_status --config Release --parallel 2
       - name: Test PSX I_STAT contract
         run: .\build\psx_interrupt_status\Release\jojo_psx_interrupt_status_tests.exe
+      - name: Configure PSX CD-ROM host contract
+        run: cmake -S tests/psx_cdrom_host -B build/psx_cdrom_host -G "Visual Studio 17 2022" -A x64
+      - name: Build PSX CD-ROM host contract
+        run: cmake --build build/psx_cdrom_host --config Release --parallel 2
+      - name: Test PSX CD-ROM host contract
+        run: .\build\psx_cdrom_host\Release\jojo_psx_cdrom_host_tests.exe
       - name: Configure PSX SysDeqIntRP contract
         run: cmake -S tests/psx_sysdeqintpr -B build/psx_sysdeqintpr -G "Visual Studio 17 2022" -A x64
       - name: Build PSX SysDeqIntRP contract
