@@ -70,6 +70,17 @@ int main() {
     CHECK(jojo::step_psx_runtime(runtime).reason == jojo::PsxR3000aStepReason::ok);
     CHECK(jojo::psx_bus_read_u16(runtime.bus, 0x1f801110u).value == 1u);
 
+    // The same scanline timing must raise the GPU VBlank interrupt on entry
+    // to NTSC line 240. JoJo's frame wait cannot progress if Timer 1 advances
+    // while the GPU/VBlank source remains silent.
+    for (std::uint32_t line = 1u; line < 240u; ++line) {
+        for (std::uint32_t cycle = 0u; cycle < 2153u; ++cycle) {
+            CHECK(jojo::step_psx_runtime(runtime).reason ==
+                  jojo::PsxR3000aStepReason::ok);
+        }
+    }
+    CHECK((runtime.bus.interrupt_status & 1u) != 0u);
+
     if (failures) return 1;
     std::cout << "PSX Timer 1 mode MMIO assertions passed\n";
     return 0;

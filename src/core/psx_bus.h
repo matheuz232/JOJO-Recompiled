@@ -83,7 +83,8 @@ struct PsxBus {
     std::uint32_t dma_interrupt{};
     std::uint16_t timer1_current{};
     std::uint16_t timer1_mode{};
-    std::uint64_t timer1_hblank_phase{};
+    std::uint64_t video_clock_phase{};
+    std::uint16_t gpu_scanline{};
     std::uint8_t cdrom_index{};
     std::uint8_t cdrom_interrupt_enable{};
     std::uint8_t cdrom_interrupt_flags{};
@@ -454,7 +455,6 @@ inline void psx_bus_latch_cdrom_irq_rising_edge(PsxBus& bus,
     if (address == PsxBus::timer1_mode_address) {
         bus.timer1_mode = static_cast<std::uint16_t>(value & PsxBus::timer_mode_valid_bits);
         bus.timer1_current = 0u;
-        bus.timer1_hblank_phase = 0u;
         return PsxBusAccessReason::ok;
     }
 
@@ -567,7 +567,9 @@ inline void psx_bus_latch_cdrom_irq_rising_edge(PsxBus& bus,
 
 inline void psx_bus_tick(PsxBus& bus, std::uint32_t cpu_cycles) noexcept {
     constexpr std::uint16_t timer1_hblank_clock = 1u << 8u;
-    if ((bus.timer1_mode & timer1_hblank_clock) == 0u) return;
+    constexpr std::uint16_t vblank_interrupt = 1u << 0u;
+    constexpr std::uint16_t ntsc_vblank_start_line = 240u;
+    constexpr std::uint16_t ntsc_scanlines_per_frame = 263u;
 
     // NTSC PS1 timings: the CPU runs at 33.8688 MHz and one scanline spans
     // 3413 ticks of the 53.693175 MHz video clock. Keeping the fractional
@@ -579,11 +581,21 @@ inline void psx_bus_tick(PsxBus& bus, std::uint32_t cpu_cycles) noexcept {
     constexpr std::uint64_t phase_per_hblank =
         cpu_clock_hz * video_clocks_per_scanline;
 
-    bus.timer1_hblank_phase +=
+    bus.video_clock_phase +=
         static_cast<std::uint64_t>(cpu_cycles) * video_clock_hz;
-    while (bus.timer1_hblank_phase >= phase_per_hblank) {
-        bus.timer1_hblank_phase -= phase_per_hblank;
-        bus.timer1_current = static_cast<std::uint16_t>(bus.timer1_current + 1u);
+    while (bus.video_clock_phase >= phase_per_hblank) {
+        bus.video_clock_phase -= phase_per_hblank;
+        if ((bus.timer1_mode & timer1_hblank_clock) != 0u) {
+            bus.timer1_current = static_cast<std::uint16_t>(bus.timer1_current + 1u);
+        }
+
+        bus.gpu_scanline = static_cast<std::uint16_t>(bus.gpu_scanline + 1u);
+        if (bus.gpu_scanline == ntsc_vblank_start_line) {
+            bus.interrupt_status = static_cast<std::uint16_t>(
+                bus.interrupt_status | vblank_interrupt);
+        } else if (bus.gpu_scanline == ntsc_scanlines_per_frame) {
+            bus.gpu_scanline = 0u;
+        }
     }
 }
 
