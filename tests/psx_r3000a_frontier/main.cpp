@@ -152,6 +152,34 @@ static void test_bios_b0_change_clear_pad_tracks_real_kernel_flag() {
     CHECK(runtime.cpu.pc == 0x8003c9b0u);
 }
 
+static void test_bios_c0_change_clear_rcnt_returns_previous_irq_policy() {
+    jojo::PsxRuntime runtime{};
+    runtime.bios.timer_vblank_irq_auto_ack[3] = true;
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000c0u);
+    runtime.cpu.gpr[4] = 3u;
+    runtime.cpu.gpr[5] = 0u;
+    runtime.cpu.gpr[9] = 0x0au;
+    runtime.cpu.gpr[31] = 0x8003c9acu;
+
+    const auto disable = jojo::step_psx_runtime(runtime);
+    CHECK(disable.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 1u);
+    CHECK(!runtime.bios.timer_vblank_irq_auto_ack[3]);
+    CHECK(runtime.cpu.pc == 0x8003c9acu);
+    CHECK(runtime.cpu.next_pc == 0x8003c9b0u);
+
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000c0u);
+    runtime.cpu.gpr[4] = 3u;
+    runtime.cpu.gpr[5] = 1u;
+    runtime.cpu.gpr[9] = 0x0au;
+    runtime.cpu.gpr[31] = 0x8003c9bcu;
+    const auto enable = jojo::step_psx_runtime(runtime);
+    CHECK(enable.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 0u);
+    CHECK(runtime.bios.timer_vblank_irq_auto_ack[3]);
+    CHECK(runtime.cpu.pc == 0x8003c9bcu);
+}
+
 static void test_exception_diagnostic_names_are_stable() {
     CHECK(std::string_view(jojo::psx_r3000a_exception_code_name(
               jojo::PsxR3000aExceptionCode::interrupt)) == "interrupt");
@@ -175,6 +203,7 @@ int main() {
     test_gpu_gp0_mmio_port_accepts_command_words();
     test_bios_a0_gpu_cw_returns_after_sending_gp0_command();
     test_bios_b0_change_clear_pad_tracks_real_kernel_flag();
+    test_bios_c0_change_clear_rcnt_returns_previous_irq_policy();
     test_exception_diagnostic_names_are_stable();
     if (failures) return 1;
     std::cout << "R3000A commercial frontier assertions passed\n";
