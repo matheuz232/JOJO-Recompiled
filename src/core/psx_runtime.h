@@ -1,6 +1,7 @@
 #pragma once
 #include "core/psx_bus.h"
 #include "core/psx_exe.h"
+#include "core/psx_gte.h"
 #include "core/psx_r3000a.h"
 #include "core/psx_system_cnf.h"
 #include "core/result.h"
@@ -34,6 +35,7 @@ struct PsxBiosState {
 struct PsxRuntime {
     PsxBus bus{};
     PsxR3000aState cpu{};
+    PsxGteState gte{};
     PsxBiosState bios{};
 };
 
@@ -151,6 +153,76 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
 
     runtime.bios.c0_table_materialized = true;
     return true;
+}
+
+[[nodiscard]] inline PsxR3000aStepResult step_psx_gte_transfer(
+    PsxRuntime& runtime, std::uint32_t instruction) noexcept {
+    constexpr std::uint32_t cop2_enable = 1u << 30u;
+    constexpr std::uint32_t cause_coprocessor_mask = 3u << 28u;
+    constexpr std::uint32_t cause_coprocessor_2 = 2u << 28u;
+
+    auto& cpu = runtime.cpu;
+    const auto instruction_pc = cpu.pc;
+
+    if ((cpu.cop0.status & cop2_enable) == 0u) {
+        auto result = raise_psx_r3000a_exception(
+            cpu, PsxR3000aExceptionCode::coprocessor_unusable,
+            instruction_pc, instruction);
+        cpu.cop0.cause = (cpu.cop0.cause & ~cause_coprocessor_mask) |
+                         cause_coprocessor_2;
+        return result;
+    }
+
+    const auto rs = static_cast<std::uint8_t>((instruction >> 21u) & 0x1fu);
+    const auto rt = static_cast<std::uint8_t>((instruction >> 16u) & 0x1fu);
+    const auto rd = static_cast<std::uint8_t>((instruction >> 11u) & 0x1fu);
+    const bool canonical_move = (instruction & 0x7ffu) == 0u;
+    const bool is_read = rs == 0x00u || rs == 0x02u;
+    const bool is_write = rs == 0x04u || rs == 0x06u;
+
+    // Valid COP2 commands and other GTE operations remain explicit frontiers;
+    // do not misreport them as Reserved Instruction until their semantics are
+    // implemented and exercised by real media.
+    if (!canonical_move || (!is_read && !is_write)) {
+        return {PsxR3000aStepReason::unsupported_instruction,
+                instruction_pc, instruction};
+    }
+
+    const auto sequential_pc = cpu.next_pc;
+    const auto following_pc = sequential_pc + 4u;
+
+    if (is_read) {
+        const auto value = rs == 0x00u
+            ? psx_gte_read_data(runtime.gte, rd)
+            : psx_gte_read_control(runtime.gte, rd);
+
+        const bool previous_load_valid = cpu.pending_load_valid;
+        const auto previous_load_register = cpu.pending_load_register;
+        const auto previous_load_value = cpu.pending_load_value;
+        if (previous_load_valid &&
+            previous_load_register != 0u &&
+            previous_load_register != rt) {
+            cpu.gpr[previous_load_register] = previous_load_value;
+        }
+
+        cpu.pending_load_valid = rt != 0u;
+        cpu.pending_load_register = rt;
+        cpu.pending_load_value = value;
+    } else {
+        if (rs == 0x04u) {
+            psx_gte_write_data(runtime.gte, rd, cpu.gpr[rt]);
+        } else {
+            psx_gte_write_control(runtime.gte, rd, cpu.gpr[rt]);
+        }
+        complete_psx_pending_load(cpu);
+    }
+
+    cpu.gpr[0] = 0u;
+    cpu.pc = sequential_pc;
+    cpu.next_pc = following_pc;
+    cpu.current_instruction_is_branch_delay_slot = false;
+    cpu.branch_pc = 0u;
+    return {PsxR3000aStepReason::ok, instruction_pc, instruction};
 }
 
 [[nodiscard]] inline bool handle_psx_syscall_exception(PsxRuntime& runtime) noexcept {
@@ -284,6 +356,10 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     const auto fetched = psx_bus_read_u32(runtime.bus, instruction_pc);
     if (fetched.reason != PsxBusAccessReason::ok) {
         return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+    }
+
+    if ((fetched.value >> 26u) == 0x12u) {
+        return step_psx_gte_transfer(runtime, fetched.value);
     }
 
     const auto stepped = step_psx_r3000a(runtime.cpu, fetched.value, runtime.bus);
