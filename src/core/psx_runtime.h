@@ -25,6 +25,10 @@ struct PsxBiosState {
     // control to the boot executable. _96_remove attempts to dequeue them but
     // is ineffective because the BIOS SysDeqIntRP path is broken.
     bool cdrom_irq_handlers_installed{true};
+    // The runtime starts at the boot executable rather than executing the ROM
+    // boot sequence. Materialize the small, game-observed SCPH-1001 C0 table
+    // surface once, then leave any game-applied patches intact.
+    bool c0_table_materialized{};
 };
 
 struct PsxRuntime {
@@ -118,6 +122,37 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     return true;
 }
 
+[[nodiscard]] inline bool materialize_scph1001_c0_patch_surface(PsxRuntime& runtime) noexcept {
+    if (runtime.bios.c0_table_materialized) return true;
+
+    constexpr std::uint32_t c0_table_address = 0x00000674u;
+    constexpr std::uint32_t exception_handler_address = 0x00000c80u;
+    constexpr std::uint32_t exception_patch_address = exception_handler_address + 0x28u;
+    constexpr std::array<std::uint32_t, 6> exception_patch_surface{
+        0xaf410004u, 0xaf420008u, 0xaf43000cu,
+        0xaf5f007cu, 0x40037000u, 0x00000000u,
+    };
+
+    // C(06h) is the retail exception-handler entry used by commercial BIOS
+    // compatibility patches. Only the C0 slot and handler words actually
+    // observed by SLUS_010.60 are materialized; unobserved table entries are
+    // intentionally not fabricated.
+    if (psx_bus_write_u32(runtime.bus, c0_table_address + 6u * 4u,
+                          exception_handler_address) != PsxBusAccessReason::ok) {
+        return false;
+    }
+    for (std::size_t i = 0; i < exception_patch_surface.size(); ++i) {
+        const auto address = exception_patch_address + static_cast<std::uint32_t>(i * 4u);
+        if (psx_bus_write_u32(runtime.bus, address, exception_patch_surface[i]) !=
+            PsxBusAccessReason::ok) {
+            return false;
+        }
+    }
+
+    runtime.bios.c0_table_materialized = true;
+    return true;
+}
+
 [[nodiscard]] inline bool handle_psx_syscall_exception(PsxRuntime& runtime) noexcept {
     constexpr std::uint32_t branch_delay_bit = 0x80000000u;
     constexpr std::uint32_t previous_interrupt_enable = 1u << 2u;
@@ -198,6 +233,16 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x19u) {
         runtime.bios.entry_interrupt_hook_installed = true;
         runtime.bios.entry_interrupt_hook_address = runtime.cpu.gpr[4];
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x56u) {
+        constexpr std::uint32_t c0_table_address = 0x00000674u;
+        if (!materialize_scph1001_c0_patch_surface(runtime)) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
+        runtime.cpu.gpr[2] = c0_table_address;
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
