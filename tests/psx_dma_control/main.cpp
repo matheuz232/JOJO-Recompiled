@@ -36,7 +36,28 @@ int main() {
     CHECK(stored.reason == jojo::PsxBusAccessReason::ok);
     CHECK(stored.value == 0x33333333u);
 
+    CHECK(jojo::psx_bus_write_u32(bus, 0x1f8010f4u, 0u) == jojo::PsxBusAccessReason::ok);
+    const auto dicr_zero = jojo::psx_bus_read_u32(bus, 0x1f8010f4u);
+    CHECK(dicr_zero.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(dicr_zero.value == 0u);
+
+    bus.dma_interrupt = (1u << 23u) | (1u << 26u);
+    const auto dicr_pending = jojo::psx_bus_read_u32(bus, 0x1f8010f4u);
+    CHECK(dicr_pending.reason == jojo::PsxBusAccessReason::ok);
+    CHECK((dicr_pending.value & (1u << 31u)) != 0u);
+    CHECK((dicr_pending.value & (1u << 26u)) != 0u);
+
+    CHECK(jojo::psx_bus_write_u32(bus, 0x1f8010f4u,
+                                  (1u << 23u) | (1u << 18u) | (1u << 26u)) ==
+          jojo::PsxBusAccessReason::ok);
+    const auto dicr_acked = jojo::psx_bus_read_u32(bus, 0x1f8010f4u);
+    CHECK(dicr_acked.reason == jojo::PsxBusAccessReason::ok);
+    CHECK((dicr_acked.value & (1u << 26u)) == 0u);
+    CHECK((dicr_acked.value & (1u << 31u)) == 0u);
+    CHECK((dicr_acked.value & (1u << 23u)) != 0u);
+    CHECK((dicr_acked.value & (1u << 18u)) != 0u);
+
     if (failures) return 1;
-    std::cout << "PSX DPCR MMIO assertions passed\n";
+    std::cout << "PSX DPCR/DICR MMIO assertions passed\n";
     return 0;
 }
