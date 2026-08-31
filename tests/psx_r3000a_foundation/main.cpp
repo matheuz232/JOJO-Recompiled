@@ -1,4 +1,4 @@
-#include "core/psx_r3000a.h"
+#include "core/psx_runtime.h"
 #include <cstdint>
 #include <iostream>
 
@@ -33,6 +33,13 @@ static std::uint32_t encode_cop2(std::uint8_t rs, std::uint8_t rt,
            (static_cast<std::uint32_t>(rd) << 11u);
 }
 
+static jojo::PsxR3000aStepResult step_runtime_instruction(jojo::PsxRuntime& runtime,
+                                                          std::uint32_t instruction) {
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, runtime.cpu.pc, instruction) ==
+          jojo::PsxBusAccessReason::ok);
+    return jojo::step_psx_runtime(runtime);
+}
+
 static void test_reset_and_zero_register_contract() {
     jojo::PsxR3000aState state{};
     state.gpr.fill(0xffffffffu);
@@ -47,12 +54,12 @@ static void test_reset_and_zero_register_contract() {
     CHECK(state.lo == 0u);
 
     CHECK(jojo::step_psx_r3000a(state, encode_i(0x09u, 0u, 0u, 1u)).reason ==
-          jojo::PsxR3000aStepReason::ok); // ADDIU r0,r0,1
+          jojo::PsxR3000aStepReason::ok);
     CHECK(state.gpr[0] == 0u);
 
     state.gpr[1] = 0xffffffffu;
     CHECK(jojo::step_psx_r3000a(state, encode_r(1u, 0u, 0u, 0u, 0x21u)).reason ==
-          jojo::PsxR3000aStepReason::ok); // ADDU r0,r1,r0
+          jojo::PsxR3000aStepReason::ok);
     CHECK(state.gpr[0] == 0u);
 }
 
@@ -63,13 +70,13 @@ static void test_unsigned_add_sub_wrap_exactly_32_bits() {
     state.gpr[2] = 1u;
 
     CHECK(jojo::step_psx_r3000a(state, encode_r(1u, 2u, 3u, 0u, 0x21u)).reason ==
-          jojo::PsxR3000aStepReason::ok); // ADDU
+          jojo::PsxR3000aStepReason::ok);
     CHECK(state.gpr[3] == 0u);
 
     state.gpr[1] = 0u;
     state.gpr[2] = 1u;
     CHECK(jojo::step_psx_r3000a(state, encode_r(1u, 2u, 4u, 0u, 0x23u)).reason ==
-          jojo::PsxR3000aStepReason::ok); // SUBU
+          jojo::PsxR3000aStepReason::ok);
     CHECK(state.gpr[4] == 0xffffffffu);
 }
 
@@ -114,7 +121,7 @@ static void test_jal_links_pc_plus_eight_and_preserves_delay_slot() {
 static void test_reserved_primary_opcode_is_explicit_exception() {
     jojo::PsxR3000aState state{};
     jojo::reset_psx_r3000a(state, 0x80014000u);
-    const auto result = jojo::step_psx_r3000a(state, 0xfc000000u); // primary opcode 3Fh
+    const auto result = jojo::step_psx_r3000a(state, 0xfc000000u);
     CHECK(result.reason == jojo::PsxR3000aStepReason::exception);
     CHECK(result.exception_code == jojo::PsxR3000aExceptionCode::reserved_instruction);
     CHECK(state.cop0.epc == 0x80014000u);
@@ -123,93 +130,92 @@ static void test_reserved_primary_opcode_is_explicit_exception() {
 }
 
 static void test_gte_register_transfers_match_real_jojo_frontier() {
-    jojo::PsxR3000aState state{};
+    jojo::PsxRuntime runtime{};
 
-    // COP2 disabled must report the architectural CpU exception and CE=2.
-    jojo::reset_psx_r3000a(state, 0x80039c3cu);
-    state.gpr[8] = 0x00000155u;
-    const auto disabled = jojo::step_psx_r3000a(state, encode_cop2(0x06u, 8u, 29u));
+    jojo::reset_psx_r3000a(runtime.cpu, 0x80039c3cu);
+    runtime.cpu.gpr[8] = 0x00000155u;
+    const auto disabled = step_runtime_instruction(runtime, encode_cop2(0x06u, 8u, 29u));
     CHECK(disabled.reason == jojo::PsxR3000aStepReason::exception);
     CHECK(disabled.exception_code == jojo::PsxR3000aExceptionCode::coprocessor_unusable);
-    CHECK(((state.cop0.cause >> 28u) & 3u) == 2u);
-    CHECK(state.cop0.epc == 0x80039c3cu);
+    CHECK(((runtime.cpu.cop0.cause >> 28u) & 3u) == 2u);
+    CHECK(runtime.cpu.cop0.epc == 0x80039c3cu);
 
-    // Real SLUS_010.60 GTE init sequence: CTC2 ZSF3/ZSF4/H/DQA/DQB/OFX/OFY.
-    jojo::reset_psx_r3000a(state, 0x80039c3cu);
-    state.cop0.status = 1u << 30u;
-    state.gpr[8] = 0x00000155u;
-    CHECK(jojo::step_psx_r3000a(state, encode_cop2(0x06u, 8u, 29u)).reason ==
+    runtime = {};
+    jojo::reset_psx_r3000a(runtime.cpu, 0x80039c3cu);
+    runtime.cpu.cop0.status = 1u << 30u;
+    runtime.cpu.gpr[8] = 0x00000155u;
+    CHECK(step_runtime_instruction(runtime, encode_cop2(0x06u, 8u, 29u)).reason ==
           jojo::PsxR3000aStepReason::ok);
-    CHECK(state.gte.control[29] == 0x00000155u);
+    CHECK(runtime.gte.control[29] == 0x00000155u);
 
-    state.gpr[8] = 0x00000100u;
-    CHECK(jojo::step_psx_r3000a(state, encode_cop2(0x06u, 8u, 30u)).reason ==
+    runtime.cpu.gpr[8] = 0x00000100u;
+    CHECK(step_runtime_instruction(runtime, encode_cop2(0x06u, 8u, 30u)).reason ==
           jojo::PsxR3000aStepReason::ok);
-    CHECK(state.gte.control[30] == 0x00000100u);
+    CHECK(runtime.gte.control[30] == 0x00000100u);
 
-    state.gpr[8] = 0x000003e8u;
-    CHECK(jojo::step_psx_r3000a(state, encode_cop2(0x06u, 8u, 26u)).reason ==
+    runtime.cpu.gpr[8] = 0x000003e8u;
+    CHECK(step_runtime_instruction(runtime, encode_cop2(0x06u, 8u, 26u)).reason ==
           jojo::PsxR3000aStepReason::ok);
-    CHECK(state.gte.control[26] == 0x000003e8u);
+    CHECK(runtime.gte.control[26] == 0x000003e8u);
 
-    state.gpr[8] = 0xffffef9eu;
-    CHECK(jojo::step_psx_r3000a(state, encode_cop2(0x06u, 8u, 27u)).reason ==
+    runtime.cpu.gpr[8] = 0xffffef9eu;
+    CHECK(step_runtime_instruction(runtime, encode_cop2(0x06u, 8u, 27u)).reason ==
           jojo::PsxR3000aStepReason::ok);
-    CHECK(state.gte.control[27] == 0xffffef9eu);
+    CHECK(runtime.gte.control[27] == 0xffffef9eu);
 
-    state.gpr[8] = 0x01400000u;
-    CHECK(jojo::step_psx_r3000a(state, encode_cop2(0x06u, 8u, 28u)).reason ==
+    runtime.cpu.gpr[8] = 0x01400000u;
+    CHECK(step_runtime_instruction(runtime, encode_cop2(0x06u, 8u, 28u)).reason ==
           jojo::PsxR3000aStepReason::ok);
-    CHECK(state.gte.control[28] == 0x01400000u);
+    CHECK(runtime.gte.control[28] == 0x01400000u);
 
-    state.gpr[0] = 0u;
-    CHECK(jojo::step_psx_r3000a(state, encode_cop2(0x06u, 0u, 24u)).reason ==
+    CHECK(step_runtime_instruction(runtime, encode_cop2(0x06u, 0u, 24u)).reason ==
           jojo::PsxR3000aStepReason::ok);
-    CHECK(jojo::step_psx_r3000a(state, encode_cop2(0x06u, 0u, 25u)).reason ==
+    CHECK(step_runtime_instruction(runtime, encode_cop2(0x06u, 0u, 25u)).reason ==
           jojo::PsxR3000aStepReason::ok);
-    CHECK(state.gte.control[24] == 0u);
-    CHECK(state.gte.control[25] == 0u);
+    CHECK(runtime.gte.control[24] == 0u);
+    CHECK(runtime.gte.control[25] == 0u);
 
-    // H is unsigned for calculations but the hardware sign-extends it on CFC2.
-    state.gpr[8] = 0x0000f000u;
-    CHECK(jojo::step_psx_r3000a(state, encode_cop2(0x06u, 8u, 26u)).reason ==
+    runtime.cpu.gpr[8] = 0x0000f000u;
+    CHECK(step_runtime_instruction(runtime, encode_cop2(0x06u, 8u, 26u)).reason ==
           jojo::PsxR3000aStepReason::ok);
-    CHECK(state.gte.control[26] == 0xfffff000u);
+    CHECK(runtime.gte.control[26] == 0xfffff000u);
 
-    state.gpr[9] = 0xdeadbeefu;
-    CHECK(jojo::step_psx_r3000a(state, encode_cop2(0x02u, 9u, 27u)).reason ==
-          jojo::PsxR3000aStepReason::ok); // CFC2 t1,DQA
-    CHECK(state.gpr[9] == 0xdeadbeefu);
-    CHECK(state.pending_load_valid);
-    CHECK(state.pending_load_register == 9u);
-    CHECK(state.pending_load_value == 0xffffef9eu);
-    CHECK(jojo::step_psx_r3000a(state, encode_r(9u, 0u, 10u, 0u, 0x21u)).reason ==
+    runtime.cpu.gpr[8] = 0xffffef9eu;
+    CHECK(step_runtime_instruction(runtime, encode_cop2(0x06u, 8u, 27u)).reason ==
           jojo::PsxR3000aStepReason::ok);
-    CHECK(state.gpr[10] == 0xdeadbeefu);
-    CHECK(state.gpr[9] == 0xffffef9eu);
-
-    // The next real routine writes LZCS and reads the hardware-derived LZCR.
-    jojo::reset_psx_r3000a(state, 0x80039c90u);
-    state.cop0.status = 1u << 30u;
-    state.gpr[4] = 0xf0000000u;
-    CHECK(jojo::step_psx_r3000a(state, encode_cop2(0x04u, 4u, 30u)).reason ==
-          jojo::PsxR3000aStepReason::ok); // MTC2 a0,LZCS
-    CHECK(state.gte.data[30] == 0xf0000000u);
-    CHECK(state.gte.data[31] == 4u);
-
-    state.gpr[2] = 0xaaaaaaaau;
-    CHECK(jojo::step_psx_r3000a(state, encode_cop2(0x00u, 2u, 31u)).reason ==
-          jojo::PsxR3000aStepReason::ok); // MFC2 v0,LZCR
-    CHECK(state.gpr[2] == 0xaaaaaaaau);
-    CHECK(state.pending_load_value == 4u);
-    CHECK(jojo::step_psx_r3000a(state, 0u).reason == jojo::PsxR3000aStepReason::ok);
-    CHECK(state.gpr[2] == 4u);
-
-    // LZCR is read-only.
-    state.gpr[4] = 0x12345678u;
-    CHECK(jojo::step_psx_r3000a(state, encode_cop2(0x04u, 4u, 31u)).reason ==
+    runtime.cpu.gpr[9] = 0xdeadbeefu;
+    CHECK(step_runtime_instruction(runtime, encode_cop2(0x02u, 9u, 27u)).reason ==
           jojo::PsxR3000aStepReason::ok);
-    CHECK(state.gte.data[31] == 4u);
+    CHECK(runtime.cpu.gpr[9] == 0xdeadbeefu);
+    CHECK(runtime.cpu.pending_load_valid);
+    CHECK(runtime.cpu.pending_load_register == 9u);
+    CHECK(runtime.cpu.pending_load_value == 0xffffef9eu);
+    CHECK(step_runtime_instruction(runtime, encode_r(9u, 0u, 10u, 0u, 0x21u)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[10] == 0xdeadbeefu);
+    CHECK(runtime.cpu.gpr[9] == 0xffffef9eu);
+
+    runtime = {};
+    jojo::reset_psx_r3000a(runtime.cpu, 0x80039c90u);
+    runtime.cpu.cop0.status = 1u << 30u;
+    runtime.cpu.gpr[4] = 0xf0000000u;
+    CHECK(step_runtime_instruction(runtime, encode_cop2(0x04u, 4u, 30u)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.gte.data[30] == 0xf0000000u);
+    CHECK(runtime.gte.data[31] == 4u);
+
+    runtime.cpu.gpr[2] = 0xaaaaaaaau;
+    CHECK(step_runtime_instruction(runtime, encode_cop2(0x00u, 2u, 31u)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 0xaaaaaaaau);
+    CHECK(runtime.cpu.pending_load_value == 4u);
+    CHECK(step_runtime_instruction(runtime, 0u).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 4u);
+
+    runtime.cpu.gpr[4] = 0x12345678u;
+    CHECK(step_runtime_instruction(runtime, encode_cop2(0x04u, 4u, 31u)).reason ==
+          jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.gte.data[31] == 4u);
 }
 
 int main() {
