@@ -46,7 +46,43 @@ int main() {
     CHECK(cpu.next_pc == 0x8003c680u);
     CHECK(bus.interrupt_status == 0u);
 
+    // Exact JoJo SLUS_010.60 sequence at 0x80050960:
+    //   sw  $v0,0($v1)    ; $v1=I_STAT, $v0=FFFFFFFEh
+    //   lw  $v0,4($v1)    ; I_MASK
+    //   ori $v0,$v0,1
+    //   sw  $v0,4($v1)
+    // IRQCTRL is on-die MMIO and accepts full 32-bit stores. I_STAT only
+    // observes the low 11 valid bits for acknowledge semantics.
+    jojo::reset_psx_r3000a(cpu, 0x80050960u);
+    cpu.gpr[3] = 0x1f801070u;
+    cpu.gpr[2] = 0xfffffffeu;
+    bus.interrupt_status = 0x07ffu;
+    bus.interrupt_mask = 0x0020u;
+
+    const auto sw_istat = jojo::step_psx_r3000a(cpu, encode_i(0x2b, 3, 2, 0u), bus);
+    CHECK(sw_istat.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.pc == 0x80050964u);
+    CHECK(cpu.next_pc == 0x80050968u);
+    CHECK(bus.interrupt_status == 0x07feu);
+
+    const auto lw_imask = jojo::step_psx_r3000a(cpu, encode_i(0x23, 3, 2, 4u), bus);
+    CHECK(lw_imask.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.pc == 0x80050968u);
+    CHECK(cpu.next_pc == 0x8005096cu);
+    CHECK(cpu.pending_load_valid);
+    CHECK(cpu.pending_load_register == 2u);
+    CHECK((cpu.pending_load_value & 0x07ffu) == 0x0020u);
+
+    // Advance the load delay with the game's ORI, then write the enabled mask.
+    const auto ori_imask = jojo::step_psx_r3000a(cpu, encode_i(0x0d, 2, 2, 1u), bus);
+    CHECK(ori_imask.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.gpr[2] == 0x0021u);
+
+    const auto sw_imask = jojo::step_psx_r3000a(cpu, encode_i(0x2b, 3, 2, 4u), bus);
+    CHECK(sw_imask.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(bus.interrupt_mask == 0x0021u);
+
     if (failures) return 1;
-    std::cout << "PSX I_STAT MMIO assertions passed\n";
+    std::cout << "PSX I_STAT/I_MASK MMIO assertions passed\n";
     return 0;
 }
