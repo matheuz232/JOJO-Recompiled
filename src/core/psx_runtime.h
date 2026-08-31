@@ -5,6 +5,7 @@
 #include "core/psx_system_cnf.h"
 #include "core/result.h"
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -19,6 +20,7 @@ struct PsxBiosState {
     bool entry_interrupt_hook_installed{};
     std::uint32_t entry_interrupt_hook_address{};
     bool pad_card_irq_completes{true};
+    std::array<bool, 4> timer_vblank_irq_auto_ack{true, true, true, true};
 };
 
 struct PsxRuntime {
@@ -117,6 +119,19 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
 
     if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x5bu) {
         runtime.bios.pad_card_irq_completes = runtime.cpu.gpr[4] != 0u;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000c0u && runtime.cpu.gpr[9] == 0x0au) {
+        const auto timer = runtime.cpu.gpr[4];
+        if (timer > 3u) {
+            return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, 0u};
+        }
+        const auto index = static_cast<std::size_t>(timer);
+        const bool previous = runtime.bios.timer_vblank_irq_auto_ack[index];
+        runtime.bios.timer_vblank_irq_auto_ack[index] = runtime.cpu.gpr[5] != 0u;
+        runtime.cpu.gpr[2] = previous ? 1u : 0u;
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
