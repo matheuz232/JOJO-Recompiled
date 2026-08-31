@@ -79,6 +79,18 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
            (state.cop0.status & state.cop0.cause & interrupt_mask) != 0u;
 }
 
+inline void synchronize_psx_r3000a_external_interrupt(
+    PsxR3000aState& state, const PsxBus& bus) noexcept {
+    constexpr std::uint32_t external_interrupt_pending = 1u << 10u;
+    const auto requested_and_enabled = static_cast<std::uint16_t>(
+        bus.interrupt_status & bus.interrupt_mask & PsxBus::interrupt_status_valid_bits);
+    if (requested_and_enabled != 0u) {
+        state.cop0.cause |= external_interrupt_pending;
+    } else {
+        state.cop0.cause &= ~external_interrupt_pending;
+    }
+}
+
 [[nodiscard]] inline PsxR3000aStepResult raise_psx_r3000a_exception(
     PsxR3000aState& state,
     PsxR3000aExceptionCode code,
@@ -187,11 +199,11 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         return shifted | (~std::uint32_t{0} << (32u - shift));
     };
 
-    if (op == 0x10u) { // COP0
+    if (op == 0x10u) {
         const auto cop_rs = rs;
         const auto rd = static_cast<std::uint8_t>((instruction >> 11u) & 0x1fu);
         const bool canonical_move = (instruction & 0x7ffu) == 0u;
-        if (cop_rs == 0x00u && canonical_move) { // MFC0
+        if (cop_rs == 0x00u && canonical_move) {
             std::uint32_t load_value = 0u;
             if (read_psx_r3000a_cop0(state, rd, load_value)) {
                 const bool previous_load_valid = state.pending_load_valid;
@@ -213,9 +225,9 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
                 state.branch_pc = 0u;
                 return {PsxR3000aStepReason::ok, instruction_pc, instruction};
             }
-        } else if (cop_rs == 0x04u && canonical_move) { // MTC0
+        } else if (cop_rs == 0x04u && canonical_move) {
             supported = write_psx_r3000a_cop0(state, rd, state.gpr[rt]);
-        } else if (instruction == 0x42000010u) { // RFE
+        } else if (instruction == 0x42000010u) {
             state.cop0.status = (state.cop0.status & ~0x0fu) |
                                 ((state.cop0.status >> 2u) & 0x0fu);
             supported = true;
@@ -226,36 +238,36 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         const auto funct = static_cast<std::uint8_t>(instruction & 0x3fu);
 
         switch (funct) {
-        case 0x00u: // SLL (also architectural NOP when instruction == 0)
+        case 0x00u:
             write_gpr(rd, state.gpr[rt] << shamt);
             supported = true;
             break;
-        case 0x02u: // SRL
+        case 0x02u:
             write_gpr(rd, state.gpr[rt] >> shamt);
             supported = true;
             break;
-        case 0x03u: // SRA
+        case 0x03u:
             write_gpr(rd, arithmetic_shift_right(state.gpr[rt], shamt));
             supported = true;
             break;
-        case 0x04u: // SLLV
+        case 0x04u:
             write_gpr(rd, state.gpr[rt] << (state.gpr[rs] & 0x1fu));
             supported = true;
             break;
-        case 0x06u: // SRLV
+        case 0x06u:
             write_gpr(rd, state.gpr[rt] >> (state.gpr[rs] & 0x1fu));
             supported = true;
             break;
-        case 0x07u: // SRAV
+        case 0x07u:
             write_gpr(rd, arithmetic_shift_right(state.gpr[rt], state.gpr[rs]));
             supported = true;
             break;
-        case 0x08u: // JR
+        case 0x08u:
             following_pc = state.gpr[rs];
             supported = true;
             creates_branch_delay_slot = true;
             break;
-        case 0x09u: { // JALR
+        case 0x09u: {
             const auto target = state.gpr[rs];
             write_gpr(rd, instruction_pc + 8u);
             following_pc = target;
@@ -263,29 +275,29 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             creates_branch_delay_slot = true;
             break;
         }
-        case 0x0cu: // SYSCALL
+        case 0x0cu:
             return raise_psx_r3000a_exception(
                 state, PsxR3000aExceptionCode::syscall, instruction_pc, instruction);
-        case 0x0du: // BREAK
+        case 0x0du:
             return raise_psx_r3000a_exception(
                 state, PsxR3000aExceptionCode::breakpoint, instruction_pc, instruction);
-        case 0x10u: // MFHI
+        case 0x10u:
             write_gpr(rd, state.hi);
             supported = true;
             break;
-        case 0x11u: // MTHI
+        case 0x11u:
             state.hi = state.gpr[rs];
             supported = true;
             break;
-        case 0x12u: // MFLO
+        case 0x12u:
             write_gpr(rd, state.lo);
             supported = true;
             break;
-        case 0x13u: // MTLO
+        case 0x13u:
             state.lo = state.gpr[rs];
             supported = true;
             break;
-        case 0x18u: { // MULT
+        case 0x18u: {
             const auto product = signed_value(state.gpr[rs]) * signed_value(state.gpr[rt]);
             const auto bits = static_cast<std::uint64_t>(product);
             state.lo = static_cast<std::uint32_t>(bits);
@@ -293,7 +305,7 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             supported = true;
             break;
         }
-        case 0x19u: { // MULTU
+        case 0x19u: {
             const auto product = static_cast<std::uint64_t>(state.gpr[rs]) *
                                  static_cast<std::uint64_t>(state.gpr[rt]);
             state.lo = static_cast<std::uint32_t>(product);
@@ -301,7 +313,7 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             supported = true;
             break;
         }
-        case 0x1au: { // DIV
+        case 0x1au: {
             const auto dividend = signed_value(state.gpr[rs]);
             const auto divisor = signed_value(state.gpr[rt]);
             if (divisor == 0) {
@@ -317,7 +329,7 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             supported = true;
             break;
         }
-        case 0x1bu: // DIVU
+        case 0x1bu:
             if (state.gpr[rt] == 0u) {
                 state.lo = 0xffffffffu;
                 state.hi = state.gpr[rs];
@@ -327,7 +339,7 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             }
             supported = true;
             break;
-        case 0x20u: { // ADD
+        case 0x20u: {
             const auto sum = signed_value(state.gpr[rs]) + signed_value(state.gpr[rt]);
             if (sum < -0x80000000ll || sum > 0x7fffffffll) {
                 return raise_psx_r3000a_exception(
@@ -337,11 +349,11 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             supported = true;
             break;
         }
-        case 0x21u: // ADDU
+        case 0x21u:
             write_gpr(rd, state.gpr[rs] + state.gpr[rt]);
             supported = true;
             break;
-        case 0x22u: { // SUB
+        case 0x22u: {
             const auto difference = signed_value(state.gpr[rs]) - signed_value(state.gpr[rt]);
             if (difference < -0x80000000ll || difference > 0x7fffffffll) {
                 return raise_psx_r3000a_exception(
@@ -351,54 +363,54 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             supported = true;
             break;
         }
-        case 0x23u: // SUBU
+        case 0x23u:
             write_gpr(rd, state.gpr[rs] - state.gpr[rt]);
             supported = true;
             break;
-        case 0x24u: // AND
+        case 0x24u:
             write_gpr(rd, state.gpr[rs] & state.gpr[rt]);
             supported = true;
             break;
-        case 0x25u: // OR
+        case 0x25u:
             write_gpr(rd, state.gpr[rs] | state.gpr[rt]);
             supported = true;
             break;
-        case 0x26u: // XOR
+        case 0x26u:
             write_gpr(rd, state.gpr[rs] ^ state.gpr[rt]);
             supported = true;
             break;
-        case 0x27u: // NOR
+        case 0x27u:
             write_gpr(rd, ~(state.gpr[rs] | state.gpr[rt]));
             supported = true;
             break;
-        case 0x2au: // SLT
+        case 0x2au:
             write_gpr(rd, signed_value(state.gpr[rs]) < signed_value(state.gpr[rt]) ? 1u : 0u);
             supported = true;
             break;
-        case 0x2bu: // SLTU
+        case 0x2bu:
             write_gpr(rd, state.gpr[rs] < state.gpr[rt] ? 1u : 0u);
             supported = true;
             break;
         default:
             break;
         }
-    } else if (op == 0x01u) { // REGIMM branches
+    } else if (op == 0x01u) {
         bool take_branch = false;
         switch (rt) {
-        case 0x00u: // BLTZ
+        case 0x00u:
             take_branch = signed_value(state.gpr[rs]) < 0;
             supported = true;
             break;
-        case 0x01u: // BGEZ
+        case 0x01u:
             take_branch = signed_value(state.gpr[rs]) >= 0;
             supported = true;
             break;
-        case 0x10u: // BLTZAL
+        case 0x10u:
             take_branch = signed_value(state.gpr[rs]) < 0;
             write_gpr(31u, instruction_pc + 8u);
             supported = true;
             break;
-        case 0x11u: // BGEZAL
+        case 0x11u:
             take_branch = signed_value(state.gpr[rs]) >= 0;
             write_gpr(31u, instruction_pc + 8u);
             supported = true;
@@ -410,31 +422,31 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             following_pc = branch_target(static_cast<std::uint16_t>(instruction));
         }
         creates_branch_delay_slot = supported;
-    } else if (op == 0x04u) { // BEQ
+    } else if (op == 0x04u) {
         if (state.gpr[rs] == state.gpr[rt]) {
             following_pc = branch_target(static_cast<std::uint16_t>(instruction));
         }
         supported = true;
         creates_branch_delay_slot = true;
-    } else if (op == 0x05u) { // BNE
+    } else if (op == 0x05u) {
         if (state.gpr[rs] != state.gpr[rt]) {
             following_pc = branch_target(static_cast<std::uint16_t>(instruction));
         }
         supported = true;
         creates_branch_delay_slot = true;
-    } else if (op == 0x06u && rt == 0u) { // BLEZ
+    } else if (op == 0x06u && rt == 0u) {
         if (signed_value(state.gpr[rs]) <= 0) {
             following_pc = branch_target(static_cast<std::uint16_t>(instruction));
         }
         supported = true;
         creates_branch_delay_slot = true;
-    } else if (op == 0x07u && rt == 0u) { // BGTZ
+    } else if (op == 0x07u && rt == 0u) {
         if (signed_value(state.gpr[rs]) > 0) {
             following_pc = branch_target(static_cast<std::uint16_t>(instruction));
         }
         supported = true;
         creates_branch_delay_slot = true;
-    } else if (op == 0x08u) { // ADDI (overflow trap deferred until COP0 exists)
+    } else if (op == 0x08u) {
         const auto raw_immediate = static_cast<std::uint32_t>(instruction & 0xffffu);
         const std::int64_t lhs = state.gpr[rs] <= 0x7fffffffu
             ? static_cast<std::int64_t>(state.gpr[rs])
@@ -449,38 +461,38 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         }
         write_gpr(rt, static_cast<std::uint32_t>(sum));
         supported = true;
-    } else if (op == 0x09u) { // ADDIU
+    } else if (op == 0x09u) {
         const auto signed_immediate = static_cast<std::int32_t>(
             static_cast<std::int16_t>(instruction & 0xffffu));
         write_gpr(rt, state.gpr[rs] + static_cast<std::uint32_t>(signed_immediate));
         supported = true;
-    } else if (op == 0x0au) { // SLTI
+    } else if (op == 0x0au) {
         const auto immediate = static_cast<std::int16_t>(instruction & 0xffffu);
         write_gpr(rt, signed_value(state.gpr[rs]) < static_cast<std::int64_t>(immediate) ? 1u : 0u);
         supported = true;
-    } else if (op == 0x0bu) { // SLTIU
+    } else if (op == 0x0bu) {
         const auto immediate = static_cast<std::int32_t>(
             static_cast<std::int16_t>(instruction & 0xffffu));
         write_gpr(rt, state.gpr[rs] < static_cast<std::uint32_t>(immediate) ? 1u : 0u);
         supported = true;
-    } else if (op == 0x0cu) { // ANDI
+    } else if (op == 0x0cu) {
         write_gpr(rt, state.gpr[rs] & (instruction & 0xffffu));
         supported = true;
-    } else if (op == 0x0du) { // ORI
+    } else if (op == 0x0du) {
         write_gpr(rt, state.gpr[rs] | (instruction & 0xffffu));
         supported = true;
-    } else if (op == 0x0eu) { // XORI
+    } else if (op == 0x0eu) {
         write_gpr(rt, state.gpr[rs] ^ (instruction & 0xffffu));
         supported = true;
-    } else if (op == 0x0fu) { // LUI
+    } else if (op == 0x0fu) {
         write_gpr(rt, (instruction & 0xffffu) << 16u);
         supported = true;
-    } else if (op == 0x02u) { // J
+    } else if (op == 0x02u) {
         const auto target = instruction & 0x03ffffffu;
         following_pc = ((instruction_pc + 4u) & 0xf0000000u) | (target << 2u);
         supported = true;
         creates_branch_delay_slot = true;
-    } else if (op == 0x03u) { // JAL
+    } else if (op == 0x03u) {
         const auto target = instruction & 0x03ffffffu;
         write_gpr(31u, instruction_pc + 8u);
         following_pc = ((instruction_pc + 4u) & 0xf0000000u) | (target << 2u);
@@ -504,6 +516,7 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
 
 [[nodiscard]] inline PsxR3000aStepResult step_psx_r3000a(
     PsxR3000aState& state, std::uint32_t instruction, PsxBus& bus) noexcept {
+    synchronize_psx_r3000a_external_interrupt(state, bus);
     const std::uint32_t instruction_pc = state.pc;
     if (psx_r3000a_interrupt_pending(state)) {
         return raise_psx_r3000a_exception(
@@ -523,7 +536,7 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         static_cast<std::int16_t>(instruction & 0xffffu));
     const auto address = state.gpr[rs] + static_cast<std::uint32_t>(signed_immediate);
 
-    if (op == 0x28u || op == 0x29u || op == 0x2bu) { // SB / SH / SW
+    if (op == 0x28u || op == 0x29u || op == 0x2bu) {
         PsxBusAccessReason store_reason = PsxBusAccessReason::unmapped;
         if (op == 0x28u) {
             store_reason = psx_bus_write_u8(bus, address, static_cast<std::uint8_t>(state.gpr[rt]));
@@ -550,7 +563,7 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
         return {PsxR3000aStepReason::ok, instruction_pc, instruction};
     }
 
-    if (op == 0x2au || op == 0x2eu) { // SWL / SWR
+    if (op == 0x2au || op == 0x2eu) {
         const auto aligned_address = address & ~std::uint32_t{3};
         const auto current = psx_bus_read_u32(bus, aligned_address);
         if (current.reason != PsxBusAccessReason::ok) {
@@ -589,7 +602,7 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
 
     PsxBusAccessReason load_reason = PsxBusAccessReason::ok;
     std::uint32_t load_value = 0u;
-    if (op == 0x22u || op == 0x26u) { // LWL / LWR
+    if (op == 0x22u || op == 0x26u) {
         const auto loaded = psx_bus_read_u32(bus, address & ~std::uint32_t{3});
         load_reason = loaded.reason;
         const auto merge_source = state.pending_load_valid &&
@@ -611,21 +624,21 @@ inline void complete_psx_pending_load(PsxR3000aState& state,
             case 3u: load_value = (merge_source & 0xffffff00u) | (loaded.value >> 24u); break;
             }
         }
-    } else if (op == 0x20u || op == 0x24u) { // LB / LBU
+    } else if (op == 0x20u || op == 0x24u) {
         const auto loaded = psx_bus_read_u8(bus, address);
         load_reason = loaded.reason;
         load_value = static_cast<std::uint32_t>(loaded.value);
         if (op == 0x20u && (loaded.value & 0x80u) != 0u) {
             load_value |= 0xffffff00u;
         }
-    } else if (op == 0x21u || op == 0x25u) { // LH / LHU
+    } else if (op == 0x21u || op == 0x25u) {
         const auto loaded = psx_bus_read_u16(bus, address);
         load_reason = loaded.reason;
         load_value = static_cast<std::uint32_t>(loaded.value);
         if (op == 0x21u && (loaded.value & 0x8000u) != 0u) {
             load_value |= 0xffff0000u;
         }
-    } else { // LW
+    } else {
         const auto loaded = psx_bus_read_u32(bus, address);
         load_reason = loaded.reason;
         load_value = loaded.value;
