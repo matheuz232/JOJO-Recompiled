@@ -29,6 +29,8 @@ struct PsxBiosState {
     std::uint32_t heap_size{};
     bool entry_interrupt_hook_installed{};
     std::uint32_t entry_interrupt_hook_address{};
+    bool interrupt_return_state_valid{};
+    PsxR3000aState interrupt_return_state{};
     bool pad_card_irq_completes{true};
     std::array<bool, 4> timer_vblank_irq_auto_ack{true, true, true, true};
     bool cdrom_irq_handlers_installed{true};
@@ -447,6 +449,49 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
     return true;
 }
 
+[[nodiscard]] inline bool handle_psx_interrupt_exception(
+    PsxRuntime& runtime, const PsxR3000aState& interrupted_state) noexcept {
+    if (!runtime.bios.entry_interrupt_hook_installed) return false;
+
+    constexpr std::size_t saved_register_count = 12u;
+    std::array<std::uint32_t, saved_register_count> saved{};
+    for (std::size_t i = 0; i < saved.size(); ++i) {
+        const auto word = psx_bus_read_u32(
+            runtime.bus,
+            runtime.bios.entry_interrupt_hook_address +
+                static_cast<std::uint32_t>(i * sizeof(std::uint32_t)));
+        if (word.reason != PsxBusAccessReason::ok) return false;
+        saved[i] = word.value;
+    }
+
+    // SCPH-1001 HookEntryInt uses the same 30h layout as setjmp:
+    // RA, SP, FP, S0-S7, GP. The completed exception handler longjmps to it
+    // with v0=1 after running its IRQ queues.
+    runtime.cpu.gpr[29] = saved[1];
+    runtime.cpu.gpr[30] = saved[2];
+    for (std::size_t i = 0; i < 8u; ++i) {
+        runtime.cpu.gpr[16u + i] = saved[3u + i];
+    }
+    runtime.cpu.gpr[28] = saved[11];
+    runtime.cpu.gpr[31] = saved[0];
+    runtime.cpu.gpr[2] = 1u;
+    runtime.cpu.gpr[0] = 0u;
+    runtime.cpu.pending_load_valid = false;
+    runtime.cpu.current_instruction_is_branch_delay_slot = false;
+    runtime.cpu.branch_pc = 0u;
+    runtime.cpu.pc = saved[0];
+    runtime.cpu.next_pc = saved[0] + 4u;
+    runtime.bios.interrupt_return_state = interrupted_state;
+    runtime.bios.interrupt_return_state_valid = true;
+
+    constexpr std::uint16_t vblank_interrupt = 1u << 0u;
+    if (runtime.bios.timer_vblank_irq_auto_ack[0]) {
+        runtime.bus.interrupt_status = static_cast<std::uint16_t>(
+            runtime.bus.interrupt_status & ~vblank_interrupt);
+    }
+    return true;
+}
+
 [[nodiscard]] inline PsxR3000aStepResult step_psx_runtime(PsxRuntime& runtime) noexcept {
     const auto instruction_pc = runtime.cpu.pc;
 
@@ -500,6 +545,15 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
         enable_psx_bios_event(runtime, runtime.cpu.gpr[4]);
         runtime.cpu.gpr[2] = 1u;
         return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x17u) {
+        if (!runtime.bios.interrupt_return_state_valid) {
+            return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, 0u};
+        }
+        runtime.cpu = runtime.bios.interrupt_return_state;
+        runtime.bios.interrupt_return_state_valid = false;
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
 
@@ -648,6 +702,16 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
         return step_psx_gte_transfer(runtime, fetched.value);
     }
 
+    PsxR3000aState interrupted_state{};
+    constexpr std::uint32_t current_interrupt_enable = 1u;
+    constexpr std::uint32_t external_interrupt_mask = 1u << 10u;
+    const bool external_interrupt_candidate =
+        (runtime.bus.interrupt_status & runtime.bus.interrupt_mask &
+         PsxBus::interrupt_status_valid_bits) != 0u &&
+        (runtime.cpu.cop0.status & current_interrupt_enable) != 0u &&
+        (runtime.cpu.cop0.status & external_interrupt_mask) != 0u;
+    if (external_interrupt_candidate) interrupted_state = runtime.cpu;
+
     const auto stepped = step_psx_r3000a(runtime.cpu, fetched.value, runtime.bus);
     if (stepped.reason == PsxR3000aStepReason::ok ||
         stepped.reason == PsxR3000aStepReason::exception) {
@@ -656,6 +720,12 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
     if (stepped.reason == PsxR3000aStepReason::exception &&
         stepped.exception_code == PsxR3000aExceptionCode::syscall &&
         handle_psx_syscall_exception(runtime)) {
+        return {PsxR3000aStepReason::ok, stepped.instruction_pc, stepped.instruction};
+    }
+    if (stepped.reason == PsxR3000aStepReason::exception &&
+        stepped.exception_code == PsxR3000aExceptionCode::interrupt &&
+        external_interrupt_candidate &&
+        handle_psx_interrupt_exception(runtime, interrupted_state)) {
         return {PsxR3000aStepReason::ok, stepped.instruction_pc, stepped.instruction};
     }
     return stepped;

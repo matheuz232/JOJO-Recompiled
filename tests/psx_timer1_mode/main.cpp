@@ -81,6 +81,48 @@ int main() {
     }
     CHECK((runtime.bus.interrupt_status & 1u) != 0u);
 
+    // The production runtime HLEs the documented SCPH-1001 exception tail:
+    // after the IRQ queues run, HookEntryInt restores its setjmp buffer and
+    // resumes at saved RA with v0=1. Returning the raw CPU exception here
+    // would stop the commercial boot path at its first VBlank.
+    jojo::PsxRuntime interrupt_runtime{};
+    jojo::reset_psx_r3000a(interrupt_runtime.cpu, 0x80020000u);
+    interrupt_runtime.cpu.gpr[8] = 0x12345678u;
+    interrupt_runtime.bios.entry_interrupt_hook_installed = true;
+    interrupt_runtime.bios.entry_interrupt_hook_address = 0x80001000u;
+    const std::uint32_t saved[] = {
+        0x80030000u, 0x801ff000u, 0x801fe000u,
+        0x10u, 0x11u, 0x12u, 0x13u, 0x14u, 0x15u, 0x16u, 0x17u,
+        0x80060000u,
+    };
+    for (std::uint32_t i = 0; i < 12u; ++i) {
+        CHECK(jojo::psx_bus_write_u32(interrupt_runtime.bus,
+                                      0x80001000u + i * 4u, saved[i]) ==
+              jojo::PsxBusAccessReason::ok);
+    }
+    interrupt_runtime.bus.interrupt_status = 1u;
+    interrupt_runtime.bus.interrupt_mask = 1u;
+    interrupt_runtime.cpu.cop0.status = (1u << 10u) | 1u;
+    const auto delivered = jojo::step_psx_runtime(interrupt_runtime);
+    CHECK(delivered.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(interrupt_runtime.cpu.pc == saved[0]);
+    CHECK(interrupt_runtime.cpu.gpr[2] == 1u);
+    CHECK(interrupt_runtime.cpu.gpr[29] == saved[1]);
+    CHECK(interrupt_runtime.cpu.gpr[30] == saved[2]);
+    CHECK(interrupt_runtime.cpu.gpr[16] == saved[3]);
+    CHECK(interrupt_runtime.cpu.gpr[23] == saved[10]);
+    CHECK(interrupt_runtime.cpu.gpr[28] == saved[11]);
+    CHECK((interrupt_runtime.bus.interrupt_status & 1u) == 0u);
+    interrupt_runtime.cpu.pc = 0x000000b0u;
+    interrupt_runtime.cpu.next_pc = 0x000000b4u;
+    interrupt_runtime.cpu.gpr[9] = 0x17u;
+    const auto returned = jojo::step_psx_runtime(interrupt_runtime);
+    CHECK(returned.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(interrupt_runtime.cpu.pc == 0x80020000u);
+    CHECK(interrupt_runtime.cpu.next_pc == 0x80020004u);
+    CHECK(interrupt_runtime.cpu.gpr[8] == 0x12345678u);
+    CHECK(interrupt_runtime.cpu.cop0.status == ((1u << 10u) | 1u));
+
     if (failures) return 1;
     std::cout << "PSX Timer 1 mode MMIO assertions passed\n";
     return 0;
