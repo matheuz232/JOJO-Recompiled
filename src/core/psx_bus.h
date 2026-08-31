@@ -35,22 +35,40 @@ struct PsxBus {
     static constexpr std::uint32_t interrupt_status_address = 0x1f801070u;
     static constexpr std::uint32_t interrupt_mask_address = 0x1f801074u;
     static constexpr std::uint32_t dma_control_address = 0x1f8010f0u;
+    static constexpr std::uint32_t dma_interrupt_address = 0x1f8010f4u;
     static constexpr std::uint32_t timer1_current_address = 0x1f801110u;
     static constexpr std::uint32_t timer1_mode_address = 0x1f801114u;
     static constexpr std::uint32_t gpu_gp0_address = 0x1f801810u;
     static constexpr std::uint16_t interrupt_status_valid_bits = 0x07ffu;
     static constexpr std::uint16_t interrupt_mask_valid_bits = 0x07ffu;
     static constexpr std::uint16_t timer_mode_valid_bits = 0x1fffu;
+    static constexpr std::uint32_t dma_interrupt_control_mask = 0x00ff807fu;
+    static constexpr std::uint32_t dma_interrupt_flag_mask = 0x7f000000u;
+    static constexpr std::uint32_t dma_interrupt_master_enable = 0x00800000u;
+    static constexpr std::uint32_t dma_interrupt_bus_error = 0x00008000u;
+    static constexpr std::uint32_t dma_interrupt_master_flag = 0x80000000u;
 
     std::vector<std::uint8_t> ram = std::vector<std::uint8_t>(main_ram_size, 0u);
     std::array<std::uint8_t, scratchpad_size> scratchpad{};
     std::uint16_t interrupt_status{};
     std::uint16_t interrupt_mask{};
     std::uint32_t dma_control{};
+    std::uint32_t dma_interrupt{};
     std::uint16_t timer1_current{};
     std::uint16_t timer1_mode{};
     std::uint32_t gpu_gp0_write_latch{};
 };
+
+[[nodiscard]] inline std::uint32_t psx_bus_dma_interrupt_value(const PsxBus& bus) noexcept {
+    auto value = bus.dma_interrupt &
+                 (PsxBus::dma_interrupt_control_mask | PsxBus::dma_interrupt_flag_mask);
+    const bool master =
+        (value & PsxBus::dma_interrupt_bus_error) != 0u ||
+        ((value & PsxBus::dma_interrupt_master_enable) != 0u &&
+         (value & PsxBus::dma_interrupt_flag_mask) != 0u);
+    if (master) value |= PsxBus::dma_interrupt_master_flag;
+    return value;
+}
 
 [[nodiscard]] inline bool psx_bus_virtual_to_physical(std::uint32_t address,
                                                        std::uint32_t& physical) noexcept {
@@ -181,6 +199,9 @@ struct PsxBus {
     if (address == PsxBus::dma_control_address) {
         return {PsxBusAccessReason::ok, bus.dma_control};
     }
+    if (address == PsxBus::dma_interrupt_address) {
+        return {PsxBusAccessReason::ok, psx_bus_dma_interrupt_value(bus)};
+    }
 
     std::size_t scratchpad_offset = 0;
     if (psx_bus_scratchpad_offset(address, 4u, scratchpad_offset) ==
@@ -271,6 +292,22 @@ struct PsxBus {
     if ((address & 3u) != 0u) return PsxBusAccessReason::misaligned;
     if (address == PsxBus::dma_control_address) {
         bus.dma_control = value;
+        return PsxBusAccessReason::ok;
+    }
+    if (address == PsxBus::dma_interrupt_address) {
+        const bool previous_master =
+            (psx_bus_dma_interrupt_value(bus) & PsxBus::dma_interrupt_master_flag) != 0u;
+        const auto previous_flags = bus.dma_interrupt & PsxBus::dma_interrupt_flag_mask;
+        const auto acknowledged = value & PsxBus::dma_interrupt_flag_mask;
+        const auto remaining_flags = previous_flags & ~acknowledged;
+        const auto control = value & PsxBus::dma_interrupt_control_mask;
+        bus.dma_interrupt = control | remaining_flags;
+        const bool current_master =
+            (psx_bus_dma_interrupt_value(bus) & PsxBus::dma_interrupt_master_flag) != 0u;
+        if (!previous_master && current_master) {
+            bus.interrupt_status = static_cast<std::uint16_t>(
+                bus.interrupt_status | (1u << 3u));
+        }
         return PsxBusAccessReason::ok;
     }
     if (address == PsxBus::timer1_mode_address) {
