@@ -1,6 +1,32 @@
 #include "core/runtime.h"
+#include "core/psx_runtime.h"
+#include "core/psx_system_cnf.h"
+#include <fstream>
+#include <iterator>
+#include <string>
+#include <vector>
 
 namespace jojo {
+namespace {
+
+Result<std::vector<std::uint8_t>> read_binary_file(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        return Result<std::vector<std::uint8_t>>::failure(
+            ErrorCode::invalid_installation,
+            "prepared runtime file is missing: " + path.string());
+    }
+    std::vector<std::uint8_t> bytes(
+        std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    if (!in.eof() && in.fail()) {
+        return Result<std::vector<std::uint8_t>>::failure(
+            ErrorCode::io_error,
+            "failed while reading prepared runtime file: " + path.string());
+    }
+    return Result<std::vector<std::uint8_t>>::success(std::move(bytes));
+}
+
+}
 
 Result<InstallationInfo> validate_installation(const std::filesystem::path& install_dir) {
     std::error_code ec;
@@ -26,11 +52,30 @@ Result<InstallationInfo> validate_installation(const std::filesystem::path& inst
 Result<void> bootstrap_runtime(const std::filesystem::path& install_dir) {
     auto install = validate_installation(install_dir);
     if (!install) return Result<void>::failure(install.error, install.detail);
-    if (install.value.manifest.backend != "native-ready") {
+
+    if (install.value.manifest.backend == "native-ready") {
+        return Result<void>::success();
+    }
+
+    if (install.value.manifest.backend != "psx-runtime-prepared") {
         return Result<void>::failure(
             ErrorCode::backend_unavailable,
-            "converted installation is valid, but the game-specific native recompiler backend is not installed yet");
+            "converted installation is valid, but no prepared PS1 runtime is available yet");
     }
+
+    auto system_bytes = read_binary_file(install_dir / "data" / "SYSTEM.CNF");
+    if (!system_bytes) return Result<void>::failure(system_bytes.error, system_bytes.detail);
+    const std::string system_text(system_bytes.value.begin(), system_bytes.value.end());
+    auto system = parse_psx_system_cnf(system_text);
+    if (!system) return Result<void>::failure(system.error, system.detail);
+
+    auto executable = read_binary_file(install_dir / "data" / "PSX.EXE");
+    if (!executable) return Result<void>::failure(executable.error, executable.detail);
+
+    PsxRuntime runtime{};
+    auto loaded = load_psx_boot_executable(runtime, executable.value, system.value);
+    if (!loaded) return Result<void>::failure(loaded.error, loaded.detail);
+
     return Result<void>::success();
 }
 
