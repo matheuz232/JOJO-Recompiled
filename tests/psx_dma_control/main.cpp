@@ -67,14 +67,30 @@ int main() {
     CHECK(display_on.reason == jojo::PsxBusAccessReason::ok);
     CHECK(display_on.value == 0x14002000u);
 
-    // Real SLUS_010.60 frontier: GP1(03h), parameter 1 = display disabled.
     CHECK(jojo::psx_bus_write_u32(bus, 0x1f801814u, 0x03000001u) ==
           jojo::PsxBusAccessReason::ok);
     const auto display_off = jojo::psx_bus_read_u32(bus, 0x1f801814u);
     CHECK(display_off.reason == jojo::PsxBusAccessReason::ok);
     CHECK(display_off.value == 0x14802000u);
 
+    // Real SLUS_010.60 frontier at 800383C0h: configure DMA2/GPU CHCR for
+    // RAM->GPU linked-list mode. Bit24 is deliberately clear, so this write
+    // configures the channel but must not start a transfer yet.
+    jojo::reset_psx_r3000a(cpu, 0x800383c0u);
+    cpu.gpr[3] = 0x1f8010a8u;
+    cpu.gpr[2] = 0x00000401u;
+    const auto dma2_setup = jojo::step_psx_r3000a(
+        cpu, encode_i(0x2b, 3, 2, 0u), bus);
+    CHECK(dma2_setup.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.pc == 0x800383c4u);
+    CHECK(cpu.next_pc == 0x800383c8u);
+
+    const auto dma2_chcr = jojo::psx_bus_read_u32(bus, 0x1f8010a8u);
+    CHECK(dma2_chcr.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(dma2_chcr.value == 0x00000401u);
+    CHECK((dma2_chcr.value & (1u << 24u)) == 0u);
+
     if (failures) return 1;
-    std::cout << "PSX DPCR/DICR and GP1 display MMIO assertions passed\n";
+    std::cout << "PSX DMA and GP1 MMIO assertions passed\n";
     return 0;
 }
