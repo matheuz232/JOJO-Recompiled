@@ -32,6 +32,7 @@ struct PsxBus {
     static constexpr std::uint32_t default_ram_mirror_window = 8u * 1024u * 1024u;
     static constexpr std::uint32_t scratchpad_address = 0x1f800000u;
     static constexpr std::size_t scratchpad_size = 1024u;
+    static constexpr std::uint32_t common_delay_address = 0x1f801020u;
     static constexpr std::uint32_t interrupt_status_address = 0x1f801070u;
     static constexpr std::uint32_t interrupt_mask_address = 0x1f801074u;
     static constexpr std::uint32_t dma2_channel_control_address = 0x1f8010a8u;
@@ -67,6 +68,7 @@ struct PsxBus {
 
     std::vector<std::uint8_t> ram = std::vector<std::uint8_t>(main_ram_size, 0u);
     std::array<std::uint8_t, scratchpad_size> scratchpad{};
+    std::uint16_t common_delay{};
     std::uint16_t interrupt_status{};
     std::uint16_t interrupt_mask{};
     std::uint32_t dma2_channel_control{};
@@ -248,6 +250,9 @@ struct PsxBus {
 [[nodiscard]] inline PsxBusReadU32Result psx_bus_read_u32(const PsxBus& bus,
                                                            std::uint32_t address) noexcept {
     if ((address & 3u) != 0u) return {PsxBusAccessReason::misaligned, 0u};
+    if (address == PsxBus::common_delay_address) {
+        return {PsxBusAccessReason::ok, static_cast<std::uint32_t>(bus.common_delay)};
+    }
     if (address == PsxBus::interrupt_mask_address) {
         // Retail IRQCTRL is on-die MMIO. The low 11 I_MASK bits are defined;
         // hardware measurements show the unused read lanes echoing BF800000h.
@@ -391,6 +396,10 @@ struct PsxBus {
                                                            std::uint32_t address,
                                                            std::uint32_t value) noexcept {
     if ((address & 3u) != 0u) return PsxBusAccessReason::misaligned;
+    if (address == PsxBus::common_delay_address) {
+        bus.common_delay = static_cast<std::uint16_t>(value);
+        return PsxBusAccessReason::ok;
+    }
     if (address == PsxBus::interrupt_status_address) {
         // Full-word IRQCTRL stores are valid. Only the low 11 I_STAT bits are
         // implemented, with zero-to-acknowledge and one-to-preserve semantics.
