@@ -214,6 +214,9 @@ struct PsxBus {
     if (address == PsxBus::dma_interrupt_address) {
         return {PsxBusAccessReason::ok, psx_bus_dma_interrupt_value(bus)};
     }
+    if (address == PsxBus::timer1_current_address) {
+        return {PsxBusAccessReason::ok, static_cast<std::uint32_t>(bus.timer1_current)};
+    }
     if (address == PsxBus::gpu_gp0_address) {
         return {PsxBusAccessReason::ok, bus.gpu_read_latch};
     }
