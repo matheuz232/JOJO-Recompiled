@@ -1,5 +1,6 @@
 #include "core/psx_bus.h"
 #include "core/psx_r3000a.h"
+#include "core/psx_runtime.h"
 #include <cstdint>
 #include <iostream>
 
@@ -94,6 +95,82 @@ int main() {
     const auto masked_com_delay = jojo::psx_bus_read_u32(bus, 0x1f801020u);
     CHECK(masked_com_delay.reason == jojo::PsxBusAccessReason::ok);
     CHECK(masked_com_delay.value == 0x00005678u);
+
+    // Exact JoJo frontier reached after COM_DELAY at 0x8004BFEC:
+    //   sb $s1,0($v0)   ; $s1=01h Nop, $v0=1F801801h COMMAND
+    // With the mounted boot disc the drive is idle with spindle on, so Nop
+    // acknowledges with INT3(stat=02h). JoJo has HINTMSK=07h and I_MASK IRQ2
+    // enabled; the response must therefore latch I_STAT.bit2 and become a real
+    // R3000A external interrupt through COP0 Cause.IP2.
+    jojo::PsxRuntime runtime{};
+    jojo::reset_psx_r3000a(runtime.cpu, 0x8004bfecu);
+    runtime.cpu.gpr[2] = 0x1f801801u;
+    runtime.cpu.gpr[17] = 0x01u;
+    runtime.cpu.cop0.status = 1u | (1u << 10u); // IEc + IM2
+
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, 0x8004bfecu,
+                                  encode_i(0x28u, 2u, 17u, 0u)) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, 0x8004bff0u, 0u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u16(runtime.bus, jojo::PsxBus::interrupt_mask_address,
+                                  static_cast<std::uint16_t>(1u << 2u)) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(runtime.bus, 0x1f801800u, 1u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(runtime.bus, 0x1f801802u, 0x07u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(runtime.bus, 0x1f801800u, 0u) ==
+          jojo::PsxBusAccessReason::ok);
+
+    const auto nop_command = jojo::step_psx_runtime(runtime);
+    CHECK(nop_command.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.pc == 0x8004bff0u);
+
+    const auto hsts_with_result = jojo::psx_bus_read_u8(runtime.bus, 0x1f801800u);
+    CHECK(hsts_with_result.reason == jojo::PsxBusAccessReason::ok);
+    CHECK((hsts_with_result.value & 0x20u) != 0u); // RSLRRDY
+
+    CHECK(jojo::psx_bus_write_u8(runtime.bus, 0x1f801800u, 1u) ==
+          jojo::PsxBusAccessReason::ok);
+    const auto nop_hintsts = jojo::psx_bus_read_u8(runtime.bus, 0x1f801803u);
+    CHECK(nop_hintsts.reason == jojo::PsxBusAccessReason::ok);
+    CHECK((nop_hintsts.value & 0x07u) == 3u); // INT3 acknowledge response
+
+    const auto cd_irq = jojo::psx_bus_read_u16(runtime.bus, jojo::PsxBus::interrupt_status_address);
+    CHECK(cd_irq.reason == jojo::PsxBusAccessReason::ok);
+    CHECK((cd_irq.value & (1u << 2u)) != 0u);
+
+    const auto nop_result = jojo::psx_bus_read_u8(runtime.bus, 0x1f801801u);
+    CHECK(nop_result.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(nop_result.value == 0x02u); // mounted disc, spindle on, shell closed
+
+    const auto hsts_after_result = jojo::psx_bus_read_u8(runtime.bus, 0x1f801800u);
+    CHECK(hsts_after_result.reason == jojo::PsxBusAccessReason::ok);
+    CHECK((hsts_after_result.value & 0x20u) == 0u);
+
+    const auto delivered_irq = jojo::step_psx_runtime(runtime);
+    CHECK(delivered_irq.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(delivered_irq.exception_code == jojo::PsxR3000aExceptionCode::interrupt);
+    CHECK(runtime.cpu.cop0.epc == 0x8004bff0u);
+    CHECK(runtime.cpu.pc == 0x80000080u);
+    CHECK((runtime.cpu.cop0.cause & (1u << 10u)) != 0u);
+
+    // Acknowledge the CD controller separately from the edge-latched I_STAT.
+    CHECK(jojo::psx_bus_write_u8(runtime.bus, 0x1f801803u, 0x07u) ==
+          jojo::PsxBusAccessReason::ok);
+    const auto nop_hintsts_acked = jojo::psx_bus_read_u8(runtime.bus, 0x1f801803u);
+    CHECK(nop_hintsts_acked.reason == jojo::PsxBusAccessReason::ok);
+    CHECK((nop_hintsts_acked.value & 0x07u) == 0u);
+    const auto cd_irq_still_latched = jojo::psx_bus_read_u16(
+        runtime.bus, jojo::PsxBus::interrupt_status_address);
+    CHECK((cd_irq_still_latched.value & (1u << 2u)) != 0u);
+
+    // Do not silently widen this frontier into arbitrary CD commands.
+    CHECK(jojo::psx_bus_write_u8(runtime.bus, 0x1f801800u, 0u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(runtime.bus, 0x1f801801u, 0x02u) ==
+          jojo::PsxBusAccessReason::unmapped);
 
     if (failures) return 1;
     std::cout << "PSX CD-ROM host interface assertions passed\n";
