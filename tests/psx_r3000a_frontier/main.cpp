@@ -162,6 +162,46 @@ static void test_broken_96_remove_leaves_cdrom_irq_chain_installed() {
     CHECK(runtime.cpu.next_pc == 0x8003c6f4u);
 }
 
+static void test_critical_section_syscalls_return_through_exception_state() {
+    jojo::PsxRuntime runtime{};
+
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, 0x80035a70u, 0x0000000cu) == jojo::PsxBusAccessReason::ok);
+    jojo::reset_psx_r3000a(runtime.cpu, 0x80035a70u);
+    runtime.cpu.cop0.status = 0x10000401u;
+    runtime.cpu.gpr[4] = 1u; // SYS(01h) EnterCriticalSection
+    runtime.cpu.gpr[2] = 0xdeadbeefu;
+    const auto enter = jojo::step_psx_runtime(runtime);
+    CHECK(enter.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 1u);
+    CHECK(runtime.cpu.cop0.epc == 0x80035a70u);
+    CHECK((runtime.cpu.cop0.cause & 0x7cu) == 0x20u);
+    CHECK(runtime.cpu.cop0.status == 0x10000000u);
+    CHECK(runtime.cpu.pc == 0x80035a74u);
+    CHECK(runtime.cpu.next_pc == 0x80035a78u);
+
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, 0x80035a84u, 0x0000000cu) == jojo::PsxBusAccessReason::ok);
+    jojo::reset_psx_r3000a(runtime.cpu, 0x80035a84u);
+    runtime.cpu.cop0.status = 0x10000000u;
+    runtime.cpu.gpr[4] = 2u; // SYS(02h) ExitCriticalSection, real JoJo frontier.
+    runtime.cpu.gpr[2] = 0x2468ace0u;
+    const auto exit = jojo::step_psx_runtime(runtime);
+    CHECK(exit.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 0x2468ace0u);
+    CHECK(runtime.cpu.cop0.epc == 0x80035a84u);
+    CHECK((runtime.cpu.cop0.cause & 0x7cu) == 0x20u);
+    CHECK(runtime.cpu.cop0.status == 0x10000401u);
+    CHECK(runtime.cpu.pc == 0x80035a88u);
+    CHECK(runtime.cpu.next_pc == 0x80035a8cu);
+
+    jojo::reset_psx_r3000a(runtime.cpu, 0x80035a70u);
+    runtime.cpu.cop0.status = 0x00000400u;
+    runtime.cpu.gpr[4] = 1u;
+    runtime.cpu.gpr[2] = 0xffffffffu;
+    CHECK(jojo::step_psx_runtime(runtime).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 0u);
+    CHECK(runtime.cpu.cop0.status == 0u);
+}
+
 static void test_exception_diagnostic_names_are_stable() {
     CHECK(std::string_view(jojo::psx_r3000a_exception_code_name(jojo::PsxR3000aExceptionCode::interrupt)) == "interrupt");
     CHECK(std::string_view(jojo::psx_r3000a_exception_code_name(jojo::PsxR3000aExceptionCode::address_error_load)) == "address_error_load");
@@ -177,6 +217,7 @@ int main() {
     test_change_clear_pad();
     test_change_clear_rcnt();
     test_broken_96_remove_leaves_cdrom_irq_chain_installed();
+    test_critical_section_syscalls_return_through_exception_state();
     test_exception_diagnostic_names_are_stable();
     if (failures) return 1;
     std::cout << "R3000A commercial frontier assertions passed\n";
