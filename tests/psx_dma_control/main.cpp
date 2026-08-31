@@ -73,9 +73,6 @@ int main() {
     CHECK(display_off.reason == jojo::PsxBusAccessReason::ok);
     CHECK(display_off.value == 0x14802000u);
 
-    // Real SLUS_010.60 frontier at 800383C0h: configure DMA2/GPU CHCR for
-    // RAM->GPU linked-list mode. Bit24 is deliberately clear, so this write
-    // configures the channel but must not start a transfer yet.
     jojo::reset_psx_r3000a(cpu, 0x800383c0u);
     cpu.gpr[3] = 0x1f8010a8u;
     cpu.gpr[2] = 0x00000401u;
@@ -89,6 +86,23 @@ int main() {
     CHECK(dma2_chcr.reason == jojo::PsxBusAccessReason::ok);
     CHECK(dma2_chcr.value == 0x00000401u);
     CHECK((dma2_chcr.value & (1u << 24u)) == 0u);
+
+    // Real SLUS_010.60 frontier at 800383F4h. Force observable GPU state away
+    // from reset first, then GP1(00h) must restore the documented reset state.
+    CHECK(jojo::psx_bus_write_u32(bus, 0x1f801814u, 0x03000000u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_read_u32(bus, 0x1f801814u).value == 0x14002000u);
+    jojo::reset_psx_r3000a(cpu, 0x800383f4u);
+    cpu.gpr[2] = 0x1f801814u;
+    cpu.gpr[0] = 0u;
+    const auto gpu_reset_command = jojo::step_psx_r3000a(
+        cpu, encode_i(0x2b, 2, 0, 0u), bus);
+    CHECK(gpu_reset_command.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.pc == 0x800383f8u);
+    CHECK(cpu.next_pc == 0x800383fcu);
+    const auto reset_status = jojo::psx_bus_read_u32(bus, 0x1f801814u);
+    CHECK(reset_status.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(reset_status.value == 0x14802000u);
 
     if (failures) return 1;
     std::cout << "PSX DMA and GP1 MMIO assertions passed\n";
