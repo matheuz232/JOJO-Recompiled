@@ -24,6 +24,10 @@ struct PsxBiosState {
     std::array<bool, 4> timer_vblank_irq_auto_ack{true, true, true, true};
     bool cdrom_irq_handlers_installed{true};
     bool c0_table_materialized{};
+    bool card_initialized{};
+    bool card_started{};
+    bool card_pad_enabled{};
+    bool early_card_irq_installed{};
 };
 
 struct PsxRuntime {
@@ -311,9 +315,16 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
             }
         }
 
-        // Retail boot leaves std_out mounted on Dummy-TTY: bytes are consumed
-        // but intentionally produce no hardware-visible output.
         runtime.cpu.gpr[2] = length;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x4au) {
+        runtime.bios.card_initialized = true;
+        runtime.bios.card_started = false;
+        runtime.bios.card_pad_enabled = runtime.cpu.gpr[4] != 0u;
+        runtime.bios.early_card_irq_installed = true;
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
