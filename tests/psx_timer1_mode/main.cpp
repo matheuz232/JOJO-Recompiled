@@ -39,6 +39,20 @@ int main() {
     CHECK(cpu.next_pc == 0x8003cc54u);
     CHECK(jojo::psx_bus_read_u16(bus, 0x1f801114u).value == 0x0100u);
 
+    // Real SLUS_010.60 frontier at 8003C234h reads Timer 1 current with LW.
+    // Hardware defines only bits 0-15; bits 16-31 are garbage, so assert only
+    // the architecturally meaningful low half after the load-delay slot.
+    CHECK(jojo::psx_bus_write_u16(bus, 0x1f801110u, 0x3456u) == jojo::PsxBusAccessReason::ok);
+    jojo::reset_psx_r3000a(cpu, 0x8003c234u);
+    cpu.gpr[5] = 0x1f801110u;
+    cpu.gpr[2] = 0xaaaaaaaau;
+    const auto timer1_lw = jojo::step_psx_r3000a(
+        cpu, encode_i(0x23, 5, 2, 0u), bus);
+    CHECK(timer1_lw.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.gpr[2] == 0xaaaaaaaau);
+    CHECK(jojo::step_psx_r3000a(cpu, 0u, bus).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK((cpu.gpr[2] & 0xffffu) == 0x3456u);
+
     if (failures) return 1;
     std::cout << "PSX Timer 1 mode MMIO assertions passed\n";
     return 0;
