@@ -202,6 +202,36 @@ static void test_critical_section_syscalls_return_through_exception_state() {
     CHECK(runtime.cpu.cop0.status == 0u);
 }
 
+static void test_reset_entry_int_restores_scph1001_default_exit_structure() {
+    jojo::PsxRuntime runtime{};
+    runtime.bios.entry_interrupt_hook_installed = true;
+    runtime.bios.entry_interrupt_hook_address = 0x800616bcu;
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
+    runtime.cpu.gpr[9] = 0x18u;
+    runtime.cpu.gpr[31] = 0x8003caacu; // Real SLUS_010.60 return address.
+    runtime.cpu.gpr[2] = 0xffffffffu;
+
+    const auto result = jojo::step_psx_runtime(runtime);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(!runtime.bios.entry_interrupt_hook_installed);
+    CHECK(runtime.bios.entry_interrupt_hook_address == 0x00006cf4u);
+    CHECK(runtime.cpu.gpr[2] == 0x00006cf4u);
+    CHECK(runtime.cpu.pc == 0x8003caacu);
+    CHECK(runtime.cpu.next_pc == 0x8003cab0u);
+
+    const auto default_pc = jojo::psx_bus_read_u32(runtime.bus, 0x00006cf4u);
+    const auto default_sp = jojo::psx_bus_read_u32(runtime.bus, 0x00006cf8u);
+    CHECK(default_pc.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(default_pc.value == 0x00000f40u);
+    CHECK(default_sp.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(default_sp.value == 0x000085d4u);
+    for (std::uint32_t address = 0x00006cfcu; address <= 0x00006d20u; address += 4u) {
+        const auto saved = jojo::psx_bus_read_u32(runtime.bus, address);
+        CHECK(saved.reason == jojo::PsxBusAccessReason::ok);
+        CHECK(saved.value == 0u);
+    }
+}
+
 static void test_exception_diagnostic_names_are_stable() {
     CHECK(std::string_view(jojo::psx_r3000a_exception_code_name(jojo::PsxR3000aExceptionCode::interrupt)) == "interrupt");
     CHECK(std::string_view(jojo::psx_r3000a_exception_code_name(jojo::PsxR3000aExceptionCode::address_error_load)) == "address_error_load");
@@ -218,6 +248,7 @@ int main() {
     test_change_clear_rcnt();
     test_broken_96_remove_leaves_cdrom_irq_chain_installed();
     test_critical_section_syscalls_return_through_exception_state();
+    test_reset_entry_int_restores_scph1001_default_exit_structure();
     test_exception_diagnostic_names_are_stable();
     if (failures) return 1;
     std::cout << "R3000A commercial frontier assertions passed\n";
