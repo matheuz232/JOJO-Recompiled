@@ -65,6 +65,33 @@ static void test_loader_copies_payload_and_initializes_boot_registers() {
     CHECK(first.value == encode_i(0x0f, 0, 2, 0x8006u));
 }
 
+static void test_loader_materializes_scph1001_exception_control_blocks() {
+    jojo::PsxRuntime runtime{};
+    auto system = synthetic_cnf();
+    system.event = 0x16u;
+    const auto loaded = jojo::load_psx_boot_executable(runtime, synthetic_exe(), system);
+    CHECK(loaded);
+    if (!loaded) return;
+
+    const auto excb_address = jojo::psx_bus_read_u32(runtime.bus, 0x00000100u);
+    const auto excb_size = jojo::psx_bus_read_u32(runtime.bus, 0x00000104u);
+    CHECK(excb_address.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(excb_size.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(excb_address.value == 0xa000e004u);
+    CHECK(excb_size.value == 0x00000020u);
+
+    for (std::uint32_t priority = 0; priority < 4u; ++priority) {
+        const auto head = jojo::psx_bus_read_u32(runtime.bus,
+            excb_address.value + priority * 8u);
+        const auto unused = jojo::psx_bus_read_u32(runtime.bus,
+            excb_address.value + priority * 8u + 4u);
+        CHECK(head.reason == jojo::PsxBusAccessReason::ok);
+        CHECK(unused.reason == jojo::PsxBusAccessReason::ok);
+        CHECK(head.value == 0u);
+        CHECK(unused.value == 0u);
+    }
+}
+
 static void test_system_cnf_stack_overrides_exe_stack_and_zero_falls_back() {
     {
         jojo::PsxRuntime runtime{};
@@ -222,6 +249,7 @@ static void test_bios_b0_get_c0_table_materializes_scph1001_patch_surface() {
 
 int main() {
     test_loader_copies_payload_and_initializes_boot_registers();
+    test_loader_materializes_scph1001_exception_control_blocks();
     test_system_cnf_stack_overrides_exe_stack_and_zero_falls_back();
     test_runtime_fetches_and_executes_instructions_from_ram();
     test_loader_rejects_payload_outside_main_ram_window();
