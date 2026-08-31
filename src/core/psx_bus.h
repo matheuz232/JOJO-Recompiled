@@ -34,6 +34,7 @@ struct PsxBus {
     static constexpr std::size_t scratchpad_size = 1024u;
     static constexpr std::uint32_t interrupt_status_address = 0x1f801070u;
     static constexpr std::uint32_t interrupt_mask_address = 0x1f801074u;
+    static constexpr std::uint32_t dma2_channel_control_address = 0x1f8010a8u;
     static constexpr std::uint32_t dma_control_address = 0x1f8010f0u;
     static constexpr std::uint32_t dma_interrupt_address = 0x1f8010f4u;
     static constexpr std::uint32_t timer1_current_address = 0x1f801110u;
@@ -45,6 +46,8 @@ struct PsxBus {
     static constexpr std::uint16_t interrupt_status_valid_bits = 0x07ffu;
     static constexpr std::uint16_t interrupt_mask_valid_bits = 0x07ffu;
     static constexpr std::uint16_t timer_mode_valid_bits = 0x1fffu;
+    static constexpr std::uint32_t dma2_channel_control_mask = 0x71770703u;
+    static constexpr std::uint32_t dma_channel_start_busy = 1u << 24u;
     static constexpr std::uint32_t dma_interrupt_control_mask = 0x00ff807fu;
     static constexpr std::uint32_t dma_interrupt_flag_mask = 0x7f000000u;
     static constexpr std::uint32_t dma_interrupt_master_enable = 0x00800000u;
@@ -55,6 +58,7 @@ struct PsxBus {
     std::array<std::uint8_t, scratchpad_size> scratchpad{};
     std::uint16_t interrupt_status{};
     std::uint16_t interrupt_mask{};
+    std::uint32_t dma2_channel_control{};
     std::uint32_t dma_control{};
     std::uint32_t dma_interrupt{};
     std::uint16_t timer1_current{};
@@ -200,6 +204,9 @@ struct PsxBus {
 [[nodiscard]] inline PsxBusReadU32Result psx_bus_read_u32(const PsxBus& bus,
                                                            std::uint32_t address) noexcept {
     if ((address & 3u) != 0u) return {PsxBusAccessReason::misaligned, 0u};
+    if (address == PsxBus::dma2_channel_control_address) {
+        return {PsxBusAccessReason::ok, bus.dma2_channel_control};
+    }
     if (address == PsxBus::dma_control_address) {
         return {PsxBusAccessReason::ok, bus.dma_control};
     }
@@ -297,6 +304,15 @@ struct PsxBus {
                                                            std::uint32_t address,
                                                            std::uint32_t value) noexcept {
     if ((address & 3u) != 0u) return PsxBusAccessReason::misaligned;
+    if (address == PsxBus::dma2_channel_control_address) {
+        // This frontier is configuration only. A start/busy write must not be
+        // acknowledged until DMA2 transfer execution is implemented.
+        if ((value & PsxBus::dma_channel_start_busy) != 0u) {
+            return PsxBusAccessReason::unmapped;
+        }
+        bus.dma2_channel_control = value & PsxBus::dma2_channel_control_mask;
+        return PsxBusAccessReason::ok;
+    }
     if (address == PsxBus::dma_control_address) {
         bus.dma_control = value;
         return PsxBusAccessReason::ok;
