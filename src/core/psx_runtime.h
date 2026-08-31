@@ -195,6 +195,17 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
 
 [[nodiscard]] inline PsxR3000aStepResult step_psx_runtime(PsxRuntime& runtime) noexcept {
     const auto instruction_pc = runtime.cpu.pc;
+
+    if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x44u) {
+        // FlushCache invalidates the physical PS1 instruction cache. The
+        // reference interpreter has no separate code cache: every fetch reads
+        // coherent RAM through PsxBus. Therefore there is no cached state to
+        // invalidate here. A future PS1 native/block-cache backend must attach
+        // real invalidation to this BIOS boundary before it can claim support.
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
     if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x49u) {
         const auto write_reason = psx_bus_write_u32(
             runtime.bus, PsxBus::gpu_gp0_address, runtime.cpu.gpr[4]);
