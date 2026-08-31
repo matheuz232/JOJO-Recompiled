@@ -342,6 +342,10 @@ struct PsxBus {
     }
     if (address == PsxBus::gpu_gp1_address) {
         const auto command = static_cast<std::uint8_t>(value >> 24u);
+        if (command == 0x00u) {
+            bus.gpu_status = PsxBus::gpu_status_reset;
+            return PsxBusAccessReason::ok;
+        }
         if (command != 0x03u) return PsxBusAccessReason::unmapped;
         if ((value & 1u) != 0u) {
             bus.gpu_status |= PsxBus::gpu_status_display_disabled;
