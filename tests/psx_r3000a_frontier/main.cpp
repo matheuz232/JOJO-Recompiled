@@ -1,3 +1,4 @@
+#include "core/psx_diagnostics.h"
 #include "core/psx_r3000a.h"
 #include "core/psx_runtime.h"
 #include <cstdint>
