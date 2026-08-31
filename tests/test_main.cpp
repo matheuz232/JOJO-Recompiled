@@ -248,11 +248,24 @@ static void test_psx_conversion_materializes_prepared_runtime() {
     }
     CHECK(fs::exists(install / "data" / "SYSTEM.CNF"));
     CHECK(fs::exists(install / "data" / "PSX.EXE"));
+    const auto prepared_disc = install / "data" / "DISC.ISO";
+    CHECK(fs::exists(prepared_disc));
 
     fs::remove(source, ec);
     CHECK(!fs::exists(source));
     const auto boot = jojo::bootstrap_runtime(install);
     CHECK(boot);
+
+    const auto prepared_image = jojo::open_iso9660(prepared_disc);
+    CHECK(prepared_image);
+    if (prepared_image) {
+        const auto prepared_system = jojo::read_iso9660_file(prepared_image.value, "/SYSTEM.CNF");
+        const auto prepared_executable = jojo::read_iso9660_file(prepared_image.value, "/SLUS_010.60");
+        CHECK(prepared_system);
+        CHECK(prepared_executable);
+        if (prepared_system) CHECK(prepared_system.value == system.value);
+        if (prepared_executable) CHECK(prepared_executable.value == executable.value);
+    }
 
     fs::remove_all(install, ec);
 }
