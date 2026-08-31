@@ -33,17 +33,39 @@ static void test_commercial_integer_frontier() {
     cpu.gpr[5] = 0x33330000u;
     CHECK(jojo::step_psx_r3000a(cpu, encode_i(0x0d, 5, 5, 0x3333u)).reason == jojo::PsxR3000aStepReason::ok);
     CHECK(cpu.gpr[5] == 0x33333333u);
+    CHECK(cpu.pc == 0x8003c678u);
+    CHECK(cpu.next_pc == 0x8003c67cu);
+
+    jojo::reset_psx_r3000a(cpu, 0x80001000u);
+    cpu.gpr[2] = 0x12340000u;
+    CHECK(jojo::step_psx_r3000a(cpu, encode_i(0x0d, 2, 3, 0xffffu)).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.gpr[3] == 0x1234ffffu);
 
     jojo::reset_psx_r3000a(cpu, 0x8003c948u);
     cpu.gpr[3] = 0x89abcdefu;
     CHECK(jojo::step_psx_r3000a(cpu, encode_i(0x0c, 3, 19, 0xffffu)).reason == jojo::PsxR3000aStepReason::ok);
     CHECK(cpu.gpr[19] == 0x0000cdefu);
+    CHECK(cpu.pc == 0x8003c94cu);
+    CHECK(cpu.next_pc == 0x8003c950u);
+
+    jojo::reset_psx_r3000a(cpu, 0x80001000u);
+    cpu.gpr[2] = 0xffff0000u;
+    CHECK(jojo::step_psx_r3000a(cpu, encode_i(0x0c, 2, 3, 0x8001u)).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.gpr[3] == 0u);
 
     jojo::reset_psx_r3000a(cpu, 0x8003c950u);
     cpu.gpr[17] = 4u;
     cpu.gpr[3] = 1u;
     CHECK(jojo::step_psx_r3000a(cpu, encode_r(17, 3, 3, 0, 0x04)).reason == jojo::PsxR3000aStepReason::ok);
     CHECK(cpu.gpr[3] == 0x10u);
+    CHECK(cpu.pc == 0x8003c954u);
+    CHECK(cpu.next_pc == 0x8003c958u);
+
+    jojo::reset_psx_r3000a(cpu, 0x80001000u);
+    cpu.gpr[2] = 0x21u;
+    cpu.gpr[3] = 3u;
+    CHECK(jojo::step_psx_r3000a(cpu, encode_r(2, 3, 4, 0, 0x04)).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.gpr[4] == 6u);
 
     jojo::reset_psx_r3000a(cpu, 0x8003c964u);
     cpu.gpr[31] = 0x12345678u;
@@ -51,6 +73,12 @@ static void test_commercial_integer_frontier() {
     CHECK(cpu.gpr[31] == 0x12345678u);
     CHECK(cpu.pc == 0x8003c968u);
     CHECK(cpu.next_pc == 0x8003c98cu);
+    CHECK(jojo::step_psx_r3000a(cpu, 0u).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.pc == 0x8003c98cu);
+
+    jojo::reset_psx_r3000a(cpu, 0x9ffffffcu);
+    CHECK(jojo::step_psx_r3000a(cpu, encode_j(0x02u, 1u)).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.next_pc == 0xa0000004u);
 }
 
 static void test_gpu_gp0_and_gpu_cw() {
@@ -66,6 +94,7 @@ static void test_gpu_gp0_and_gpu_cw() {
     CHECK(jojo::step_psx_runtime(runtime).reason == jojo::PsxR3000aStepReason::ok);
     CHECK(runtime.cpu.gpr[2] == 0u);
     CHECK(runtime.cpu.pc == 0x8003ca10u);
+    CHECK(runtime.cpu.next_pc == 0x8003ca14u);
 }
 
 static void test_change_clear_pad() {
@@ -80,6 +109,15 @@ static void test_change_clear_pad() {
     CHECK(!runtime.bios.pad_card_irq_completes);
     CHECK(runtime.cpu.gpr[2] == 0x13579bdfu);
     CHECK(runtime.cpu.pc == 0x8003c9a0u);
+    CHECK(runtime.cpu.next_pc == 0x8003c9a4u);
+
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
+    runtime.cpu.gpr[4] = 1u;
+    runtime.cpu.gpr[9] = 0x5bu;
+    runtime.cpu.gpr[31] = 0x8003c9b0u;
+    CHECK(jojo::step_psx_runtime(runtime).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.bios.pad_card_irq_completes);
+    CHECK(runtime.cpu.pc == 0x8003c9b0u);
 }
 
 static void test_change_clear_rcnt() {
@@ -94,6 +132,17 @@ static void test_change_clear_rcnt() {
     CHECK(runtime.cpu.gpr[2] == 1u);
     CHECK(!runtime.bios.timer_vblank_irq_auto_ack[3]);
     CHECK(runtime.cpu.pc == 0x8003c9acu);
+    CHECK(runtime.cpu.next_pc == 0x8003c9b0u);
+
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000c0u);
+    runtime.cpu.gpr[4] = 3u;
+    runtime.cpu.gpr[5] = 1u;
+    runtime.cpu.gpr[9] = 0x0au;
+    runtime.cpu.gpr[31] = 0x8003c9bcu;
+    CHECK(jojo::step_psx_runtime(runtime).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 0u);
+    CHECK(runtime.bios.timer_vblank_irq_auto_ack[3]);
+    CHECK(runtime.cpu.pc == 0x8003c9bcu);
 }
 
 static void test_broken_96_remove_leaves_cdrom_irq_chain_installed() {
