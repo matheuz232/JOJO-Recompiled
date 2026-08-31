@@ -1,5 +1,6 @@
 #include "core/psx_bus.h"
 #include "core/psx_r3000a.h"
+#include "core/psx_runtime.h"
 #include <cstdint>
 #include <iostream>
 
@@ -52,6 +53,22 @@ int main() {
     CHECK(cpu.gpr[2] == 0xaaaaaaaau);
     CHECK(jojo::step_psx_r3000a(cpu, 0u, bus).reason == jojo::PsxR3000aStepReason::ok);
     CHECK((cpu.gpr[2] & 0xffffu) == 0x3456u);
+
+    // JoJo configures Timer 1 mode=0100h, selecting HBlank as its clock.
+    // On an NTSC PS1, 3413 video clocks per scanline at 53.693175 MHz are
+    // approximately 2152.866 CPU clocks at 33.8688 MHz. Runtime execution must
+    // therefore leave the counter at zero through 2152 one-cycle instructions
+    // and increment it on the next cycle instead of freezing forever.
+    jojo::PsxRuntime runtime{};
+    jojo::reset_psx_r3000a(runtime.cpu, 0x80010000u);
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, 0x1f801114u, 0x00000100u) ==
+          jojo::PsxBusAccessReason::ok);
+    for (std::uint32_t i = 0; i < 2152u; ++i) {
+        CHECK(jojo::step_psx_runtime(runtime).reason == jojo::PsxR3000aStepReason::ok);
+    }
+    CHECK(jojo::psx_bus_read_u16(runtime.bus, 0x1f801110u).value == 0u);
+    CHECK(jojo::step_psx_runtime(runtime).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(jojo::psx_bus_read_u16(runtime.bus, 0x1f801110u).value == 1u);
 
     if (failures) return 1;
     std::cout << "PSX Timer 1 mode MMIO assertions passed\n";
