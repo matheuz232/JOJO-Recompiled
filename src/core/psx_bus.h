@@ -64,7 +64,13 @@ struct PsxBus {
     static constexpr std::uint32_t gpu_status_display_disabled = 1u << 23u;
     static constexpr std::uint16_t interrupt_status_valid_bits = 0x07ffu;
     static constexpr std::uint16_t interrupt_mask_valid_bits = 0x07ffu;
-    static constexpr std::uint16_t timer_mode_valid_bits = 0x1fffu;
+    static constexpr std::uint16_t timer_mode_guest_bits = 0x1fffu;
+    // Bit 15 never reaches guest reads. It is an internal write epoch so the
+    // runtime can observe a MODE rewrite even when the architectural value is
+    // unchanged and restart Timer 1's fractional source phase.
+    static constexpr std::uint16_t timer_mode_write_epoch = 0x8000u;
+    static constexpr std::uint16_t timer_mode_valid_bits =
+        timer_mode_guest_bits | timer_mode_write_epoch;
     static constexpr std::uint32_t dma2_channel_control_mask = 0x71770703u;
     static constexpr std::uint32_t dma_channel_start_busy = 1u << 24u;
     static constexpr std::uint32_t dma_interrupt_control_mask = 0x00ff807fu;
@@ -286,7 +292,7 @@ inline void psx_bus_latch_cdrom_irq_rising_edge(PsxBus& bus,
     }
     if (address == PsxBus::timer1_mode_address) {
         return {PsxBusAccessReason::ok,
-                static_cast<std::uint16_t>(bus.timer1_mode & PsxBus::timer_mode_valid_bits)};
+                static_cast<std::uint16_t>(bus.timer1_mode & PsxBus::timer_mode_guest_bits)};
     }
 
     std::size_t scratchpad_offset = 0;
@@ -451,7 +457,11 @@ inline void psx_bus_latch_cdrom_irq_rising_edge(PsxBus& bus,
         return PsxBusAccessReason::ok;
     }
     if (address == PsxBus::timer1_mode_address) {
-        bus.timer1_mode = static_cast<std::uint16_t>(value & PsxBus::timer_mode_valid_bits);
+        const auto next_epoch = static_cast<std::uint16_t>(
+            (bus.timer1_mode ^ PsxBus::timer_mode_write_epoch) &
+            PsxBus::timer_mode_write_epoch);
+        bus.timer1_mode = static_cast<std::uint16_t>(
+            (value & PsxBus::timer_mode_guest_bits) | next_epoch);
         bus.timer1_current = 0u;
         return PsxBusAccessReason::ok;
     }
