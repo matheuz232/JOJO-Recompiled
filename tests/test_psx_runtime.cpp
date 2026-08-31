@@ -36,9 +36,9 @@ static std::vector<std::uint8_t> synthetic_exe(std::uint32_t load = 0x80010000u,
     le32(file, 0x30u, 0x801ff000u);
     le32(file, 0x34u, 0x100u);
 
-    le32(file, 0x800u + 0u, encode_i(0x0f, 0, 2, 0x8006u));      // LUI r2,8006
-    le32(file, 0x800u + 4u, encode_i(0x09, 2, 2, 0x36d8u));      // ADDIU r2,r2,36d8
-    le32(file, 0x800u + 8u, encode_i(0x2b, 2, 3, 0xfffcu));      // SW r3,-4(r2)
+    le32(file, 0x800u + 0u, encode_i(0x0f, 0, 2, 0x8006u));
+    le32(file, 0x800u + 4u, encode_i(0x09, 2, 2, 0x36d8u));
+    le32(file, 0x800u + 8u, encode_i(0x2b, 2, 3, 0xfffcu));
     return file;
 }
 
@@ -55,13 +55,11 @@ static void test_loader_copies_payload_and_initializes_boot_registers() {
     const auto loaded = jojo::load_psx_boot_executable(runtime, file, synthetic_cnf());
     CHECK(loaded);
     if (!loaded) return;
-
     CHECK(runtime.cpu.pc == 0x80010000u);
     CHECK(runtime.cpu.next_pc == 0x80010004u);
     CHECK(runtime.cpu.gpr[28] == 0x80020000u);
     CHECK(runtime.cpu.gpr[29] == 0x801fff00u);
     CHECK(runtime.cpu.gpr[30] == 0x801fff00u);
-
     const auto first = jojo::psx_bus_read_u32(runtime.bus, 0x80010000u);
     CHECK(first.reason == jojo::PsxBusAccessReason::ok);
     CHECK(first.value == encode_i(0x0f, 0, 2, 0x8006u));
@@ -70,8 +68,7 @@ static void test_loader_copies_payload_and_initializes_boot_registers() {
 static void test_system_cnf_stack_overrides_exe_stack_and_zero_falls_back() {
     {
         jojo::PsxRuntime runtime{};
-        const auto loaded = jojo::load_psx_boot_executable(runtime, synthetic_exe(),
-                                                            synthetic_cnf(0x801ffe00u));
+        const auto loaded = jojo::load_psx_boot_executable(runtime, synthetic_exe(), synthetic_cnf(0x801ffe00u));
         CHECK(loaded);
         if (loaded) {
             CHECK(runtime.cpu.gpr[29] == 0x801ffe00u);
@@ -80,8 +77,7 @@ static void test_system_cnf_stack_overrides_exe_stack_and_zero_falls_back() {
     }
     {
         jojo::PsxRuntime runtime{};
-        const auto loaded = jojo::load_psx_boot_executable(runtime, synthetic_exe(),
-                                                            synthetic_cnf(0u));
+        const auto loaded = jojo::load_psx_boot_executable(runtime, synthetic_exe(), synthetic_cnf(0u));
         CHECK(loaded);
         if (loaded) {
             CHECK(runtime.cpu.gpr[29] == 0x801ff100u);
@@ -96,15 +92,12 @@ static void test_runtime_fetches_and_executes_instructions_from_ram() {
     CHECK(loaded);
     if (!loaded) return;
     runtime.cpu.gpr[3] = 0xdeadbeefu;
-
     CHECK(jojo::step_psx_runtime(runtime).reason == jojo::PsxR3000aStepReason::ok);
     CHECK(runtime.cpu.gpr[2] == 0x80060000u);
     CHECK(runtime.cpu.pc == 0x80010004u);
-
     CHECK(jojo::step_psx_runtime(runtime).reason == jojo::PsxR3000aStepReason::ok);
     CHECK(runtime.cpu.gpr[2] == 0x800636d8u);
     CHECK(runtime.cpu.pc == 0x80010008u);
-
     CHECK(jojo::step_psx_runtime(runtime).reason == jojo::PsxR3000aStepReason::ok);
     const auto stored = jojo::psx_bus_read_u32(runtime.bus, 0x800636d4u);
     CHECK(stored.reason == jojo::PsxBusAccessReason::ok);
@@ -135,7 +128,6 @@ static void test_bios_vectors_are_boundaries_not_executable_ram() {
         jojo::PsxRuntime runtime{};
         jojo::reset_psx_r3000a(runtime.cpu, vector);
         runtime.cpu.gpr[9] = 0x7fu;
-
         const auto result = jojo::step_psx_runtime(runtime);
         CHECK(result.reason == jojo::PsxR3000aStepReason::unsupported_instruction);
         CHECK(runtime.cpu.pc == vector);
@@ -150,7 +142,6 @@ static void test_bios_a0_init_heap_initializes_hle_state_and_returns_to_ra() {
     runtime.cpu.gpr[5] = 0x00040000u;
     runtime.cpu.gpr[9] = 0x39u;
     runtime.cpu.gpr[31] = 0x80012340u;
-
     const auto result = jojo::step_psx_runtime(runtime);
     CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
     CHECK(runtime.bios.heap_initialized);
@@ -167,7 +158,6 @@ static void test_bios_b0_hook_entry_int_records_context_pointer_and_returns_to_r
     runtime.cpu.gpr[4] = 0x800616f0u;
     runtime.cpu.gpr[9] = 0x19u;
     runtime.cpu.gpr[31] = 0x8003c6c4u;
-
     const auto result = jojo::step_psx_runtime(runtime);
     CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
     CHECK(runtime.bios.entry_interrupt_hook_installed);
@@ -175,6 +165,33 @@ static void test_bios_b0_hook_entry_int_records_context_pointer_and_returns_to_r
     CHECK(runtime.cpu.pc == 0x8003c6c4u);
     CHECK(runtime.cpu.next_pc == 0x8003c6c8u);
     CHECK(runtime.cpu.gpr[31] == 0x8003c6c4u);
+}
+
+static void test_bios_b0_get_c0_table_materializes_scph1001_patch_surface() {
+    jojo::PsxRuntime runtime{};
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
+    runtime.cpu.gpr[9] = 0x56u;
+    runtime.cpu.gpr[31] = 0x8003c140u;
+
+    const auto result = jojo::step_psx_runtime(runtime);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 0x00000674u);
+    CHECK(runtime.cpu.pc == 0x8003c140u);
+    CHECK(runtime.cpu.next_pc == 0x8003c144u);
+
+    const auto exception_entry = jojo::psx_bus_read_u32(runtime.bus, 0x0000068cu);
+    CHECK(exception_entry.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(exception_entry.value == 0x00000c80u);
+
+    constexpr std::uint32_t expected[] = {
+        0xaf410004u, 0xaf420008u, 0xaf43000cu,
+        0xaf5f007cu, 0x40037000u, 0x00000000u,
+    };
+    for (std::uint32_t i = 0; i < 6u; ++i) {
+        const auto word = jojo::psx_bus_read_u32(runtime.bus, 0x00000ca8u + i * 4u);
+        CHECK(word.reason == jojo::PsxBusAccessReason::ok);
+        CHECK(word.value == expected[i]);
+    }
 }
 
 int main() {
@@ -186,6 +203,7 @@ int main() {
     test_bios_vectors_are_boundaries_not_executable_ram();
     test_bios_a0_init_heap_initializes_hle_state_and_returns_to_ra();
     test_bios_b0_hook_entry_int_records_context_pointer_and_returns_to_ra();
+    test_bios_b0_get_c0_table_materializes_scph1001_patch_surface();
     if (failures) return 1;
     std::cout << "PS-X EXE runtime loading/fetch assertions passed\n";
     return 0;
