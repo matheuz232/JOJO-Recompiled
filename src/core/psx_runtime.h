@@ -22,13 +22,7 @@ struct PsxBiosState {
     std::uint32_t entry_interrupt_hook_address{};
     bool pad_card_irq_completes{true};
     std::array<bool, 4> timer_vblank_irq_auto_ack{true, true, true, true};
-    // The retail BIOS initializes its CD-ROM interrupt handlers before handing
-    // control to the boot executable. _96_remove attempts to dequeue them but
-    // is ineffective because the BIOS SysDeqIntRP path is broken.
     bool cdrom_irq_handlers_installed{true};
-    // The runtime starts at the boot executable rather than executing the ROM
-    // boot sequence. Materialize the small, game-observed SCPH-1001 C0 table
-    // surface once, then leave any game-applied patches intact.
     bool c0_table_materialized{};
 };
 
@@ -100,10 +94,6 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
 }
 
 [[nodiscard]] inline bool restore_scph1001_default_entry_interrupt(PsxRuntime& runtime) noexcept {
-    // Decoded from the user's SCPH1001.BIN. The retail kernel's ResetEntryInt
-    // at RAM 00000F2Ch stores 00006CF4h as EntryInt and returns that pointer.
-    // The 30h-byte jmp_buf at 00006CF4h contains ReturnFromException (00000F40h),
-    // the exception stack pointer 000085D4h, then FP/S0-S7/GP all zero.
     constexpr std::uint32_t default_entry_address = 0x00006cf4u;
     constexpr std::array<std::uint32_t, 12> default_exit_structure{
         0x00000f40u, 0x000085d4u, 0u, 0u, 0u, 0u,
@@ -135,10 +125,6 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
         0xaf5f007cu, 0x40037000u, 0x00000000u,
     };
 
-    // C(06h) is the retail exception-handler entry used by commercial BIOS
-    // compatibility patches. Only the C0 slot and handler words actually
-    // observed by SLUS_010.60 are materialized; unobserved table entries are
-    // intentionally not fabricated.
     if (psx_bus_write_u32(runtime.bus, c0_table_address + 6u * 4u,
                           exception_handler_address) != PsxBusAccessReason::ok) {
         return false;
@@ -180,9 +166,6 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     const bool is_read = rs == 0x00u || rs == 0x02u;
     const bool is_write = rs == 0x04u || rs == 0x06u;
 
-    // Valid COP2 commands and other GTE operations remain explicit frontiers;
-    // do not misreport them as Reserved Instruction until their semantics are
-    // implemented and exercised by real media.
     if (!canonical_move || (!is_read && !is_write)) {
         return {PsxR3000aStepReason::unsupported_instruction,
                 instruction_pc, instruction};
@@ -231,29 +214,25 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     constexpr std::uint32_t interrupt_mask_bit_2 = 1u << 10u;
     constexpr std::uint32_t critical_bits = previous_interrupt_enable | interrupt_mask_bit_2;
 
-    // The retail kernel has additional bookkeeping for a syscall in a branch
-    // delay slot. Do not claim support for that path until it is required and
-    // tested from real media.
     if ((runtime.cpu.cop0.cause & branch_delay_bit) != 0u) return false;
 
     switch (runtime.cpu.gpr[4]) {
-    case 0u: // SYS(00h) NoFunction
+    case 0u:
         break;
-    case 1u: { // SYS(01h) EnterCriticalSection
+    case 1u: {
         const bool both_were_enabled =
             (runtime.cpu.cop0.status & critical_bits) == critical_bits;
         runtime.cpu.cop0.status &= ~critical_bits;
         runtime.cpu.gpr[2] = both_were_enabled ? 1u : 0u;
         break;
     }
-    case 2u: // SYS(02h) ExitCriticalSection
+    case 2u:
         runtime.cpu.cop0.status |= critical_bits;
         break;
     default:
         return false;
     }
 
-    // BIOS ReturnFromException executes RFE after advancing past the syscall.
     runtime.cpu.cop0.status = (runtime.cpu.cop0.status & ~0x0fu) |
                               ((runtime.cpu.cop0.status >> 2u) & 0x0fu);
     const auto return_pc = runtime.cpu.cop0.epc + 4u;
@@ -269,11 +248,6 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     const auto instruction_pc = runtime.cpu.pc;
 
     if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x44u) {
-        // FlushCache invalidates the physical PS1 instruction cache. The
-        // reference interpreter has no separate code cache: every fetch reads
-        // coherent RAM through PsxBus. Therefore there is no cached state to
-        // invalidate here. A future PS1 native/block-cache backend must attach
-        // real invalidation to this BIOS boundary before it can claim support.
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
@@ -298,9 +272,6 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     }
 
     if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x72u) {
-        // Retail BIOS behavior: _96_remove() is a void routine whose attempt
-        // to remove the CD-ROM priority-0 handlers fails through SysDeqIntRP.
-        // The installed-chain state therefore remains unchanged.
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
@@ -316,6 +287,33 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x19u) {
         runtime.bios.entry_interrupt_hook_installed = true;
         runtime.bios.entry_interrupt_hook_address = runtime.cpu.gpr[4];
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x35u) {
+        const auto fd = runtime.cpu.gpr[4];
+        const auto source = runtime.cpu.gpr[5];
+        const auto length = runtime.cpu.gpr[6];
+        if (fd != 1u) {
+            return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, 0u};
+        }
+
+        const auto end = static_cast<std::uint64_t>(source) +
+                         static_cast<std::uint64_t>(length);
+        if (end > (std::uint64_t{1} << 32u)) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
+        for (std::uint32_t i = 0; i < length; ++i) {
+            if (psx_bus_read_u8(runtime.bus, source + i).reason !=
+                PsxBusAccessReason::ok) {
+                return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+            }
+        }
+
+        // Retail boot leaves std_out mounted on Dummy-TTY: bytes are consumed
+        // but intentionally produce no hardware-visible output.
+        runtime.cpu.gpr[2] = length;
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
