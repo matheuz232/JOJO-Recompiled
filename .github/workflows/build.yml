@@ -38,6 +38,12 @@ jobs:
         run: cmake --build build/psx_sysdeqintpr --parallel 2
       - name: Test PSX SysDeqIntRP contract
         run: ./build/psx_sysdeqintpr/jojo_psx_sysdeqintpr_tests
+      - name: Configure PSX SysEnqIntRP contract
+        run: cmake -S tests/psx_sysenqintpr -B build/psx_sysenqintpr -DCMAKE_BUILD_TYPE=Release
+      - name: Build PSX SysEnqIntRP contract
+        run: cmake --build build/psx_sysenqintpr --parallel 2
+      - name: Test PSX SysEnqIntRP contract
+        run: ./build/psx_sysenqintpr/jojo_psx_sysenqintpr_tests
       - name: Configure PSX DPCR contract
         run: cmake -S tests/psx_dma_control -B build/psx_dma_control -DCMAKE_BUILD_TYPE=Release
       - name: Build PSX DPCR contract
@@ -106,6 +112,12 @@ jobs:
         run: cmake --build build/psx_sysdeqintpr --config Release --parallel 2
       - name: Test PSX SysDeqIntRP contract
         run: .\build\psx_sysdeqintpr\Release\jojo_psx_sysdeqintpr_tests.exe
+      - name: Configure PSX SysEnqIntRP contract
+        run: cmake -S tests/psx_sysenqintpr -B build/psx_sysenqintpr -G "Visual Studio 17 2022" -A x64
+      - name: Build PSX SysEnqIntRP contract
+        run: cmake --build build/psx_sysenqintpr --config Release --parallel 2
+      - name: Test PSX SysEnqIntRP contract
+        run: .\build\psx_sysenqintpr\Release\jojo_psx_sysenqintpr_tests.exe
       - name: Configure PSX DPCR contract
         run: cmake -S tests/psx_dma_control -B build/psx_dma_control -G "Visual Studio 17 2022" -A x64
       - name: Build PSX DPCR contract
