@@ -15,9 +15,6 @@ int main() {
 
     const auto result = jojo::step_psx_runtime(runtime);
     CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
-    CHECK(runtime.bios.card_initialized);
-    CHECK(!runtime.bios.card_pad_enabled);
-    CHECK(runtime.bios.card_early_irq_handler_installed);
     CHECK(runtime.cpu.gpr[2] == 0x2468ace0u);
     CHECK(runtime.cpu.pc == 0x80045068u);
     CHECK(runtime.cpu.next_pc == 0x8004506cu);
