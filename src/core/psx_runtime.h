@@ -14,6 +14,15 @@
 
 namespace jojo {
 
+struct PsxBiosEvent {
+    bool allocated{};
+    std::uint32_t event_class{};
+    std::uint32_t status{};
+    std::uint32_t spec{};
+    std::uint32_t mode{};
+    std::uint32_t callback{};
+};
+
 struct PsxBiosState {
     bool heap_initialized{};
     std::uint32_t heap_base{};
@@ -29,6 +38,10 @@ struct PsxBiosState {
     bool card_started{};
     bool card_pad_enabled{};
     bool early_card_irq_installed{};
+    static constexpr std::size_t max_events = 32u;
+    std::array<PsxBiosEvent, max_events> events{};
+    std::uint32_t event_capacity{0x10u};
+    bool event_table_initialized{};
 };
 
 struct PsxRuntime {
@@ -62,10 +75,20 @@ struct PsxRuntime {
                                      "PS-X EXE payload would wrap across mirrored main RAM");
     }
 
+    const auto requested_events = system.event == 0u ? 0x10u : system.event;
+    if (requested_events > PsxBiosState::max_events) {
+        return Result<void>::failure(ErrorCode::invalid_installation,
+                                     "SYSTEM.CNF requests more PS1 events than this runtime supports");
+    }
+
     std::fill(runtime.bus.ram.begin(), runtime.bus.ram.end(), std::uint8_t{0});
     for (std::size_t i = 0; i < payload_size; ++i) {
         runtime.bus.ram[static_cast<std::size_t>(physical_offset) + i] = file[header_size + i];
     }
+
+    runtime.bios.events.fill(PsxBiosEvent{});
+    runtime.bios.event_capacity = requested_events;
+    runtime.bios.event_table_initialized = false;
 
     reset_psx_r3000a(runtime.cpu, exe.initial_pc);
     runtime.cpu.gpr[28] = exe.initial_gp;
@@ -170,6 +193,58 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
 
     runtime.bios.b0_table_materialized = true;
     return true;
+}
+
+inline void initialize_scph1001_event_slots(PsxRuntime& runtime) noexcept {
+    if (runtime.bios.event_table_initialized) return;
+
+    constexpr std::array<std::uint32_t, 5> cdrom_specs{
+        0x10u, 0x20u, 0x40u, 0x80u, 0x8000u,
+    };
+    const auto reserved_count = std::min<std::uint32_t>(
+        static_cast<std::uint32_t>(cdrom_specs.size()), runtime.bios.event_capacity);
+    for (std::uint32_t i = 0; i < reserved_count; ++i) {
+        auto& event = runtime.bios.events[i];
+        event = PsxBiosEvent{};
+        event.allocated = true;
+        event.event_class = 0xf0000003u;
+        event.spec = cdrom_specs[i];
+    }
+    runtime.bios.event_table_initialized = true;
+}
+
+[[nodiscard]] inline std::uint32_t open_psx_bios_event(PsxRuntime& runtime) noexcept {
+    constexpr std::uint32_t disabled = 0x1000u;
+    constexpr std::uint32_t handle_base = 0xf1000000u;
+
+    initialize_scph1001_event_slots(runtime);
+    for (std::uint32_t i = 0; i < runtime.bios.event_capacity; ++i) {
+        auto& event = runtime.bios.events[i];
+        if (event.allocated) continue;
+
+        event.allocated = true;
+        event.event_class = runtime.cpu.gpr[4];
+        event.status = disabled;
+        event.spec = runtime.cpu.gpr[5];
+        event.mode = runtime.cpu.gpr[6];
+        event.callback = runtime.cpu.gpr[7];
+        return handle_base | i;
+    }
+    return 0xffffffffu;
+}
+
+inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noexcept {
+    constexpr std::uint32_t handle_mask = 0xffff0000u;
+    constexpr std::uint32_t handle_base = 0xf1000000u;
+    constexpr std::uint32_t enabled_busy = 0x2000u;
+
+    initialize_scph1001_event_slots(runtime);
+    if ((handle & handle_mask) != handle_base) return;
+    const auto index = handle & 0xffffu;
+    if (index >= runtime.bios.event_capacity) return;
+    auto& event = runtime.bios.events[index];
+    if (!event.allocated) return;
+    event.status = enabled_busy;
 }
 
 [[nodiscard]] inline PsxR3000aStepResult step_psx_gte_transfer(
@@ -308,6 +383,19 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     }
 
     if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x72u) {
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x08u) {
+        runtime.cpu.gpr[2] = open_psx_bios_event(runtime);
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x0cu) {
+        enable_psx_bios_event(runtime, runtime.cpu.gpr[4]);
+        runtime.cpu.gpr[2] = 1u;
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
