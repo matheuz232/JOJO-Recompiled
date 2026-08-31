@@ -39,6 +39,17 @@ struct PsxBus {
     static constexpr std::uint32_t dma_interrupt_address = 0x1f8010f4u;
     static constexpr std::uint32_t timer1_current_address = 0x1f801110u;
     static constexpr std::uint32_t timer1_mode_address = 0x1f801114u;
+    static constexpr std::uint32_t cdrom_base_address = 0x1f801800u;
+    static constexpr std::uint32_t cdrom_end_address = cdrom_base_address + 3u;
+    static constexpr std::uint8_t cdrom_bank_mask = 0x03u;
+    static constexpr std::uint8_t cdrom_interrupt_bits = 0x1fu;
+    static constexpr std::uint8_t cdrom_read_reserved_bits = 0xe0u;
+    static constexpr std::uint8_t cdrom_hsts_parameter_empty = 1u << 3u;
+    static constexpr std::uint8_t cdrom_hsts_parameter_write_ready = 1u << 4u;
+    static constexpr std::uint8_t cdrom_clear_parameters = 1u << 6u;
+    static constexpr std::uint8_t cdrom_decoder_reset = 1u << 7u;
+    static constexpr std::uint8_t cdrom_sound_map_clear = 1u << 5u;
+    static constexpr std::size_t cdrom_parameter_capacity = 16u;
     static constexpr std::uint32_t gpu_gp0_address = 0x1f801810u;
     static constexpr std::uint32_t gpu_gp1_address = 0x1f801814u;
     static constexpr std::uint32_t gpu_status_reset = 0x14802000u;
@@ -63,6 +74,11 @@ struct PsxBus {
     std::uint32_t dma_interrupt{};
     std::uint16_t timer1_current{};
     std::uint16_t timer1_mode{};
+    std::uint8_t cdrom_index{};
+    std::uint8_t cdrom_interrupt_enable{};
+    std::uint8_t cdrom_interrupt_flags{};
+    std::uint8_t cdrom_host_control{};
+    std::uint8_t cdrom_parameter_count{};
     std::uint32_t gpu_gp0_write_latch{};
     std::uint32_t gpu_read_latch{};
     std::uint32_t gpu_status{gpu_status_reset};
@@ -145,6 +161,17 @@ struct PsxBus {
     return PsxBusAccessReason::ok;
 }
 
+[[nodiscard]] inline std::uint8_t psx_bus_cdrom_hsts(const PsxBus& bus) noexcept {
+    auto value = static_cast<std::uint8_t>(bus.cdrom_index & PsxBus::cdrom_bank_mask);
+    if (bus.cdrom_parameter_count == 0u) {
+        value = static_cast<std::uint8_t>(value | PsxBus::cdrom_hsts_parameter_empty);
+    }
+    if (bus.cdrom_parameter_count < PsxBus::cdrom_parameter_capacity) {
+        value = static_cast<std::uint8_t>(value | PsxBus::cdrom_hsts_parameter_write_ready);
+    }
+    return value;
+}
+
 [[nodiscard]] inline PsxBusReadU8Result psx_bus_read_u8(const PsxBus& bus,
                                                          std::uint32_t address) noexcept {
     std::uint32_t physical = 0;
@@ -154,6 +181,22 @@ struct PsxBus {
     if (physical < PsxBus::default_ram_mirror_window) {
         const auto offset = static_cast<std::size_t>(physical & (PsxBus::main_ram_size - 1u));
         return {PsxBusAccessReason::ok, bus.ram[offset]};
+    }
+
+    if (physical == PsxBus::cdrom_base_address) {
+        return {PsxBusAccessReason::ok, psx_bus_cdrom_hsts(bus)};
+    }
+    if (physical == PsxBus::cdrom_base_address + 3u) {
+        if ((bus.cdrom_index & 1u) != 0u) {
+            return {PsxBusAccessReason::ok,
+                    static_cast<std::uint8_t>(PsxBus::cdrom_read_reserved_bits |
+                                              (bus.cdrom_interrupt_flags &
+                                               PsxBus::cdrom_interrupt_bits))};
+        }
+        return {PsxBusAccessReason::ok,
+                static_cast<std::uint8_t>(PsxBus::cdrom_read_reserved_bits |
+                                          (bus.cdrom_interrupt_enable &
+                                           PsxBus::cdrom_interrupt_bits))};
     }
 
     std::size_t offset = 0;
@@ -262,6 +305,36 @@ struct PsxBus {
     if (physical < PsxBus::default_ram_mirror_window) {
         const auto offset = static_cast<std::size_t>(physical & (PsxBus::main_ram_size - 1u));
         bus.ram[offset] = value;
+        return PsxBusAccessReason::ok;
+    }
+
+    if (physical == PsxBus::cdrom_base_address) {
+        bus.cdrom_index = static_cast<std::uint8_t>(value & PsxBus::cdrom_bank_mask);
+        return PsxBusAccessReason::ok;
+    }
+    if (physical == PsxBus::cdrom_base_address + 2u && bus.cdrom_index == 1u) {
+        bus.cdrom_interrupt_enable =
+            static_cast<std::uint8_t>(value & PsxBus::cdrom_interrupt_bits);
+        return PsxBusAccessReason::ok;
+    }
+    if (physical == PsxBus::cdrom_base_address + 3u && bus.cdrom_index == 1u) {
+        if ((value & (PsxBus::cdrom_sound_map_clear | PsxBus::cdrom_decoder_reset)) != 0u) {
+            return PsxBusAccessReason::unmapped;
+        }
+        bus.cdrom_interrupt_flags = static_cast<std::uint8_t>(
+            bus.cdrom_interrupt_flags &
+            static_cast<std::uint8_t>(~(value & PsxBus::cdrom_interrupt_bits)));
+        if ((value & PsxBus::cdrom_clear_parameters) != 0u) {
+            bus.cdrom_parameter_count = 0u;
+        }
+        return PsxBusAccessReason::ok;
+    }
+    if (physical == PsxBus::cdrom_base_address + 3u && bus.cdrom_index == 0u) {
+        // The real JoJo initialization path writes HCHPCTL=0. Data-buffer and
+        // sound-map requests remain explicit until their transfer semantics are
+        // implemented instead of being acknowledged as inert latches.
+        if (value != 0u) return PsxBusAccessReason::unmapped;
+        bus.cdrom_host_control = 0u;
         return PsxBusAccessReason::ok;
     }
 
