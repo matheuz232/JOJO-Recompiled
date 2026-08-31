@@ -356,6 +356,13 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
 
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x4bu) {
+        runtime.bios.card_started = true;
+        runtime.cpu.gpr[2] = 1u;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
     if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x56u) {
         constexpr std::uint32_t c0_table_address = 0x00000674u;
         if (!materialize_scph1001_c0_patch_surface(runtime)) {
