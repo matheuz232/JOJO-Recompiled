@@ -39,6 +39,9 @@ struct PsxBus {
     static constexpr std::uint32_t timer1_current_address = 0x1f801110u;
     static constexpr std::uint32_t timer1_mode_address = 0x1f801114u;
     static constexpr std::uint32_t gpu_gp0_address = 0x1f801810u;
+    static constexpr std::uint32_t gpu_gp1_address = 0x1f801814u;
+    static constexpr std::uint32_t gpu_status_reset = 0x14802000u;
+    static constexpr std::uint32_t gpu_status_display_disabled = 1u << 23u;
     static constexpr std::uint16_t interrupt_status_valid_bits = 0x07ffu;
     static constexpr std::uint16_t interrupt_mask_valid_bits = 0x07ffu;
     static constexpr std::uint16_t timer_mode_valid_bits = 0x1fffu;
@@ -57,6 +60,7 @@ struct PsxBus {
     std::uint16_t timer1_current{};
     std::uint16_t timer1_mode{};
     std::uint32_t gpu_gp0_write_latch{};
+    std::uint32_t gpu_status{gpu_status_reset};
 };
 
 [[nodiscard]] inline std::uint32_t psx_bus_dma_interrupt_value(const PsxBus& bus) noexcept {
@@ -202,6 +206,9 @@ struct PsxBus {
     if (address == PsxBus::dma_interrupt_address) {
         return {PsxBusAccessReason::ok, psx_bus_dma_interrupt_value(bus)};
     }
+    if (address == PsxBus::gpu_gp1_address) {
+        return {PsxBusAccessReason::ok, bus.gpu_status};
+    }
 
     std::size_t scratchpad_offset = 0;
     if (psx_bus_scratchpad_offset(address, 4u, scratchpad_offset) ==
@@ -315,6 +322,16 @@ struct PsxBus {
     }
     if (address == PsxBus::gpu_gp0_address) {
         bus.gpu_gp0_write_latch = value;
+        return PsxBusAccessReason::ok;
+    }
+    if (address == PsxBus::gpu_gp1_address) {
+        const auto command = static_cast<std::uint8_t>(value >> 24u);
+        if (command != 0x03u) return PsxBusAccessReason::unmapped;
+        if ((value & 1u) != 0u) {
+            bus.gpu_status |= PsxBus::gpu_status_display_disabled;
+        } else {
+            bus.gpu_status &= ~PsxBus::gpu_status_display_disabled;
+        }
         return PsxBusAccessReason::ok;
     }
 
