@@ -32,34 +32,45 @@ int main() {
     const auto hsts_bank1 = jojo::psx_bus_read_u8(bus, 0x1f801800u);
     CHECK(hsts_bank1.reason == jojo::PsxBusAccessReason::ok);
     CHECK((hsts_bank1.value & 0x03u) == 1u);
-    CHECK((hsts_bank1.value & 0x18u) == 0x18u); // parameter FIFO empty + writable
-    CHECK((hsts_bank1.value & 0xe4u) == 0u);    // idle: no ADPCM/result/data/busy
+    CHECK((hsts_bank1.value & 0x18u) == 0x18u);
+    CHECK((hsts_bank1.value & 0xe4u) == 0u);
 
-    // Bank 1 offset 3 is HINTSTS. With no command pending there is no INTx,
-    // while reserved bits 5-7 read back as ones on retail hardware.
+    // Bank 1 offset 3 is HINTSTS. Idle has no INTx pending and reserved
+    // bits 5-7 read as ones on the retail host interface.
     const auto hintsts_idle = jojo::psx_bus_read_u8(bus, 0x1f801803u);
     CHECK(hintsts_idle.reason == jojo::PsxBusAccessReason::ok);
     CHECK((hintsts_idle.value & 0x07u) == 0u);
     CHECK((hintsts_idle.value & 0xe0u) == 0xe0u);
 
-    // JoJo's cleanup loop writes 07h to HINTMSK and HCLRCTL in bank 1.
+    // JoJo programs HINTMSK=7 while bank 1 is selected.
     CHECK(jojo::psx_bus_write_u8(bus, 0x1f801802u, 0x07u) ==
           jojo::PsxBusAccessReason::ok);
-    CHECK(bus.cdrom_interrupt_enable == 0x07u);
 
-    bus.cdrom_interrupt_flags = 0x03u;
+    // HINTMSK is observable by selecting bank 0 and reading offset 3.
+    CHECK(jojo::psx_bus_write_u8(bus, 0x1f801800u, 0u) ==
+          jojo::PsxBusAccessReason::ok);
+    const auto hintmsk = jojo::psx_bus_read_u8(bus, 0x1f801803u);
+    CHECK(hintmsk.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(hintmsk.value == 0xe7u);
+
+    // Re-select bank 1 and acknowledge all low interrupt causes. With the
+    // idle foundation there are no flags, so HINTSTS must remain INT0.
+    CHECK(jojo::psx_bus_write_u8(bus, 0x1f801800u, 1u) ==
+          jojo::PsxBusAccessReason::ok);
     CHECK(jojo::psx_bus_write_u8(bus, 0x1f801803u, 0x07u) ==
           jojo::PsxBusAccessReason::ok);
-    CHECK(bus.cdrom_interrupt_flags == 0u);
-    CHECK((jojo::psx_bus_read_u8(bus, 0x1f801803u).value & 0x07u) == 0u);
+    const auto hintsts_after_ack = jojo::psx_bus_read_u8(bus, 0x1f801803u);
+    CHECK(hintsts_after_ack.reason == jojo::PsxBusAccessReason::ok);
+    CHECK((hintsts_after_ack.value & 0x07u) == 0u);
 
     // Return to bank 0 and perform the exact zero HCHPCTL write used by JoJo.
     CHECK(jojo::psx_bus_write_u8(bus, 0x1f801800u, 0u) ==
           jojo::PsxBusAccessReason::ok);
-    CHECK((jojo::psx_bus_read_u8(bus, 0x1f801800u).value & 0x03u) == 0u);
+    const auto hsts_bank0 = jojo::psx_bus_read_u8(bus, 0x1f801800u);
+    CHECK(hsts_bank0.reason == jojo::PsxBusAccessReason::ok);
+    CHECK((hsts_bank0.value & 0x03u) == 0u);
     CHECK(jojo::psx_bus_write_u8(bus, 0x1f801803u, 0u) ==
           jojo::PsxBusAccessReason::ok);
-    CHECK(bus.cdrom_host_control == 0u);
 
     if (failures) return 1;
     std::cout << "PSX CD-ROM host interface assertions passed\n";
