@@ -1,5 +1,6 @@
 #include "core/iso9660.h"
 #include "core/psx_boot.h"
+#include "core/psx_diagnostics.h"
 #include "core/psx_revision.h"
 #include "core/psx_runtime.h"
 #include "core/revision.h"
@@ -38,6 +39,23 @@ void print_bios_context(const jojo::PsxRuntime& runtime, std::uint32_t pc) {
     std::cout << "a2=" << runtime.cpu.gpr[6] << '\n';
     std::cout << "a3=" << runtime.cpu.gpr[7] << '\n';
     std::cout << "ra=" << runtime.cpu.gpr[31] << '\n';
+    std::cout << std::dec << std::noshowbase;
+}
+
+void print_exception_context(const jojo::PsxRuntime& runtime,
+                             const jojo::PsxR3000aStepResult& result) {
+    if (result.reason != jojo::PsxR3000aStepReason::exception) return;
+
+    std::cout << "exception_code="
+              << jojo::psx_r3000a_exception_code_name(result.exception_code) << '\n';
+    std::cout << "branch_delay_slot="
+              << (jojo::psx_r3000a_exception_in_branch_delay_slot(runtime.cpu) ? 1 : 0)
+              << '\n';
+    std::cout << std::hex << std::showbase;
+    std::cout << "cop0_cause=" << runtime.cpu.cop0.cause << '\n';
+    std::cout << "cop0_epc=" << runtime.cpu.cop0.epc << '\n';
+    std::cout << "cop0_badvaddr=" << runtime.cpu.cop0.bad_vaddr << '\n';
+    std::cout << "cop0_status=" << runtime.cpu.cop0.status << '\n';
     std::cout << std::dec << std::noshowbase;
 }
 
@@ -141,6 +159,7 @@ int main(int argc, char** argv) {
             std::cout << "reason=" << step_reason_name(result.reason) << '\n';
             std::cout << std::hex << std::showbase << "stop_pc=" << instruction_pc << '\n';
             std::cout << std::dec << std::noshowbase;
+            print_exception_context(runtime, result);
             print_instruction_context(runtime, instruction_pc);
             return 0;
         }
