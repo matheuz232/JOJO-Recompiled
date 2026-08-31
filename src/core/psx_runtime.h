@@ -18,6 +18,7 @@ struct PsxBiosState {
     std::uint32_t heap_size{};
     bool entry_interrupt_hook_installed{};
     std::uint32_t entry_interrupt_hook_address{};
+    bool pad_card_irq_completes{true};
 };
 
 struct PsxRuntime {
@@ -110,6 +111,12 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x19u) {
         runtime.bios.entry_interrupt_hook_installed = true;
         runtime.bios.entry_interrupt_hook_address = runtime.cpu.gpr[4];
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x5bu) {
+        runtime.bios.pad_card_irq_completes = runtime.cpu.gpr[4] != 0u;
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
