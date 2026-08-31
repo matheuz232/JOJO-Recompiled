@@ -192,6 +192,17 @@ static void test_bios_b0_get_c0_table_materializes_scph1001_patch_surface() {
         CHECK(word.reason == jojo::PsxBusAccessReason::ok);
         CHECK(word.value == expected[i]);
     }
+
+    // The game patches this handler after obtaining the table. A later
+    // GetC0Table call must only return the pointer, not restore BIOS bytes.
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, 0x00000cb0u, 0x40026800u) ==
+          jojo::PsxBusAccessReason::ok);
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
+    runtime.cpu.gpr[9] = 0x56u;
+    runtime.cpu.gpr[31] = 0x80040000u;
+    CHECK(jojo::step_psx_runtime(runtime).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 0x00000674u);
+    CHECK(jojo::psx_bus_read_u32(runtime.bus, 0x00000cb0u).value == 0x40026800u);
 }
 
 int main() {
