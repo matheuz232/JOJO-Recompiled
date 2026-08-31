@@ -328,6 +328,22 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
     return PsxBusAccessReason::ok;
 }
 
+[[nodiscard]] inline PsxBusAccessReason enqueue_scph1001_interrupt_handler(
+    PsxRuntime& runtime,
+    std::uint32_t priority,
+    std::uint32_t node) noexcept {
+    const auto excb_base = psx_bus_read_u32(runtime.bus, 0x00000100u);
+    if (excb_base.reason != PsxBusAccessReason::ok) return excb_base.reason;
+
+    const auto entry_address = excb_base.value + priority * 8u;
+    const auto old_head = psx_bus_read_u32(runtime.bus, entry_address);
+    if (old_head.reason != PsxBusAccessReason::ok) return old_head.reason;
+
+    const auto head_write = psx_bus_write_u32(runtime.bus, entry_address, node);
+    if (head_write != PsxBusAccessReason::ok) return head_write;
+    return psx_bus_write_u32(runtime.bus, node, old_head.value);
+}
+
 [[nodiscard]] inline PsxR3000aStepResult step_psx_gte_transfer(
     PsxRuntime& runtime, std::uint32_t instruction) noexcept {
     constexpr std::uint32_t cop2_enable = 1u << 30u;
@@ -565,6 +581,24 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
 
     if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x5bu) {
         runtime.bios.pad_card_irq_completes = runtime.cpu.gpr[4] != 0u;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000c0u && runtime.cpu.gpr[9] == 0x02u) {
+        const auto priority = runtime.cpu.gpr[4];
+        const auto node = runtime.cpu.gpr[5];
+        if (priority > 3u) {
+            return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, 0u};
+        }
+
+        const auto enqueue_reason = enqueue_scph1001_interrupt_handler(
+            runtime, priority, node);
+        if (enqueue_reason != PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
+
+        runtime.cpu.gpr[2] = 0u;
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
