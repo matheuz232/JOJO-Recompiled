@@ -93,6 +93,46 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     runtime.cpu.gpr[0] = 0u;
 }
 
+[[nodiscard]] inline bool handle_psx_syscall_exception(PsxRuntime& runtime) noexcept {
+    constexpr std::uint32_t branch_delay_bit = 0x80000000u;
+    constexpr std::uint32_t previous_interrupt_enable = 1u << 2u;
+    constexpr std::uint32_t interrupt_mask_bit_2 = 1u << 10u;
+    constexpr std::uint32_t critical_bits = previous_interrupt_enable | interrupt_mask_bit_2;
+
+    // The retail kernel has additional bookkeeping for a syscall in a branch
+    // delay slot. Do not claim support for that path until it is required and
+    // tested from real media.
+    if ((runtime.cpu.cop0.cause & branch_delay_bit) != 0u) return false;
+
+    switch (runtime.cpu.gpr[4]) {
+    case 0u: // SYS(00h) NoFunction
+        break;
+    case 1u: { // SYS(01h) EnterCriticalSection
+        const bool both_were_enabled =
+            (runtime.cpu.cop0.status & critical_bits) == critical_bits;
+        runtime.cpu.cop0.status &= ~critical_bits;
+        runtime.cpu.gpr[2] = both_were_enabled ? 1u : 0u;
+        break;
+    }
+    case 2u: // SYS(02h) ExitCriticalSection
+        runtime.cpu.cop0.status |= critical_bits;
+        break;
+    default:
+        return false;
+    }
+
+    // BIOS ReturnFromException executes RFE after advancing past the syscall.
+    runtime.cpu.cop0.status = (runtime.cpu.cop0.status & ~0x0fu) |
+                              ((runtime.cpu.cop0.status >> 2u) & 0x0fu);
+    const auto return_pc = runtime.cpu.cop0.epc + 4u;
+    runtime.cpu.pc = return_pc;
+    runtime.cpu.next_pc = return_pc + 4u;
+    runtime.cpu.current_instruction_is_branch_delay_slot = false;
+    runtime.cpu.branch_pc = 0u;
+    runtime.cpu.gpr[0] = 0u;
+    return true;
+}
+
 [[nodiscard]] inline PsxR3000aStepResult step_psx_runtime(PsxRuntime& runtime) noexcept {
     const auto instruction_pc = runtime.cpu.pc;
     if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x49u) {
@@ -156,7 +196,14 @@ inline void return_from_psx_bios_call(PsxRuntime& runtime) noexcept {
     if (fetched.reason != PsxBusAccessReason::ok) {
         return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
     }
-    return step_psx_r3000a(runtime.cpu, fetched.value, runtime.bus);
+
+    const auto stepped = step_psx_r3000a(runtime.cpu, fetched.value, runtime.bus);
+    if (stepped.reason == PsxR3000aStepReason::exception &&
+        stepped.exception_code == PsxR3000aExceptionCode::syscall &&
+        handle_psx_syscall_exception(runtime)) {
+        return {PsxR3000aStepReason::ok, stepped.instruction_pc, stepped.instruction};
+    }
+    return stepped;
 }
 
 }
