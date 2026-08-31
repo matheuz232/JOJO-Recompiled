@@ -152,6 +152,23 @@ static void test_bios_a0_init_heap_initializes_hle_state_and_returns_to_ra() {
     CHECK(runtime.cpu.gpr[31] == 0x80012340u);
 }
 
+static void test_bios_a0_flush_cache_is_coherent_reference_barrier() {
+    jojo::PsxRuntime runtime{};
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, 0x00001000u, 0x11223344u) ==
+          jojo::PsxBusAccessReason::ok);
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000a0u);
+    runtime.cpu.gpr[2] = 0xcafebabeu;
+    runtime.cpu.gpr[9] = 0x44u;
+    runtime.cpu.gpr[31] = 0x8003c1b0u;
+
+    const auto result = jojo::step_psx_runtime(runtime);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 0xcafebabeu);
+    CHECK(runtime.cpu.pc == 0x8003c1b0u);
+    CHECK(runtime.cpu.next_pc == 0x8003c1b4u);
+    CHECK(jojo::psx_bus_read_u32(runtime.bus, 0x80001000u).value == 0x11223344u);
+}
+
 static void test_bios_b0_hook_entry_int_records_context_pointer_and_returns_to_ra() {
     jojo::PsxRuntime runtime{};
     jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
@@ -193,8 +210,6 @@ static void test_bios_b0_get_c0_table_materializes_scph1001_patch_surface() {
         CHECK(word.value == expected[i]);
     }
 
-    // The game patches this handler after obtaining the table. A later
-    // GetC0Table call must only return the pointer, not restore BIOS bytes.
     CHECK(jojo::psx_bus_write_u32(runtime.bus, 0x00000cb0u, 0x40026800u) ==
           jojo::PsxBusAccessReason::ok);
     jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
@@ -213,6 +228,7 @@ int main() {
     test_fetch_fault_is_explicit_and_does_not_advance_pc();
     test_bios_vectors_are_boundaries_not_executable_ram();
     test_bios_a0_init_heap_initializes_hle_state_and_returns_to_ra();
+    test_bios_a0_flush_cache_is_coherent_reference_barrier();
     test_bios_b0_hook_entry_int_records_context_pointer_and_returns_to_ra();
     test_bios_b0_get_c0_table_materializes_scph1001_patch_surface();
     if (failures) return 1;
