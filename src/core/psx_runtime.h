@@ -247,6 +247,25 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
     event.status = enabled_busy;
 }
 
+[[nodiscard]] inline std::uint32_t test_psx_bios_event(
+    PsxRuntime& runtime, std::uint32_t handle) noexcept {
+    constexpr std::uint32_t handle_mask = 0xffff0000u;
+    constexpr std::uint32_t handle_base = 0xf1000000u;
+    constexpr std::uint32_t enabled_busy = 0x2000u;
+    constexpr std::uint32_t enabled_ready = 0x4000u;
+
+    initialize_scph1001_event_slots(runtime);
+    if ((handle & handle_mask) != handle_base) return 0u;
+    const auto index = handle & 0xffffu;
+    if (index >= runtime.bios.event_capacity) return 0u;
+    auto& event = runtime.bios.events[index];
+    if (!event.allocated) return 0u;
+    if (event.status != enabled_ready) return 0u;
+
+    event.status = enabled_busy;
+    return 1u;
+}
+
 [[nodiscard]] inline PsxR3000aStepResult step_psx_gte_transfer(
     PsxRuntime& runtime, std::uint32_t instruction) noexcept {
     constexpr std::uint32_t cop2_enable = 1u << 30u;
@@ -389,6 +408,12 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
 
     if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x08u) {
         runtime.cpu.gpr[2] = open_psx_bios_event(runtime);
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x0bu) {
+        runtime.cpu.gpr[2] = test_psx_bios_event(runtime, runtime.cpu.gpr[4]);
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
