@@ -294,6 +294,40 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
     return 1u;
 }
 
+[[nodiscard]] inline PsxBusAccessReason dequeue_scph1001_interrupt_handler(
+    PsxRuntime& runtime,
+    std::uint32_t priority,
+    std::uint32_t requested,
+    std::uint32_t& removed) noexcept {
+    removed = 0u;
+
+    const auto excb_base = psx_bus_read_u32(runtime.bus, 0x00000100u);
+    if (excb_base.reason != PsxBusAccessReason::ok) return excb_base.reason;
+
+    std::uint32_t link_address = excb_base.value + priority * 8u;
+    const auto first = psx_bus_read_u32(runtime.bus, link_address);
+    if (first.reason != PsxBusAccessReason::ok) return first.reason;
+
+    auto current = first.value;
+    while (current != 0u) {
+        if (current == requested) {
+            const auto next = psx_bus_read_u32(runtime.bus, current);
+            if (next.reason != PsxBusAccessReason::ok) return next.reason;
+            const auto write = psx_bus_write_u32(runtime.bus, link_address, next.value);
+            if (write != PsxBusAccessReason::ok) return write;
+            removed = current;
+            return PsxBusAccessReason::ok;
+        }
+
+        const auto next = psx_bus_read_u32(runtime.bus, current);
+        if (next.reason != PsxBusAccessReason::ok) return next.reason;
+        link_address = current;
+        current = next.value;
+    }
+
+    return PsxBusAccessReason::ok;
+}
+
 [[nodiscard]] inline PsxR3000aStepResult step_psx_gte_transfer(
     PsxRuntime& runtime, std::uint32_t instruction) noexcept {
     constexpr std::uint32_t cop2_enable = 1u << 30u;
@@ -542,37 +576,16 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
             return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, 0u};
         }
 
-        const auto excb_base = psx_bus_read_u32(runtime.bus, 0x00000100u);
-        if (excb_base.reason != PsxBusAccessReason::ok) {
-            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
-        }
-        const auto entry_address = excb_base.value + priority * 8u;
-        const auto head = psx_bus_read_u32(runtime.bus, entry_address);
-        if (head.reason != PsxBusAccessReason::ok) {
+        std::uint32_t removed = 0u;
+        const auto dequeue_reason = dequeue_scph1001_interrupt_handler(
+            runtime, priority, requested, removed);
+        if (dequeue_reason != PsxBusAccessReason::ok) {
             return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
         }
 
-        if (head.value == 0u) {
-            runtime.cpu.gpr[2] = 0u;
-            return_from_psx_bios_call(runtime);
-            return {PsxR3000aStepReason::ok, instruction_pc, 0u};
-        }
-
-        if (head.value == requested) {
-            const auto next = psx_bus_read_u32(runtime.bus, requested);
-            if (next.reason != PsxBusAccessReason::ok ||
-                psx_bus_write_u32(runtime.bus, entry_address, next.value) != PsxBusAccessReason::ok) {
-                return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
-            }
-            runtime.cpu.gpr[2] = requested;
-            return_from_psx_bios_call(runtime);
-            return {PsxR3000aStepReason::ok, instruction_pc, 0u};
-        }
-
-        // SCPH-1001's deeper-chain search uses uninitialized stack data. Keep
-        // that unproven path explicit rather than silently implementing an
-        // idealized linked-list removal that the retail BIOS does not perform.
-        return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, 0u};
+        runtime.cpu.gpr[2] = removed;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
 
     if (instruction_pc == 0x000000c0u && runtime.cpu.gpr[9] == 0x0au) {
