@@ -649,6 +649,10 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
     }
 
     const auto stepped = step_psx_r3000a(runtime.cpu, fetched.value, runtime.bus);
+    if (stepped.reason == PsxR3000aStepReason::ok ||
+        stepped.reason == PsxR3000aStepReason::exception) {
+        psx_bus_tick(runtime.bus, 1u);
+    }
     if (stepped.reason == PsxR3000aStepReason::exception &&
         stepped.exception_code == PsxR3000aExceptionCode::syscall &&
         handle_psx_syscall_exception(runtime)) {

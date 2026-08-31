@@ -83,6 +83,7 @@ struct PsxBus {
     std::uint32_t dma_interrupt{};
     std::uint16_t timer1_current{};
     std::uint16_t timer1_mode{};
+    std::uint64_t timer1_hblank_phase{};
     std::uint8_t cdrom_index{};
     std::uint8_t cdrom_interrupt_enable{};
     std::uint8_t cdrom_interrupt_flags{};
@@ -453,6 +454,7 @@ inline void psx_bus_latch_cdrom_irq_rising_edge(PsxBus& bus,
     if (address == PsxBus::timer1_mode_address) {
         bus.timer1_mode = static_cast<std::uint16_t>(value & PsxBus::timer_mode_valid_bits);
         bus.timer1_current = 0u;
+        bus.timer1_hblank_phase = 0u;
         return PsxBusAccessReason::ok;
     }
 
@@ -561,6 +563,28 @@ inline void psx_bus_latch_cdrom_irq_rising_edge(PsxBus& bus,
     bus.ram[offset + 2u] = static_cast<std::uint8_t>(value >> 16u);
     bus.ram[offset + 3u] = static_cast<std::uint8_t>(value >> 24u);
     return PsxBusAccessReason::ok;
+}
+
+inline void psx_bus_tick(PsxBus& bus, std::uint32_t cpu_cycles) noexcept {
+    constexpr std::uint16_t timer1_hblank_clock = 1u << 8u;
+    if ((bus.timer1_mode & timer1_hblank_clock) == 0u) return;
+
+    // NTSC PS1 timings: the CPU runs at 33.8688 MHz and one scanline spans
+    // 3413 ticks of the 53.693175 MHz video clock. Keeping the fractional
+    // phase prevents long-running drift that a rounded 2153-cycle period
+    // would introduce.
+    constexpr std::uint64_t cpu_clock_hz = 33'868'800u;
+    constexpr std::uint64_t video_clock_hz = 53'693'175u;
+    constexpr std::uint64_t video_clocks_per_scanline = 3'413u;
+    constexpr std::uint64_t phase_per_hblank =
+        cpu_clock_hz * video_clocks_per_scanline;
+
+    bus.timer1_hblank_phase +=
+        static_cast<std::uint64_t>(cpu_cycles) * video_clock_hz;
+    while (bus.timer1_hblank_phase >= phase_per_hblank) {
+        bus.timer1_hblank_phase -= phase_per_hblank;
+        bus.timer1_current = static_cast<std::uint16_t>(bus.timer1_current + 1u);
+    }
 }
 
 }

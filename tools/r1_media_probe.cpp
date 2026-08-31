@@ -12,7 +12,7 @@
 
 namespace {
 
-constexpr std::uint64_t execution_limit = 10000000u;
+constexpr std::uint64_t execution_limit = 100000000u;
 
 const char* step_reason_name(jojo::PsxR3000aStepReason reason) noexcept {
     switch (reason) {
@@ -167,6 +167,10 @@ int main(int argc, char** argv) {
 
     std::cout << "executed=" << execution_limit << '\n';
     std::cout << "reason=limit\n";
+    std::cout << std::hex << std::showbase;
+    std::cout << "timer1_mode=" << runtime.bus.timer1_mode << '\n';
+    std::cout << "timer1_current=" << runtime.bus.timer1_current << '\n';
+    std::cout << std::dec << std::noshowbase;
     std::cout << std::hex << std::showbase << "stop_pc=" << runtime.cpu.pc << '\n';
     std::cout << std::dec << std::noshowbase;
     print_instruction_context(runtime, runtime.cpu.pc);
