@@ -95,7 +95,61 @@ int main() {
     CHECK(runtime.cpu.pc == 0x80044fe0u);
     CHECK(runtime.cpu.next_pc == 0x80044fe4u);
 
+    // Exact commercial sequence after _bu_init: eight callback events are opened.
+    // SCPH-1001's C0(04h) allocator scans EvCBs from slot zero upward; five slots
+    // are already occupied by the BIOS CD-ROM events, so the game receives 5..12.
+    constexpr std::uint32_t event_class[] = {
+        0xf4000001u, 0xf4000001u, 0xf4000001u, 0xf4000001u,
+        0xf0000011u, 0xf0000011u, 0xf0000011u, 0xf0000011u,
+    };
+    constexpr std::uint32_t event_spec[] = {
+        0x00000004u, 0x00008000u, 0x00000100u, 0x00002000u,
+        0x00000004u, 0x00008000u, 0x00000100u, 0x00002000u,
+    };
+    constexpr std::uint32_t event_callback[] = {
+        0x80047ad0u, 0x80047ae4u, 0x80047af8u, 0x80047b0cu,
+        0x80047b20u, 0x80047b34u, 0x80047b48u, 0x80047b5cu,
+    };
+    constexpr std::uint32_t open_return[] = {
+        0x80047bd0u, 0x80047bf4u, 0x80047c18u, 0x80047c3cu,
+        0x80047c60u, 0x80047c84u, 0x80047ca8u, 0x80047cccu,
+    };
+    std::uint32_t handles[8]{};
+    for (std::uint32_t i = 0; i < 8u; ++i) {
+        jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
+        runtime.cpu.gpr[4] = event_class[i];
+        runtime.cpu.gpr[5] = event_spec[i];
+        runtime.cpu.gpr[6] = 0x00001000u;
+        runtime.cpu.gpr[7] = event_callback[i];
+        runtime.cpu.gpr[9] = 0x08u;
+        runtime.cpu.gpr[31] = open_return[i];
+        const auto opened = jojo::step_psx_runtime(runtime);
+        CHECK(opened.reason == jojo::PsxR3000aStepReason::ok);
+        handles[i] = runtime.cpu.gpr[2];
+        CHECK(handles[i] == 0xf1000005u + i);
+        CHECK(runtime.cpu.pc == open_return[i]);
+        CHECK(runtime.cpu.next_pc == open_return[i] + 4u);
+    }
+
+    // The same routine immediately enables all eight handles through B0(0Ch).
+    constexpr std::uint32_t enable_return[] = {
+        0x80047ce0u, 0x80047cf0u, 0x80047d00u, 0x80047d10u,
+        0x80047d20u, 0x80047d30u, 0x80047d40u, 0x80047d50u,
+    };
+    for (std::uint32_t i = 0; i < 8u; ++i) {
+        jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
+        runtime.cpu.gpr[4] = handles[i];
+        runtime.cpu.gpr[9] = 0x0cu;
+        runtime.cpu.gpr[31] = enable_return[i];
+        runtime.cpu.gpr[2] = 0u;
+        const auto enabled = jojo::step_psx_runtime(runtime);
+        CHECK(enabled.reason == jojo::PsxR3000aStepReason::ok);
+        CHECK(runtime.cpu.gpr[2] == 1u);
+        CHECK(runtime.cpu.pc == enable_return[i]);
+        CHECK(runtime.cpu.next_pc == enable_return[i] + 4u);
+    }
+
     if (failures) return 1;
-    std::cout << "PSX card/GetB0Table/StartCARD2/_bu_init frontier assertions passed\n";
+    std::cout << "PSX card and kernel-event frontier assertions passed\n";
     return 0;
 }
