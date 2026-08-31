@@ -247,6 +247,35 @@ static void test_bios_b0_get_c0_table_materializes_scph1001_patch_surface() {
     CHECK(jojo::psx_bus_read_u32(runtime.bus, 0x00000cb0u).value == 0x40026800u);
 }
 
+static void test_bios_c0_sysdeqintpr_matches_real_jojo_empty_priority2_frontier() {
+    jojo::PsxRuntime runtime{};
+    auto system = synthetic_cnf();
+    system.event = 0x16u;
+    const auto loaded = jojo::load_psx_boot_executable(runtime, synthetic_exe(), system);
+    CHECK(loaded);
+    if (!loaded) return;
+
+    const auto excb_base = jojo::psx_bus_read_u32(runtime.bus, 0x00000100u);
+    CHECK(excb_base.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(excb_base.value == 0xa000e004u);
+    const auto priority2_entry = excb_base.value + 2u * 8u;
+    CHECK(jojo::psx_bus_read_u32(runtime.bus, priority2_entry).value == 0u);
+
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000c0u);
+    runtime.cpu.gpr[4] = 2u;
+    runtime.cpu.gpr[5] = 0x8006364cu;
+    runtime.cpu.gpr[9] = 0x03u;
+    runtime.cpu.gpr[31] = 0x80050944u;
+    runtime.cpu.gpr[2] = 0xfeedfaceu;
+
+    const auto result = jojo::step_psx_runtime(runtime);
+    CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 0u);
+    CHECK(runtime.cpu.pc == 0x80050944u);
+    CHECK(runtime.cpu.next_pc == 0x80050948u);
+    CHECK(jojo::psx_bus_read_u32(runtime.bus, priority2_entry).value == 0u);
+}
+
 int main() {
     test_loader_copies_payload_and_initializes_boot_registers();
     test_loader_materializes_scph1001_exception_control_blocks();
@@ -259,6 +288,7 @@ int main() {
     test_bios_a0_flush_cache_is_coherent_reference_barrier();
     test_bios_b0_hook_entry_int_records_context_pointer_and_returns_to_ra();
     test_bios_b0_get_c0_table_materializes_scph1001_patch_surface();
+    test_bios_c0_sysdeqintpr_matches_real_jojo_empty_priority2_frontier();
     if (failures) return 1;
     std::cout << "PS-X EXE runtime loading/fetch assertions passed\n";
     return 0;
