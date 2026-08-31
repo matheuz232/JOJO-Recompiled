@@ -16,8 +16,8 @@ Result<std::vector<std::uint8_t>> read_binary_file(const std::filesystem::path& 
             ErrorCode::invalid_installation,
             "prepared runtime file is missing: " + path.string());
     }
-    std::vector<std::uint8_t> bytes(
-        std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    std::vector<std::uint8_t> bytes{
+        std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
     if (!in.eof() && in.fail()) {
         return Result<std::vector<std::uint8_t>>::failure(
             ErrorCode::io_error,
