@@ -535,6 +535,46 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
 
+    if (instruction_pc == 0x000000c0u && runtime.cpu.gpr[9] == 0x03u) {
+        const auto priority = runtime.cpu.gpr[4];
+        const auto requested = runtime.cpu.gpr[5];
+        if (priority > 3u) {
+            return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, 0u};
+        }
+
+        const auto excb_base = psx_bus_read_u32(runtime.bus, 0x00000100u);
+        if (excb_base.reason != PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
+        const auto entry_address = excb_base.value + priority * 8u;
+        const auto head = psx_bus_read_u32(runtime.bus, entry_address);
+        if (head.reason != PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
+
+        if (head.value == 0u) {
+            runtime.cpu.gpr[2] = 0u;
+            return_from_psx_bios_call(runtime);
+            return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+        }
+
+        if (head.value == requested) {
+            const auto next = psx_bus_read_u32(runtime.bus, requested);
+            if (next.reason != PsxBusAccessReason::ok ||
+                psx_bus_write_u32(runtime.bus, entry_address, next.value) != PsxBusAccessReason::ok) {
+                return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+            }
+            runtime.cpu.gpr[2] = requested;
+            return_from_psx_bios_call(runtime);
+            return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+        }
+
+        // SCPH-1001's deeper-chain search uses uninitialized stack data. Keep
+        // that unproven path explicit rather than silently implementing an
+        // idealized linked-list removal that the retail BIOS does not perform.
+        return {PsxR3000aStepReason::unsupported_instruction, instruction_pc, 0u};
+    }
+
     if (instruction_pc == 0x000000c0u && runtime.cpu.gpr[9] == 0x0au) {
         const auto timer = runtime.cpu.gpr[4];
         if (timer > 3u) {
