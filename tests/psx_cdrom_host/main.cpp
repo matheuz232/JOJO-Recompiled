@@ -72,6 +72,29 @@ int main() {
     CHECK(jojo::psx_bus_write_u8(bus, 0x1f801803u, 0u) ==
           jojo::PsxBusAccessReason::ok);
 
+    // Exact next JoJo frontier at 0x8004C628:
+    //   sw $v0,0($v1)   ; $v0=00001325h, $v1=1F801020h
+    // COM_DELAY stores the four 4-bit common timing values in bits 0-15;
+    // the upper half is unused and reads back as zero.
+    jojo::PsxR3000aState timing_cpu{};
+    jojo::reset_psx_r3000a(timing_cpu, 0x8004c628u);
+    timing_cpu.gpr[2] = 0x00001325u;
+    timing_cpu.gpr[3] = 0x1f801020u;
+    const auto write_com_delay = jojo::step_psx_r3000a(
+        timing_cpu, encode_i(0x2bu, 3u, 2u, 0u), bus);
+    CHECK(write_com_delay.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(timing_cpu.pc == 0x8004c62cu);
+
+    const auto com_delay = jojo::psx_bus_read_u32(bus, 0x1f801020u);
+    CHECK(com_delay.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(com_delay.value == 0x00001325u);
+
+    CHECK(jojo::psx_bus_write_u32(bus, 0x1f801020u, 0xabcd5678u) ==
+          jojo::PsxBusAccessReason::ok);
+    const auto masked_com_delay = jojo::psx_bus_read_u32(bus, 0x1f801020u);
+    CHECK(masked_com_delay.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(masked_com_delay.value == 0x00005678u);
+
     if (failures) return 1;
     std::cout << "PSX CD-ROM host interface assertions passed\n";
     return 0;
