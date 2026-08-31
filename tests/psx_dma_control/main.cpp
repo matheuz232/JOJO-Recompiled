@@ -104,6 +104,23 @@ int main() {
     CHECK(reset_status.reason == jojo::PsxBusAccessReason::ok);
     CHECK(reset_status.value == 0x14802000u);
 
+    // Real SLUS_010.60 frontier at 80038758h. GP1(10h).index7 on a v2 retail
+    // GPU latches version 2 into GPUREAD at 1F801810h, readable immediately.
+    jojo::reset_psx_r3000a(cpu, 0x80038758u);
+    cpu.gpr[2] = 0x1f801814u;
+    cpu.gpr[3] = 0x10000007u;
+    const auto gpu_version_request = jojo::step_psx_r3000a(
+        cpu, encode_i(0x2b, 2, 3, 0u), bus);
+    CHECK(gpu_version_request.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(cpu.pc == 0x8003875cu);
+    CHECK(cpu.next_pc == 0x80038760u);
+    const auto gpu_version = jojo::psx_bus_read_u32(bus, 0x1f801810u);
+    CHECK(gpu_version.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(gpu_version.value == 2u);
+    const auto gpu_version_again = jojo::psx_bus_read_u32(bus, 0x1f801810u);
+    CHECK(gpu_version_again.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(gpu_version_again.value == 2u);
+
     if (failures) return 1;
     std::cout << "PSX DMA and GP1 MMIO assertions passed\n";
     return 0;
