@@ -2,6 +2,7 @@
 #include "core/psx_runtime.h"
 #include <cstdint>
 #include <iostream>
+#include <string_view>
 
 static int failures = 0;
 #define CHECK(expr) do { if (!(expr)) { std::cerr << __FILE__ << ':' << __LINE__ << " CHECK failed: " #expr "\n"; ++failures; } } while (0)
@@ -124,6 +125,21 @@ static void test_bios_a0_gpu_cw_returns_after_sending_gp0_command() {
     CHECK(runtime.cpu.next_pc == 0x8003ca14u);
 }
 
+static void test_exception_diagnostic_names_are_stable() {
+    CHECK(std::string_view(jojo::psx_r3000a_exception_code_name(
+              jojo::PsxR3000aExceptionCode::interrupt)) == "interrupt");
+    CHECK(std::string_view(jojo::psx_r3000a_exception_code_name(
+              jojo::PsxR3000aExceptionCode::address_error_load)) == "address_error_load");
+    CHECK(std::string_view(jojo::psx_r3000a_exception_code_name(
+              jojo::PsxR3000aExceptionCode::address_error_store)) == "address_error_store");
+    CHECK(std::string_view(jojo::psx_r3000a_exception_code_name(
+              jojo::PsxR3000aExceptionCode::reserved_instruction)) == "reserved_instruction");
+    CHECK(std::string_view(jojo::psx_r3000a_exception_code_name(
+              jojo::PsxR3000aExceptionCode::overflow)) == "overflow");
+    CHECK(std::string_view(jojo::psx_r3000a_exception_code_name(
+              jojo::PsxR3000aExceptionCode::none)) == "none");
+}
+
 int main() {
     test_ori_zero_extends_immediate_and_advances();
     test_andi_zero_extends_immediate_and_advances();
@@ -131,6 +147,7 @@ int main() {
     test_j_preserves_delay_slot_and_uses_pc_high_nibble();
     test_gpu_gp0_mmio_port_accepts_command_words();
     test_bios_a0_gpu_cw_returns_after_sending_gp0_command();
+    test_exception_diagnostic_names_are_stable();
     if (failures) return 1;
     std::cout << "R3000A commercial frontier assertions passed\n";
     return 0;
