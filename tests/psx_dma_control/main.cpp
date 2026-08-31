@@ -57,7 +57,24 @@ int main() {
     CHECK((dicr_acked.value & (1u << 23u)) != 0u);
     CHECK((dicr_acked.value & (1u << 18u)) != 0u);
 
+    const auto gpu_reset = jojo::psx_bus_read_u32(bus, 0x1f801814u);
+    CHECK(gpu_reset.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(gpu_reset.value == 0x14802000u);
+
+    CHECK(jojo::psx_bus_write_u32(bus, 0x1f801814u, 0x03000000u) ==
+          jojo::PsxBusAccessReason::ok);
+    const auto display_on = jojo::psx_bus_read_u32(bus, 0x1f801814u);
+    CHECK(display_on.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(display_on.value == 0x14002000u);
+
+    // Real SLUS_010.60 frontier: GP1(03h), parameter 1 = display disabled.
+    CHECK(jojo::psx_bus_write_u32(bus, 0x1f801814u, 0x03000001u) ==
+          jojo::PsxBusAccessReason::ok);
+    const auto display_off = jojo::psx_bus_read_u32(bus, 0x1f801814u);
+    CHECK(display_off.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(display_off.value == 0x14802000u);
+
     if (failures) return 1;
-    std::cout << "PSX DPCR/DICR MMIO assertions passed\n";
+    std::cout << "PSX DPCR/DICR and GP1 display MMIO assertions passed\n";
     return 0;
 }
