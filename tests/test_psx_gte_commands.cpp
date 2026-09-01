@@ -11,11 +11,16 @@ static std::uint32_t pack_sxy(std::int16_t x, std::int16_t y) {
            (static_cast<std::uint32_t>(static_cast<std::uint16_t>(y)) << 16u);
 }
 
+static void prepare_runtime(jojo::PsxRuntime& runtime,
+                            std::uint32_t pc = 0x80010000u) {
+    jojo::reset_psx_r3000a(runtime.cpu, pc);
+    runtime.cpu.cop0.status |= 1u << 30u;
+}
+
 static jojo::PsxR3000aStepResult run_command(jojo::PsxRuntime& runtime,
                                               std::uint32_t instruction) {
     constexpr std::uint32_t pc = 0x80010000u;
-    jojo::reset_psx_r3000a(runtime.cpu, pc);
-    runtime.cpu.cop0.status |= 1u << 30u;
+    prepare_runtime(runtime, pc);
     CHECK(jojo::psx_bus_write_u32(runtime.bus, pc, instruction) ==
           jojo::PsxBusAccessReason::ok);
     return jojo::step_psx_runtime(runtime);
@@ -60,10 +65,93 @@ static void test_avsz4_saturates_otz_to_unsigned_16_bit() {
     CHECK(runtime.gte.data[7] == 0xffffu);
 }
 
+static void test_lwc2_loads_ram_word_into_gte_data_register() {
+    jojo::PsxRuntime runtime{};
+    constexpr std::uint32_t pc = 0x80010000u;
+    constexpr std::uint32_t base = 0x80010100u;
+    prepare_runtime(runtime, pc);
+    runtime.cpu.gpr[1] = base;
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, base + 4u, 0x12345678u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, pc, 0xc8220004u) ==
+          jojo::PsxBusAccessReason::ok); // LWC2 r2,4(r1)
+
+    const auto step = jojo::step_psx_runtime(runtime);
+    CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.gte.data[2] == 0x12345678u);
+    CHECK(runtime.cpu.pc == pc + 4u);
+}
+
+static void test_swc2_stores_gte_data_register_into_ram() {
+    jojo::PsxRuntime runtime{};
+    constexpr std::uint32_t pc = 0x80010000u;
+    constexpr std::uint32_t base = 0x80010100u;
+    prepare_runtime(runtime, pc);
+    runtime.cpu.gpr[1] = base;
+    jojo::psx_gte_write_data(runtime.gte, 2u, 0x89abcdefu);
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, pc, 0xe8220008u) ==
+          jojo::PsxBusAccessReason::ok); // SWC2 r2,8(r1)
+
+    const auto step = jojo::step_psx_runtime(runtime);
+    CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+    const auto stored = jojo::psx_bus_read_u32(runtime.bus, base + 8u);
+    CHECK(stored.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(stored.value == 0x89abcdefu);
+}
+
+static void test_lwc2_requires_enabled_cop2() {
+    jojo::PsxRuntime runtime{};
+    constexpr std::uint32_t pc = 0x80010000u;
+    jojo::reset_psx_r3000a(runtime.cpu, pc);
+    runtime.cpu.gpr[1] = 0x80010100u;
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, pc, 0xc8220000u) ==
+          jojo::PsxBusAccessReason::ok);
+
+    const auto step = jojo::step_psx_runtime(runtime);
+    CHECK(step.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(step.exception_code == jojo::PsxR3000aExceptionCode::coprocessor_unusable);
+    CHECK(((runtime.cpu.cop0.cause >> 28u) & 3u) == 2u);
+}
+
+static void test_lwc2_misalignment_raises_address_error_load() {
+    jojo::PsxRuntime runtime{};
+    constexpr std::uint32_t pc = 0x80010000u;
+    constexpr std::uint32_t base = 0x80010100u;
+    prepare_runtime(runtime, pc);
+    runtime.cpu.gpr[1] = base;
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, pc, 0xc8220002u) ==
+          jojo::PsxBusAccessReason::ok);
+
+    const auto step = jojo::step_psx_runtime(runtime);
+    CHECK(step.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(step.exception_code == jojo::PsxR3000aExceptionCode::address_error_load);
+    CHECK(runtime.cpu.cop0.bad_vaddr == base + 2u);
+}
+
+static void test_swc2_misalignment_raises_address_error_store() {
+    jojo::PsxRuntime runtime{};
+    constexpr std::uint32_t pc = 0x80010000u;
+    constexpr std::uint32_t base = 0x80010100u;
+    prepare_runtime(runtime, pc);
+    runtime.cpu.gpr[1] = base;
+    CHECK(jojo::psx_bus_write_u32(runtime.bus, pc, 0xe8220002u) ==
+          jojo::PsxBusAccessReason::ok);
+
+    const auto step = jojo::step_psx_runtime(runtime);
+    CHECK(step.reason == jojo::PsxR3000aStepReason::exception);
+    CHECK(step.exception_code == jojo::PsxR3000aExceptionCode::address_error_store);
+    CHECK(runtime.cpu.cop0.bad_vaddr == base + 2u);
+}
+
 int main() {
     test_nclip_executes_real_cop2_command();
     test_avsz3_updates_mac0_and_otz();
     test_avsz4_saturates_otz_to_unsigned_16_bit();
+    test_lwc2_loads_ram_word_into_gte_data_register();
+    test_swc2_stores_gte_data_register_into_ram();
+    test_lwc2_requires_enabled_cop2();
+    test_lwc2_misalignment_raises_address_error_load();
+    test_swc2_misalignment_raises_address_error_store();
     if (failures) return 1;
     std::cout << "PS1 GTE command assertions passed\n";
     return 0;
