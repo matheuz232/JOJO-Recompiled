@@ -11,6 +11,27 @@ static std::uint32_t pack_sxy(std::int16_t x, std::int16_t y) {
            (static_cast<std::uint32_t>(static_cast<std::uint16_t>(y)) << 16u);
 }
 
+static std::uint32_t mvmva_instruction(bool sf,
+                                       std::uint8_t mx,
+                                       std::uint8_t v,
+                                       std::uint8_t cv,
+                                       bool lm) {
+    return 0x4a000012u |
+           (sf ? (1u << 19u) : 0u) |
+           ((static_cast<std::uint32_t>(mx) & 3u) << 17u) |
+           ((static_cast<std::uint32_t>(v) & 3u) << 15u) |
+           ((static_cast<std::uint32_t>(cv) & 3u) << 13u) |
+           (lm ? (1u << 10u) : 0u);
+}
+
+static void set_identity_matrix(jojo::PsxGteState& gte, std::uint8_t base) {
+    gte.control[base + 0u] = 0x00001000u;
+    gte.control[base + 1u] = 0u;
+    gte.control[base + 2u] = 0x00001000u;
+    gte.control[base + 3u] = 0u;
+    gte.control[base + 4u] = 0x00001000u;
+}
+
 static void prepare_runtime(jojo::PsxRuntime& runtime,
                             std::uint32_t pc = 0x80010000u) {
     jojo::reset_psx_r3000a(runtime.cpu, pc);
@@ -34,7 +55,6 @@ static void test_nclip_executes_real_cop2_command() {
 
     const auto step = run_command(runtime, 0x4a140006u);
     CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
-    // 1*3 + 5*8 + 4*2 - 1*8 - 5*2 - 4*3 = 21.
     CHECK(runtime.gte.data[24] == 21u);
     CHECK(runtime.cpu.pc == 0x80010004u);
 }
@@ -65,6 +85,88 @@ static void test_avsz4_saturates_otz_to_unsigned_16_bit() {
     CHECK(runtime.gte.data[7] == 0xffffu);
 }
 
+static void test_mvmva_rotation_v0_translation_with_fraction_shift() {
+    jojo::PsxRuntime runtime{};
+    set_identity_matrix(runtime.gte, 0u);
+    runtime.gte.control[5] = 10u;
+    runtime.gte.control[6] = 20u;
+    runtime.gte.control[7] = 30u;
+    runtime.gte.data[0] = pack_sxy(1, 2);
+    runtime.gte.data[1] = 3u;
+
+    const auto step = run_command(runtime, mvmva_instruction(true, 0u, 0u, 0u, false));
+    CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.gte.data[25] == 11u);
+    CHECK(runtime.gte.data[26] == 22u);
+    CHECK(runtime.gte.data[27] == 33u);
+    CHECK(runtime.gte.data[9] == 11u);
+    CHECK(runtime.gte.data[10] == 22u);
+    CHECK(runtime.gte.data[11] == 33u);
+}
+
+static void test_mvmva_selects_light_matrix_v1_and_background_vector() {
+    jojo::PsxRuntime runtime{};
+    set_identity_matrix(runtime.gte, 8u);
+    runtime.gte.control[13] = 100u;
+    runtime.gte.control[14] = 200u;
+    runtime.gte.control[15] = 300u;
+    runtime.gte.data[2] = pack_sxy(4, 5);
+    runtime.gte.data[3] = 6u;
+
+    const auto step = run_command(runtime, mvmva_instruction(true, 1u, 1u, 1u, false));
+    CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.gte.data[25] == 104u);
+    CHECK(runtime.gte.data[26] == 205u);
+    CHECK(runtime.gte.data[27] == 306u);
+}
+
+static void test_mvmva_lm_clamps_negative_ir_but_preserves_mac() {
+    jojo::PsxRuntime runtime{};
+    set_identity_matrix(runtime.gte, 0u);
+    runtime.gte.data[0] = pack_sxy(-5, 2);
+    runtime.gte.data[1] = 3u;
+
+    const auto step = run_command(runtime, mvmva_instruction(true, 0u, 0u, 3u, true));
+    CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.gte.data[25] == 0xfffffffbu);
+    CHECK(runtime.gte.data[9] == 0u);
+    CHECK(runtime.gte.data[10] == 2u);
+    CHECK(runtime.gte.data[11] == 3u);
+    CHECK((runtime.gte.control[31] & (1u << 24u)) != 0u);
+}
+
+static void test_mvmva_far_color_selector_keeps_hardware_bug() {
+    jojo::PsxRuntime runtime{};
+    set_identity_matrix(runtime.gte, 0u);
+    runtime.gte.control[21] = 1000u;
+    runtime.gte.control[22] = 2000u;
+    runtime.gte.control[23] = 3000u;
+    runtime.gte.data[0] = pack_sxy(1, 2);
+    runtime.gte.data[1] = 3u;
+
+    const auto step = run_command(runtime, mvmva_instruction(true, 0u, 0u, 2u, false));
+    CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.gte.data[25] == 0u);
+    CHECK(runtime.gte.data[26] == 2u);
+    CHECK(runtime.gte.data[27] == 3u);
+}
+
+static void test_mvmva_reserved_matrix_uses_documented_garbage_matrix() {
+    jojo::PsxRuntime runtime{};
+    runtime.gte.data[6] = 2u;      // RGBC.R=2 -> +/-32 matrix elements.
+    runtime.gte.data[8] = 0x1000u; // IR0 becomes matrix element 1.0.
+    runtime.gte.control[1] = 4u;   // RT13.
+    runtime.gte.control[2] = 5u;   // RT22.
+    runtime.gte.data[0] = pack_sxy(1, 2);
+    runtime.gte.data[1] = 3u;
+
+    const auto step = run_command(runtime, mvmva_instruction(false, 3u, 0u, 3u, false));
+    CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.gte.data[25] == 12320u);
+    CHECK(runtime.gte.data[26] == 24u);
+    CHECK(runtime.gte.data[27] == 30u);
+}
+
 static void test_lwc2_loads_ram_word_into_gte_data_register() {
     jojo::PsxRuntime runtime{};
     constexpr std::uint32_t pc = 0x80010000u;
@@ -74,7 +176,7 @@ static void test_lwc2_loads_ram_word_into_gte_data_register() {
     CHECK(jojo::psx_bus_write_u32(runtime.bus, base + 4u, 0x12345678u) ==
           jojo::PsxBusAccessReason::ok);
     CHECK(jojo::psx_bus_write_u32(runtime.bus, pc, 0xc8220004u) ==
-          jojo::PsxBusAccessReason::ok); // LWC2 r2,4(r1)
+          jojo::PsxBusAccessReason::ok);
 
     const auto step = jojo::step_psx_runtime(runtime);
     CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
@@ -90,7 +192,7 @@ static void test_swc2_stores_gte_data_register_into_ram() {
     runtime.cpu.gpr[1] = base;
     jojo::psx_gte_write_data(runtime.gte, 2u, 0x89abcdefu);
     CHECK(jojo::psx_bus_write_u32(runtime.bus, pc, 0xe8220008u) ==
-          jojo::PsxBusAccessReason::ok); // SWC2 r2,8(r1)
+          jojo::PsxBusAccessReason::ok);
 
     const auto step = jojo::step_psx_runtime(runtime);
     CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
@@ -147,6 +249,11 @@ int main() {
     test_nclip_executes_real_cop2_command();
     test_avsz3_updates_mac0_and_otz();
     test_avsz4_saturates_otz_to_unsigned_16_bit();
+    test_mvmva_rotation_v0_translation_with_fraction_shift();
+    test_mvmva_selects_light_matrix_v1_and_background_vector();
+    test_mvmva_lm_clamps_negative_ir_but_preserves_mac();
+    test_mvmva_far_color_selector_keeps_hardware_bug();
+    test_mvmva_reserved_matrix_uses_documented_garbage_matrix();
     test_lwc2_loads_ram_word_into_gte_data_register();
     test_swc2_stores_gte_data_register_into_ram();
     test_lwc2_requires_enabled_cop2();
