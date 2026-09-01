@@ -28,19 +28,19 @@ Required evidence:
 - reject unknown revisions explicitly rather than guessing offsets or silently continuing;
 - feed the exact validated commercial executable/data into the production conversion/runtime path.
 
-Portable parser/revision infrastructure exists, but R1 is not complete until supported commercial-media evidence is recorded.
+Portable parser/revision infrastructure exists. The preparation path now materializes validated PS1 boot files and a normalized 2048-byte-sector data track (`SYSTEM.CNF`, `PSX.EXE`, `DISC.ISO`) so later runtime execution does not depend on reopening the user's original image. This is enabling infrastructure only: R1 is not complete until supported commercial-media evidence is recorded.
 
 ### R2 — Commercial boot/runtime — NOT COMPLETE
 
 Required evidence:
 
-- boot the real supported commercial executable through the production runtime;
-- execute every CPU instruction required to reach normal game operation correctly;
-- implement required Dreamcast memory/MMIO/device behavior instead of ignoring unsupported accesses;
+- boot the real supported commercial PS-X executable through the production runtime;
+- execute every R3000A/GTE operation required to reach normal game operation correctly;
+- implement required PS1 memory/MMIO/device behavior instead of ignoring unsupported accesses, including the GPU, CD-ROM, SIO/controllers, SPU/audio, DMA, timers and interrupts used by the game;
 - fail explicitly and diagnostically during development on unsupported behavior;
-- use the native backend/recompiler path as designed without cosmetically reporting a game-ready installation before it is true.
+- keep the prepared/local runtime path honest: a successfully parsed or loaded executable must never be cosmetically reported as a game-ready installation before commercial boot is actually proven.
 
-Existing SH-4, memory, bus, interrupt, PVR2 and native-backend components are foundations only; they do not by themselves prove commercial boot.
+Existing PS1 R3000A/GTE/bus/BIOS/MMIO contracts, prepared-runtime support and historical Dreamcast/SH-4 work are engineering foundations/history only; none of them by themselves proves commercial boot.
 
 ### R3 — Real video output + resolution/aspect/60 FPS — NOT COMPLETE
 
@@ -63,13 +63,13 @@ Required evidence:
 
 - produce real commercial-game audio through the shipping runtime;
 - keep audio synchronized in normal and verified 60 FPS modes;
-- connect Player 1 and Player 2 host input to the real game's input path;
+- connect Player 1 and Player 2 host input to the real game's PS1 controller/SIO path;
 - support two simultaneously active physical controllers;
 - support mixed local configurations such as keyboard + controller where exposed by host APIs;
 - preserve independent bindings across disconnect/reconnect;
 - complete a real local versus match through `JOJO-Recompiled.exe` with both players providing simultaneous input.
 
-The reusable input model already defines exactly two logical players and Windows controller support, but R4 requires commercial-runtime integration.
+The reusable input model defines exactly two logical players and Windows controller support. Host actions are also translated to the original PS1 digital-pad button layout, but R4 still requires SIO/runtime integration, real audio and commercial-game evidence.
 
 ### R5 — Original offline content completion — NOT COMPLETE
 
