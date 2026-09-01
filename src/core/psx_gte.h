@@ -31,16 +31,16 @@ inline void psx_gte_write_control(PsxGteState& gte,
                                   std::uint8_t index,
                                   std::uint32_t value) noexcept {
     switch (index) {
-    case 4u:  // RT33
-    case 12u: // L33
-    case 20u: // LR33
-    case 26u: // H (unsigned for calculations, sign-extended on transfer reads)
-    case 27u: // DQA
-    case 29u: // ZSF3
-    case 30u: // ZSF4
+    case 4u:
+    case 12u:
+    case 20u:
+    case 26u:
+    case 27u:
+    case 29u:
+    case 30u:
         gte.control[index] = psx_gte_sign_extend_u16(value);
         return;
-    case 31u: { // FLAG
+    case 31u: {
         constexpr std::uint32_t writable_mask = 0x7ffff000u;
         constexpr std::uint32_t error_summary_mask = 0x7f87e000u;
         auto flags = value & writable_mask;
@@ -63,28 +63,28 @@ inline void psx_gte_write_data(PsxGteState& gte,
                                std::uint8_t index,
                                std::uint32_t value) noexcept {
     switch (index) {
-    case 1u:  // VZ0
-    case 3u:  // VZ1
-    case 5u:  // VZ2
-    case 8u:  // IR0
-    case 9u:  // IR1
-    case 10u: // IR2
-    case 11u: // IR3
+    case 1u:
+    case 3u:
+    case 5u:
+    case 8u:
+    case 9u:
+    case 10u:
+    case 11u:
         gte.data[index] = psx_gte_sign_extend_u16(value);
         return;
-    case 7u:  // OTZ
-    case 16u: // SZ0
-    case 17u: // SZ1
-    case 18u: // SZ2
-    case 19u: // SZ3
+    case 7u:
+    case 16u:
+    case 17u:
+    case 18u:
+    case 19u:
         gte.data[index] = value & 0xffffu;
         return;
-    case 15u: // SXYP: push SXY FIFO
+    case 15u:
         gte.data[12] = gte.data[13];
         gte.data[13] = gte.data[14];
         gte.data[14] = value;
         return;
-    case 28u: { // IRGB: 5:5:5 input expands into IR1/IR2/IR3
+    case 28u: {
         gte.data[28] = value & 0x7fffu;
         const auto r = (value & 0x1fu) * 0x80u;
         const auto g = ((value >> 5u) & 0x1fu) * 0x80u;
@@ -94,13 +94,13 @@ inline void psx_gte_write_data(PsxGteState& gte,
         gte.data[11] = psx_gte_sign_extend_u16(b);
         return;
     }
-    case 29u: // ORGB is read-only
+    case 29u:
         return;
-    case 30u: // LZCS
+    case 30u:
         gte.data[30] = value;
         gte.data[31] = psx_gte_count_leading_bits(value);
         return;
-    case 31u: // LZCR is read-only
+    case 31u:
         return;
     default:
         gte.data[index] = value;
@@ -110,7 +110,7 @@ inline void psx_gte_write_data(PsxGteState& gte,
 
 [[nodiscard]] inline std::uint32_t psx_gte_read_data(const PsxGteState& gte,
                                                       std::uint8_t index) noexcept {
-    if (index == 15u) return gte.data[14]; // SXY3 mirrors SXY2
+    if (index == 15u) return gte.data[14];
     if (index == 28u || index == 29u) {
         const auto component = [&](std::uint8_t ir_index) noexcept -> std::uint32_t {
             const auto signed_value = static_cast<std::int32_t>(gte.data[ir_index]);
@@ -170,20 +170,16 @@ using PsxGteMatrix = std::array<PsxGteVector, 3>;
                                                   std::uint8_t selector) noexcept {
     switch (selector & 3u) {
     case 0u:
-        return {psx_gte_s16(gte.data[0]),
-                psx_gte_s16(gte.data[0] >> 16u),
+        return {psx_gte_s16(gte.data[0]), psx_gte_s16(gte.data[0] >> 16u),
                 psx_gte_s16(gte.data[1])};
     case 1u:
-        return {psx_gte_s16(gte.data[2]),
-                psx_gte_s16(gte.data[2] >> 16u),
+        return {psx_gte_s16(gte.data[2]), psx_gte_s16(gte.data[2] >> 16u),
                 psx_gte_s16(gte.data[3])};
     case 2u:
-        return {psx_gte_s16(gte.data[4]),
-                psx_gte_s16(gte.data[4] >> 16u),
+        return {psx_gte_s16(gte.data[4]), psx_gte_s16(gte.data[4] >> 16u),
                 psx_gte_s16(gte.data[5])};
     default:
-        return {psx_gte_s16(gte.data[9]),
-                psx_gte_s16(gte.data[10]),
+        return {psx_gte_s16(gte.data[9]), psx_gte_s16(gte.data[10]),
                 psx_gte_s16(gte.data[11])};
     }
 }
@@ -231,11 +227,14 @@ using PsxGteMatrix = std::array<PsxGteVector, 3>;
     };
     switch (selector & 3u) {
     case 0u:
-        return {signed32(gte.control[5]), signed32(gte.control[6]), signed32(gte.control[7])};
+        return {signed32(gte.control[5]), signed32(gte.control[6]),
+                signed32(gte.control[7])};
     case 1u:
-        return {signed32(gte.control[13]), signed32(gte.control[14]), signed32(gte.control[15])};
+        return {signed32(gte.control[13]), signed32(gte.control[14]),
+                signed32(gte.control[15])};
     case 2u:
-        return {signed32(gte.control[21]), signed32(gte.control[22]), signed32(gte.control[23])};
+        return {signed32(gte.control[21]), signed32(gte.control[22]),
+                signed32(gte.control[23])};
     default:
         return {0, 0, 0};
     }
@@ -278,6 +277,26 @@ inline void psx_gte_store_mac_ir(PsxGteState& gte,
         static_cast<std::int32_t>(saturated));
 }
 
+inline void psx_gte_push_color_fifo(PsxGteState& gte) noexcept {
+    std::uint32_t packed = gte.data[6] & 0xff000000u;
+    for (std::uint8_t component = 0u; component < 3u; ++component) {
+        const auto mac = static_cast<std::int32_t>(gte.data[25u + component]);
+        const auto divided = static_cast<std::int64_t>(mac) / 16ll;
+        auto color = divided;
+        if (color < 0) {
+            color = 0;
+            gte.control[31] |= std::uint32_t{1} << (21u - component);
+        } else if (color > 0xff) {
+            color = 0xff;
+            gte.control[31] |= std::uint32_t{1} << (21u - component);
+        }
+        packed |= static_cast<std::uint32_t>(color) << (component * 8u);
+    }
+    gte.data[20] = gte.data[21];
+    gte.data[21] = gte.data[22];
+    gte.data[22] = packed;
+}
+
 inline void psx_gte_execute_mvmva(PsxGteState& gte,
                                   std::uint32_t instruction) noexcept {
     const bool sf = (instruction & (1u << 19u)) != 0u;
@@ -296,10 +315,6 @@ inline void psx_gte_execute_mvmva(PsxGteState& gte,
             static_cast<std::int64_t>(matrix[row][0]) * vector[0] +
             static_cast<std::int64_t>(matrix[row][1]) * vector[1] +
             static_cast<std::int64_t>(matrix[row][2]) * vector[2];
-
-        // Real GTE hardware has a documented MVMVA quirk for cv=2 (far color):
-        // the translation and first matrix product participate in internal flag
-        // behavior, but the final MAC result retains only the last two products.
         const auto result_value = cv == 2u
             ? static_cast<std::int64_t>(matrix[row][1]) * vector[1] +
               static_cast<std::int64_t>(matrix[row][2]) * vector[2]
@@ -324,13 +339,69 @@ inline void psx_gte_execute_mvmva(PsxGteState& gte,
     }
 }
 
+inline void psx_gte_execute_sqr(PsxGteState& gte,
+                                std::uint32_t instruction) noexcept {
+    const bool sf = (instruction & (1u << 19u)) != 0u;
+    const auto ir = psx_gte_vector(gte, 3u);
+    for (std::uint8_t component = 0u; component < 3u; ++component) {
+        const auto raw = static_cast<std::int64_t>(ir[component]) * ir[component];
+        psx_gte_store_mac_ir(gte, component, raw, sf, false);
+    }
+}
+
+inline void psx_gte_execute_op(PsxGteState& gte,
+                               std::uint32_t instruction) noexcept {
+    const bool sf = (instruction & (1u << 19u)) != 0u;
+    const bool lm = (instruction & (1u << 10u)) != 0u;
+    const auto ir = psx_gte_vector(gte, 3u);
+    const PsxGteVector diagonal{
+        psx_gte_s16(gte.control[0]),
+        psx_gte_s16(gte.control[2]),
+        psx_gte_s16(gte.control[4]),
+    };
+    const std::array<std::int64_t, 3> raw{
+        static_cast<std::int64_t>(ir[2]) * diagonal[1] -
+            static_cast<std::int64_t>(ir[1]) * diagonal[2],
+        static_cast<std::int64_t>(ir[0]) * diagonal[2] -
+            static_cast<std::int64_t>(ir[2]) * diagonal[0],
+        static_cast<std::int64_t>(ir[1]) * diagonal[0] -
+            static_cast<std::int64_t>(ir[0]) * diagonal[1],
+    };
+    for (std::uint8_t component = 0u; component < 3u; ++component) {
+        psx_gte_store_mac_ir(gte, component, raw[component], sf, lm);
+    }
+}
+
+inline void psx_gte_execute_gpf_gpl(PsxGteState& gte,
+                                    std::uint32_t instruction,
+                                    bool accumulate) noexcept {
+    const bool sf = (instruction & (1u << 19u)) != 0u;
+    const bool lm = (instruction & (1u << 10u)) != 0u;
+    const auto ir0 = static_cast<std::int64_t>(psx_gte_s16(gte.data[8]));
+    const auto ir = psx_gte_vector(gte, 3u);
+    const std::array<std::int32_t, 3> old_mac{
+        static_cast<std::int32_t>(gte.data[25]),
+        static_cast<std::int32_t>(gte.data[26]),
+        static_cast<std::int32_t>(gte.data[27]),
+    };
+
+    for (std::uint8_t component = 0u; component < 3u; ++component) {
+        const auto base = accumulate
+            ? static_cast<std::int64_t>(old_mac[component]) * (sf ? 0x1000ll : 1ll)
+            : 0ll;
+        const auto raw = base + static_cast<std::int64_t>(ir[component]) * ir0;
+        psx_gte_store_mac_ir(gte, component, raw, sf, lm);
+    }
+    psx_gte_push_color_fifo(gte);
+}
+
 [[nodiscard]] inline bool execute_psx_gte_command(PsxGteState& gte,
                                                    std::uint32_t instruction) noexcept {
     gte.control[31] = 0u;
     const auto command = static_cast<std::uint8_t>(instruction & 0x3fu);
 
     switch (command) {
-    case 0x06u: { // NCLIP
+    case 0x06u: {
         const auto sx0 = psx_gte_s16(gte.data[12]);
         const auto sy0 = psx_gte_s16(gte.data[12] >> 16u);
         const auto sx1 = psx_gte_s16(gte.data[13]);
@@ -348,11 +419,19 @@ inline void psx_gte_execute_mvmva(PsxGteState& gte,
         psx_gte_finalize_flags(gte);
         return true;
     }
-    case 0x12u: // MVMVA
+    case 0x0cu:
+        psx_gte_execute_op(gte, instruction);
+        psx_gte_finalize_flags(gte);
+        return true;
+    case 0x12u:
         psx_gte_execute_mvmva(gte, instruction);
         psx_gte_finalize_flags(gte);
         return true;
-    case 0x2du: { // AVSZ3
+    case 0x28u:
+        psx_gte_execute_sqr(gte, instruction);
+        psx_gte_finalize_flags(gte);
+        return true;
+    case 0x2du: {
         const auto zsf3 = static_cast<std::int32_t>(gte.control[29]);
         const auto sum = static_cast<std::int64_t>(gte.data[17] & 0xffffu) +
                          static_cast<std::int64_t>(gte.data[18] & 0xffffu) +
@@ -363,7 +442,7 @@ inline void psx_gte_execute_mvmva(PsxGteState& gte,
         psx_gte_finalize_flags(gte);
         return true;
     }
-    case 0x2eu: { // AVSZ4
+    case 0x2eu: {
         const auto zsf4 = static_cast<std::int32_t>(gte.control[30]);
         const auto sum = static_cast<std::int64_t>(gte.data[16] & 0xffffu) +
                          static_cast<std::int64_t>(gte.data[17] & 0xffffu) +
@@ -375,6 +454,14 @@ inline void psx_gte_execute_mvmva(PsxGteState& gte,
         psx_gte_finalize_flags(gte);
         return true;
     }
+    case 0x3du:
+        psx_gte_execute_gpf_gpl(gte, instruction, false);
+        psx_gte_finalize_flags(gte);
+        return true;
+    case 0x3eu:
+        psx_gte_execute_gpf_gpl(gte, instruction, true);
+        psx_gte_finalize_flags(gte);
+        return true;
     default:
         return false;
     }
