@@ -4,13 +4,14 @@ on:
   push:
     branches:
       - feature/offline-product-rebuild
+    paths:
+      - .github/workflows/agent-line-patch.yml
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.event.head_commit.message != 'feat: integrate PS1 GPU lines' && github.event.head_commit.message != 'chore: remove temporary line patch workflow'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,19 +80,19 @@ jobs:
               '        }\n'
               '    } else if (primitive_group == 3u) {\n')
           replace_once(
+              '            bus.gpu_drawing_offset = 0u;\n'
               '            bus.gpu_gp0_packet = {};\n'
               '            bus.gpu_gp0_packet_count = 0u;\n'
               '            bus.gpu_gp0_packet_words = 0u;\n'
-              '            return PsxBusAccessReason::ok;\n'
-              '        }\n        if (command == 0x10u) {\n',
+              '            return PsxBusAccessReason::ok;\n',
+              '            bus.gpu_drawing_offset = 0u;\n'
               '            bus.gpu_gp0_packet = {};\n'
               '            bus.gpu_gp0_packet_count = 0u;\n'
               '            bus.gpu_gp0_packet_words = 0u;\n'
               '            bus.gpu_polyline_active = false;\n'
               '            bus.gpu_polyline_gouraud = false;\n'
               '            bus.gpu_polyline_expect_color = false;\n'
-              '            return PsxBusAccessReason::ok;\n'
-              '        }\n        if (command == 0x10u) {\n')
+              '            return PsxBusAccessReason::ok;\n')
 
           path.write_text(text)
           PY
