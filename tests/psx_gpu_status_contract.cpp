@@ -99,11 +99,46 @@ void test_dma_request_meaning_follows_gp1_direction() {
     STATUS_REQUIRE((done & (1u << 25u)) == 0u);
 }
 
+void test_gpu_irq_request_latches_istat_only_on_source_rising_edge() {
+    jojo::PsxBus bus{};
+    constexpr std::uint16_t gpu_irq = 1u << 1u;
+
+    STATUS_REQUIRE((status(bus) & (1u << 24u)) == 0u);
+    STATUS_REQUIRE((bus.interrupt_status & gpu_irq) == 0u);
+
+    gp0(bus, 0x1f000000u);
+    STATUS_REQUIRE((status(bus) & (1u << 24u)) != 0u);
+    STATUS_REQUIRE((bus.interrupt_status & gpu_irq) != 0u);
+
+    // I_STAT is latched independently from the GPU source. Clearing I_STAT
+    // while GPUSTAT.24 remains high must not synthesize a second edge.
+    STATUS_REQUIRE(jojo::psx_bus_write_u16(
+                       bus, jojo::PsxBus::interrupt_status_address,
+                       static_cast<std::uint16_t>(jojo::PsxBus::interrupt_status_valid_bits & ~gpu_irq)) ==
+                   jojo::PsxBusAccessReason::ok);
+    STATUS_REQUIRE((bus.interrupt_status & gpu_irq) == 0u);
+    STATUS_REQUIRE((status(bus) & (1u << 24u)) != 0u);
+
+    gp0(bus, 0x1f000000u);
+    STATUS_REQUIRE((bus.interrupt_status & gpu_irq) == 0u);
+
+    // GP1(02h) lowers the GPU IRQ source. The next GP0(1Fh) therefore creates
+    // a fresh rising edge and relatches I_STAT.1.
+    gp1(bus, 0x02000000u);
+    STATUS_REQUIRE((status(bus) & (1u << 24u)) == 0u);
+    STATUS_REQUIRE((bus.interrupt_status & gpu_irq) == 0u);
+
+    gp0(bus, 0x1f000000u);
+    STATUS_REQUIRE((status(bus) & (1u << 24u)) != 0u);
+    STATUS_REQUIRE((bus.interrupt_status & gpu_irq) != 0u);
+}
+
 struct StatusContractRunner {
     StatusContractRunner() {
         test_ready_command_word_tracks_packet_boundaries();
         test_ready_dma_block_drops_during_polygon_parameters();
         test_dma_request_meaning_follows_gp1_direction();
+        test_gpu_irq_request_latches_istat_only_on_source_rising_edge();
     }
 };
 
