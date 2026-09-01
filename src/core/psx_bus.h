@@ -163,6 +163,12 @@ struct PsxBus {
     std::uint16_t timer2_current{};
     std::uint16_t timer2_mode{};
     std::uint16_t timer2_target{};
+    bool timer0_reset_pending{};
+    bool timer1_reset_pending{};
+    bool timer2_reset_pending{};
+    bool timer0_irq_fired{};
+    bool timer1_irq_fired{};
+    bool timer2_irq_fired{};
     std::uint8_t timer2_clock_phase{};
     std::uint64_t video_clock_phase{};
     std::uint16_t gpu_scanline{};
@@ -1147,27 +1153,33 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
         return PsxBusAccessReason::ok;
     }
     if (address == PsxBus::interrupt_mask_address) { bus.interrupt_mask = static_cast<std::uint16_t>(value & PsxBus::interrupt_mask_valid_bits); return PsxBusAccessReason::ok; }
-    if (address == PsxBus::timer0_current_address) { bus.timer0_current = value; return PsxBusAccessReason::ok; }
+    if (address == PsxBus::timer0_current_address) { bus.timer0_current = value; bus.timer0_reset_pending = false; return PsxBusAccessReason::ok; }
     if (address == PsxBus::timer0_mode_address) {
         const auto next_epoch = static_cast<std::uint16_t>((bus.timer0_mode ^ PsxBus::timer_mode_write_epoch) & PsxBus::timer_mode_write_epoch);
         bus.timer0_mode = static_cast<std::uint16_t>((value & PsxBus::timer_mode_guest_bits) | next_epoch);
         bus.timer0_current = 0u;
+        bus.timer0_reset_pending = false;
+        bus.timer0_irq_fired = false;
         return PsxBusAccessReason::ok;
     }
     if (address == PsxBus::timer0_target_address) { bus.timer0_target = value; return PsxBusAccessReason::ok; }
-    if (address == PsxBus::timer1_current_address) { bus.timer1_current = value; return PsxBusAccessReason::ok; }
+    if (address == PsxBus::timer1_current_address) { bus.timer1_current = value; bus.timer1_reset_pending = false; return PsxBusAccessReason::ok; }
     if (address == PsxBus::timer1_mode_address) {
         const auto next_epoch = static_cast<std::uint16_t>((bus.timer1_mode ^ PsxBus::timer_mode_write_epoch) & PsxBus::timer_mode_write_epoch);
         bus.timer1_mode = static_cast<std::uint16_t>((value & PsxBus::timer_mode_guest_bits) | next_epoch);
         bus.timer1_current = 0u;
+        bus.timer1_reset_pending = false;
+        bus.timer1_irq_fired = false;
         return PsxBusAccessReason::ok;
     }
     if (address == PsxBus::timer1_target_address) { bus.timer1_target = value; return PsxBusAccessReason::ok; }
-    if (address == PsxBus::timer2_current_address) { bus.timer2_current = value; return PsxBusAccessReason::ok; }
+    if (address == PsxBus::timer2_current_address) { bus.timer2_current = value; bus.timer2_reset_pending = false; return PsxBusAccessReason::ok; }
     if (address == PsxBus::timer2_mode_address) {
         const auto next_epoch = static_cast<std::uint16_t>((bus.timer2_mode ^ PsxBus::timer_mode_write_epoch) & PsxBus::timer_mode_write_epoch);
         bus.timer2_mode = static_cast<std::uint16_t>((value & PsxBus::timer_mode_guest_bits) | next_epoch);
         bus.timer2_current = 0u;
+        bus.timer2_reset_pending = false;
+        bus.timer2_irq_fired = false;
         bus.timer2_clock_phase = 0u;
         return PsxBusAccessReason::ok;
     }
@@ -1512,29 +1524,76 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     return PsxBusAccessReason::ok;
 }
 
+inline void psx_bus_tick_root_counter(PsxBus& bus,
+                                              std::uint16_t& current,
+                                              std::uint16_t mode,
+                                              std::uint16_t target,
+                                              bool& reset_pending,
+                                              bool& irq_fired,
+                                              std::uint16_t irq_bit,
+                                              std::uint32_t ticks) noexcept {
+    constexpr std::uint16_t reset_at_target = 1u << 3u;
+    constexpr std::uint16_t irq_at_target = 1u << 4u;
+    constexpr std::uint16_t irq_at_ffff = 1u << 5u;
+    constexpr std::uint16_t repeat_irq = 1u << 6u;
+    for (std::uint32_t tick = 0u; tick < ticks; ++tick) {
+        if (reset_pending) {
+            current = 0u;
+            reset_pending = false;
+            continue;
+        }
+        current = static_cast<std::uint16_t>(current + 1u);
+        const bool hit_target = current == target;
+        const bool hit_ffff = current == 0xffffu;
+        const bool irq_enabled =
+            (hit_target && (mode & irq_at_target) != 0u) ||
+            (hit_ffff && (mode & irq_at_ffff) != 0u);
+        if (irq_enabled && (((mode & repeat_irq) != 0u) || !irq_fired)) {
+            bus.interrupt_status = static_cast<std::uint16_t>(
+                bus.interrupt_status | irq_bit);
+            if ((mode & repeat_irq) == 0u) irq_fired = true;
+        }
+        if (((mode & reset_at_target) != 0u && hit_target) ||
+            ((mode & reset_at_target) == 0u && hit_ffff)) {
+            reset_pending = true;
+        }
+    }
+}
 inline void psx_bus_tick(PsxBus& bus, std::uint32_t cpu_cycles) noexcept {
     constexpr std::uint16_t synchronization_enable = 1u << 0u;
     constexpr std::uint16_t timer1_hblank_clock = 1u << 8u;
+    constexpr std::uint16_t timer0_interrupt = 1u << 4u;
+    constexpr std::uint16_t timer1_interrupt = 1u << 5u;
+    constexpr std::uint16_t timer2_interrupt = 1u << 6u;
     if ((bus.timer0_mode & synchronization_enable) == 0u) {
         const auto source = static_cast<std::uint16_t>((bus.timer0_mode >> 8u) & 3u);
         if (source == 0u || source == 2u) {
-            bus.timer0_current = static_cast<std::uint16_t>(bus.timer0_current + cpu_cycles);
+            psx_bus_tick_root_counter(bus, bus.timer0_current, bus.timer0_mode,
+                                      bus.timer0_target, bus.timer0_reset_pending,
+                                      bus.timer0_irq_fired, timer0_interrupt, cpu_cycles);
         }
     }
     if ((bus.timer1_mode & synchronization_enable) == 0u) {
         const auto source = static_cast<std::uint16_t>((bus.timer1_mode >> 8u) & 3u);
         if (source == 0u || source == 2u) {
-            bus.timer1_current = static_cast<std::uint16_t>(bus.timer1_current + cpu_cycles);
+            psx_bus_tick_root_counter(bus, bus.timer1_current, bus.timer1_mode,
+                                      bus.timer1_target, bus.timer1_reset_pending,
+                                      bus.timer1_irq_fired, timer1_interrupt, cpu_cycles);
         }
     }
     if ((bus.timer2_mode & synchronization_enable) == 0u) {
         const auto source = static_cast<std::uint16_t>((bus.timer2_mode >> 8u) & 3u);
         if (source == 0u || source == 1u) {
-            bus.timer2_current = static_cast<std::uint16_t>(bus.timer2_current + cpu_cycles);
+            psx_bus_tick_root_counter(bus, bus.timer2_current, bus.timer2_mode,
+                                      bus.timer2_target, bus.timer2_reset_pending,
+                                      bus.timer2_irq_fired, timer2_interrupt, cpu_cycles);
         } else {
             const auto total = static_cast<std::uint64_t>(bus.timer2_clock_phase) + cpu_cycles;
-            bus.timer2_current = static_cast<std::uint16_t>(bus.timer2_current + total / 8u);
+            const auto counter_ticks = static_cast<std::uint32_t>(total / 8u);
             bus.timer2_clock_phase = static_cast<std::uint8_t>(total % 8u);
+            psx_bus_tick_root_counter(bus, bus.timer2_current, bus.timer2_mode,
+                                      bus.timer2_target, bus.timer2_reset_pending,
+                                      bus.timer2_irq_fired, timer2_interrupt, counter_ticks);
         }
     }
     constexpr std::uint16_t vblank_interrupt = 1u << 0u;
@@ -1547,7 +1606,11 @@ inline void psx_bus_tick(PsxBus& bus, std::uint32_t cpu_cycles) noexcept {
     bus.video_clock_phase += static_cast<std::uint64_t>(cpu_cycles) * video_clock_hz;
     while (bus.video_clock_phase >= phase_per_hblank) {
         bus.video_clock_phase -= phase_per_hblank;
-        if ((bus.timer1_mode & timer1_hblank_clock) != 0u) bus.timer1_current = static_cast<std::uint16_t>(bus.timer1_current + 1u);
+        if ((bus.timer1_mode & timer1_hblank_clock) != 0u) {
+            psx_bus_tick_root_counter(bus, bus.timer1_current, bus.timer1_mode,
+                                      bus.timer1_target, bus.timer1_reset_pending,
+                                      bus.timer1_irq_fired, timer1_interrupt, 1u);
+        }
         bus.gpu_scanline = static_cast<std::uint16_t>(bus.gpu_scanline + 1u);
         if (bus.gpu_scanline == ntsc_vblank_start_line) bus.interrupt_status = static_cast<std::uint16_t>(bus.interrupt_status | vblank_interrupt);
         else if (bus.gpu_scanline == ntsc_scanlines_per_frame) bus.gpu_scanline = 0u;
