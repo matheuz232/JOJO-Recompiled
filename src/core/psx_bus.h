@@ -402,9 +402,15 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
     if (bus.gpu_gp0_packet_count == 0u) {
         const auto command = static_cast<std::uint8_t>(value >> 24u);
         switch (command) {
-        case 0x1fu:
+        case 0x1fu: {
+            const bool was_requested = (bus.gpu_status & (1u << 24u)) != 0u;
             bus.gpu_status |= 1u << 24u;
+            if (!was_requested) {
+                bus.interrupt_status = static_cast<std::uint16_t>(
+                    bus.interrupt_status | (1u << 1u));
+            }
             return;
+        }
         case 0xe1u:
             bus.gpu_draw_mode = value & 0x00003fffu;
             bus.gpu_status =
