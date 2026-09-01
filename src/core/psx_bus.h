@@ -185,6 +185,10 @@ struct PsxBus {
     std::uint32_t gpu_gp0_write_latch{};
     std::uint32_t gpu_read_latch{};
     std::uint32_t gpu_status{gpu_status_reset};
+    std::uint32_t gpu_texture_window{};
+    std::uint32_t gpu_drawing_area_top_left{};
+    std::uint32_t gpu_drawing_area_bottom_right{};
+    std::uint32_t gpu_drawing_offset{};
     std::vector<std::uint16_t> gpu_vram =
         std::vector<std::uint16_t>(gpu_vram_width * gpu_vram_height, 0u);
     std::array<std::uint32_t, 3> gpu_gp0_packet{};
@@ -231,14 +235,21 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
         const auto width = dimensions & 0xffffu;
         const auto height = dimensions >> 16u;
         const auto total = width * height;
+        const bool force_mask = (bus.gpu_status & (1u << 11u)) != 0u;
+        const bool check_mask = (bus.gpu_status & (1u << 12u)) != 0u;
 
         for (std::uint32_t half = 0u; half < 2u && written < total; ++half) {
-            const auto pixel = static_cast<std::uint16_t>(value >> (half * 16u));
+            auto pixel = static_cast<std::uint16_t>(value >> (half * 16u));
             const auto local_x = written % width;
             const auto local_y = written / width;
             const auto x = (base_x + local_x) & 0x3ffu;
             const auto y = (base_y + local_y) & 0x1ffu;
-            bus.gpu_vram[static_cast<std::size_t>(y) * PsxBus::gpu_vram_width + x] = pixel;
+            auto& destination_pixel =
+                bus.gpu_vram[static_cast<std::size_t>(y) * PsxBus::gpu_vram_width + x];
+            if (!check_mask || (destination_pixel & 0x8000u) == 0u) {
+                if (force_mask) pixel = static_cast<std::uint16_t>(pixel | 0x8000u);
+                destination_pixel = pixel;
+            }
             ++written;
         }
         bus.gpu_gp0_packet[2] = written;
@@ -252,6 +263,30 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
 
     if (bus.gpu_gp0_packet_count == 0u) {
         const auto command = static_cast<std::uint8_t>(value >> 24u);
+        switch (command) {
+        case 0xe1u:
+            bus.gpu_status = (bus.gpu_status & ~0x000007ffu) | (value & 0x000007ffu);
+            return;
+        case 0xe2u:
+            bus.gpu_texture_window = value & 0x000fffffu;
+            return;
+        case 0xe3u:
+            bus.gpu_drawing_area_top_left = value & 0x0007ffffu;
+            return;
+        case 0xe4u:
+            bus.gpu_drawing_area_bottom_right = value & 0x0007ffffu;
+            return;
+        case 0xe5u:
+            bus.gpu_drawing_offset = value & 0x003fffffu;
+            return;
+        case 0xe6u:
+            bus.gpu_status = (bus.gpu_status & ~(3u << 11u)) |
+                             ((value & 3u) << 11u);
+            return;
+        default:
+            break;
+        }
+
         const bool cpu_to_vram = (value >> 29u) == 5u;
         if (command == 0x02u || cpu_to_vram) {
             bus.gpu_gp0_packet_words = 3u;
@@ -1173,15 +1208,37 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
         const auto command = static_cast<std::uint8_t>(value >> 24u);
         if (command == 0x00u) {
             bus.gpu_status = PsxBus::gpu_status_reset;
+            bus.gpu_read_latch = 0u;
+            bus.gpu_texture_window = 0u;
+            bus.gpu_drawing_area_top_left = 0u;
+            bus.gpu_drawing_area_bottom_right = 0u;
+            bus.gpu_drawing_offset = 0u;
+            bus.gpu_gp0_packet = {};
             bus.gpu_gp0_packet_count = 0u;
             bus.gpu_gp0_packet_words = 0u;
             return PsxBusAccessReason::ok;
         }
         if (command == 0x10u) {
             const auto index = value & 0x00ffffffu;
-            if (index != 0x07u) return PsxBusAccessReason::unmapped;
-            bus.gpu_read_latch = 2u;
-            return PsxBusAccessReason::ok;
+            switch (index) {
+            case 0x02u:
+                bus.gpu_read_latch = bus.gpu_texture_window;
+                return PsxBusAccessReason::ok;
+            case 0x03u:
+                bus.gpu_read_latch = bus.gpu_drawing_area_top_left;
+                return PsxBusAccessReason::ok;
+            case 0x04u:
+                bus.gpu_read_latch = bus.gpu_drawing_area_bottom_right;
+                return PsxBusAccessReason::ok;
+            case 0x05u:
+                bus.gpu_read_latch = bus.gpu_drawing_offset;
+                return PsxBusAccessReason::ok;
+            case 0x07u:
+                bus.gpu_read_latch = 2u;
+                return PsxBusAccessReason::ok;
+            default:
+                return PsxBusAccessReason::unmapped;
+            }
         }
         if (command == 0x04u) {
             constexpr std::uint32_t dma_direction_mask = 3u << 29u;
