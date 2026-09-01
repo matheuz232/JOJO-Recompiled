@@ -5,6 +5,12 @@ struct Vertex {
     std::int32_t y{};
 };
 
+struct Color {
+    std::uint32_t red{};
+    std::uint32_t green{};
+    std::uint32_t blue{};
+};
+
 [[nodiscard]] inline Vertex decode_vertex(const PsxBus& bus,
                                           std::uint32_t packed) noexcept {
     const auto offset_x = psx_gpu_sign_extend_11(bus.gpu_drawing_offset);
@@ -12,6 +18,14 @@ struct Vertex {
     return {
         psx_gpu_sign_extend_11(packed) + offset_x,
         psx_gpu_sign_extend_11(packed >> 16u) + offset_y,
+    };
+}
+
+[[nodiscard]] inline Color decode_color(std::uint32_t packed) noexcept {
+    return {
+        packed & 0xffu,
+        (packed >> 8u) & 0xffu,
+        (packed >> 16u) & 0xffu,
     };
 }
 
@@ -68,6 +82,68 @@ inline void raster_flat_triangle(PsxBus& bus,
     }
 }
 
+inline void raster_gouraud_triangle(PsxBus& bus,
+                                    Vertex a,
+                                    Vertex b,
+                                    Vertex c,
+                                    Color color_a,
+                                    Color color_b,
+                                    Color color_c,
+                                    bool semi_transparent) noexcept {
+    const auto min_x = std::min({a.x, b.x, c.x});
+    const auto max_x = std::max({a.x, b.x, c.x});
+    const auto min_y = std::min({a.y, b.y, c.y});
+    const auto max_y = std::max({a.y, b.y, c.y});
+    if (max_x - min_x > 1023 || max_y - min_y > 511) return;
+
+    const std::int64_t ax = static_cast<std::int64_t>(a.x) * 2;
+    const std::int64_t ay = static_cast<std::int64_t>(a.y) * 2;
+    const std::int64_t bx = static_cast<std::int64_t>(b.x) * 2;
+    const std::int64_t by = static_cast<std::int64_t>(b.y) * 2;
+    const std::int64_t cx = static_cast<std::int64_t>(c.x) * 2;
+    const std::int64_t cy = static_cast<std::int64_t>(c.y) * 2;
+    const auto area = edge(ax, ay, bx, by, cx, cy);
+    if (area == 0) return;
+
+    const auto start_x = std::max<std::int32_t>(0, min_x);
+    const auto end_x = std::min<std::int32_t>(
+        static_cast<std::int32_t>(PsxBus::gpu_vram_width), max_x);
+    const auto start_y = std::max<std::int32_t>(0, min_y);
+    const auto end_y = std::min<std::int32_t>(
+        static_cast<std::int32_t>(PsxBus::gpu_vram_height), max_y);
+
+    for (auto y = start_y; y < end_y; ++y) {
+        const auto py = static_cast<std::int64_t>(y) * 2 + 1;
+        for (auto x = start_x; x < end_x; ++x) {
+            const auto px = static_cast<std::int64_t>(x) * 2 + 1;
+            const auto e0 = edge(ax, ay, bx, by, px, py);
+            const auto e1 = edge(bx, by, cx, cy, px, py);
+            const auto e2 = edge(cx, cy, ax, ay, px, py);
+            const bool inside = area > 0
+                                    ? (e0 >= 0 && e1 >= 0 && e2 >= 0)
+                                    : (e0 <= 0 && e1 <= 0 && e2 <= 0);
+            if (!inside) continue;
+
+            const auto interpolate = [area, e0, e1, e2](
+                                         std::uint32_t ca,
+                                         std::uint32_t cb,
+                                         std::uint32_t cc) noexcept {
+                const auto numerator =
+                    static_cast<std::int64_t>(ca) * e1 +
+                    static_cast<std::int64_t>(cb) * e2 +
+                    static_cast<std::int64_t>(cc) * e0;
+                return static_cast<std::uint32_t>(numerator / area);
+            };
+            const auto red = interpolate(color_a.red, color_b.red, color_c.red);
+            const auto green = interpolate(color_a.green, color_b.green, color_c.green);
+            const auto blue = interpolate(color_a.blue, color_b.blue, color_c.blue);
+            const auto rgb24 = red | (green << 8u) | (blue << 16u);
+            psx_gpu_write_render_pixel(
+                bus, x, y, psx_gpu_bgr555(rgb24), semi_transparent);
+        }
+    }
+}
+
 } // namespace psx_gpu_polygon_detail
 
 inline void psx_gpu_execute_flat_polygon(PsxBus& bus) noexcept {
@@ -86,5 +162,27 @@ inline void psx_gpu_execute_flat_polygon(PsxBus& bus) noexcept {
         const auto v4 = psx_gpu_polygon_detail::decode_vertex(bus, bus.gpu_gp0_packet[4]);
         psx_gpu_polygon_detail::raster_flat_triangle(
             bus, v2, v3, v4, color, semi_transparent);
+    }
+}
+
+inline void psx_gpu_execute_gouraud_polygon(PsxBus& bus) noexcept {
+    const auto command = bus.gpu_gp0_packet[0];
+    const bool quad = (command & (1u << 27u)) != 0u;
+    const bool semi_transparent = (command & (1u << 25u)) != 0u;
+
+    const auto c1 = psx_gpu_polygon_detail::decode_color(command);
+    const auto v1 = psx_gpu_polygon_detail::decode_vertex(bus, bus.gpu_gp0_packet[1]);
+    const auto c2 = psx_gpu_polygon_detail::decode_color(bus.gpu_gp0_packet[2]);
+    const auto v2 = psx_gpu_polygon_detail::decode_vertex(bus, bus.gpu_gp0_packet[3]);
+    const auto c3 = psx_gpu_polygon_detail::decode_color(bus.gpu_gp0_packet[4]);
+    const auto v3 = psx_gpu_polygon_detail::decode_vertex(bus, bus.gpu_gp0_packet[5]);
+    psx_gpu_polygon_detail::raster_gouraud_triangle(
+        bus, v1, v2, v3, c1, c2, c3, semi_transparent);
+
+    if (quad) {
+        const auto c4 = psx_gpu_polygon_detail::decode_color(bus.gpu_gp0_packet[6]);
+        const auto v4 = psx_gpu_polygon_detail::decode_vertex(bus, bus.gpu_gp0_packet[7]);
+        psx_gpu_polygon_detail::raster_gouraud_triangle(
+            bus, v2, v3, v4, c2, c3, c4, semi_transparent);
     }
 }
