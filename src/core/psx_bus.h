@@ -291,6 +291,7 @@ inline void psx_gpu_write_render_pixel(PsxBus& bus,
 #include "core/psx_gpu_texture.inl"
 #include "core/psx_gpu_polygon.inl"
 #include "core/psx_gpu_line.inl"
+#include "core/psx_gpu_transfer.inl"
 
 inline void psx_gpu_execute_render_rectangle(PsxBus& bus) noexcept {
     const auto command = bus.gpu_gp0_packet[0];
@@ -360,6 +361,7 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
     constexpr std::uint8_t image_payload_state = 0xffu;
     bus.gpu_gp0_write_latch = value;
 
+    if (psx_gpu_vram_to_cpu_active(bus)) return;
     if (psx_gpu_consume_polyline_word(bus, value)) return;
 
     if (bus.gpu_gp0_packet_count == image_payload_state) {
@@ -430,15 +432,19 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
             break;
         }
 
+        const bool vram_to_vram = (value >> 29u) == 4u;
         const bool cpu_to_vram = (value >> 29u) == 5u;
+        const bool vram_to_cpu = (value >> 29u) == 6u;
         const bool polygon = (value >> 29u) == 1u;
         const bool line = (value >> 29u) == 2u;
         const bool rectangle = (value >> 29u) == 3u;
         const bool gouraud = (value & (1u << 28u)) != 0u;
         const bool quad = (value & (1u << 27u)) != 0u;
         const bool textured = (value & (1u << 26u)) != 0u;
-        if (command == 0x02u || cpu_to_vram) {
+        if (command == 0x02u || cpu_to_vram || vram_to_cpu) {
             bus.gpu_gp0_packet_words = 3u;
+        } else if (vram_to_vram) {
+            bus.gpu_gp0_packet_words = 4u;
         } else if (polygon) {
             if (textured) {
                 if (gouraud) {
@@ -470,7 +476,18 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
     bus.gpu_gp0_packet[bus.gpu_gp0_packet_count++] = value;
     if (bus.gpu_gp0_packet_count != bus.gpu_gp0_packet_words) return;
 
-    if ((bus.gpu_gp0_packet[0] >> 29u) == 5u) {
+    const auto transfer_group = bus.gpu_gp0_packet[0] >> 29u;
+    if (transfer_group == 4u) {
+        psx_gpu_execute_vram_to_vram(bus);
+        bus.gpu_gp0_packet_count = 0u;
+        bus.gpu_gp0_packet_words = 0u;
+        return;
+    }
+    if (transfer_group == 6u) {
+        psx_gpu_begin_vram_to_cpu(bus);
+        return;
+    }
+    if (transfer_group == 5u) {
         const auto destination = bus.gpu_gp0_packet[1];
         const auto raw_size = bus.gpu_gp0_packet[2];
         const auto raw_width = raw_size & 0xffffu;
@@ -963,6 +980,15 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     return {PsxBusAccessReason::ok, value};
 }
 
+[[nodiscard]] inline PsxBusReadU32Result psx_bus_read_u32(PsxBus& bus,
+                                                           std::uint32_t address) noexcept {
+    if ((address & 3u) != 0u) return {PsxBusAccessReason::misaligned, 0u};
+    if (address == PsxBus::gpu_gp0_address && psx_gpu_vram_to_cpu_active(bus)) {
+        return {PsxBusAccessReason::ok, psx_gpu_read_vram_to_cpu_word(bus)};
+    }
+    return psx_bus_read_u32(static_cast<const PsxBus&>(bus), address);
+}
+
 [[nodiscard]] inline PsxBusAccessReason psx_bus_write_u8(PsxBus& bus,
                                                           std::uint32_t address,
                                                           std::uint8_t value) noexcept {
@@ -1258,6 +1284,7 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
             bus.gpu_polyline_active = false;
             bus.gpu_polyline_gouraud = false;
             bus.gpu_polyline_expect_color = false;
+            bus.gpu_status &= ~(1u << 27u);
             return PsxBusAccessReason::ok;
         }
         if (command == 0x02u) {
