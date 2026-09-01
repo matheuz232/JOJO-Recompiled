@@ -5,7 +5,9 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(jojo_psx_dma_control_tests main.cpp)
+add_executable(jojo_psx_dma_control_tests
+  main.cpp
+  dma3_contract.cpp)
 target_include_directories(jojo_psx_dma_control_tests PRIVATE ../../src)
 
 if(MSVC)
