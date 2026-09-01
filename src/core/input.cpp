@@ -1,4 +1,5 @@
 #include "core/input.h"
+#include "core/psx_pad.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -31,6 +32,12 @@ bool binding_active(const InputBinding& binding, const InputDeviceState& device,
         }
     }
     return false;
+}
+
+void set_psx_button(std::uint16_t& buttons, unsigned bit, bool pressed) noexcept {
+    if (pressed) {
+        buttons = static_cast<std::uint16_t>(buttons & ~(std::uint16_t{1u} << bit));
+    }
 }
 
 }
@@ -191,6 +198,42 @@ ResolvedInputFrame resolve_player_actions(const InputSettings& settings,
         }
     }
     return result;
+}
+
+PsxDigitalPadState make_psx_digital_pad_state(const ResolvedPlayerInput& input) noexcept {
+    PsxDigitalPadState pad{};
+    set_psx_button(pad.buttons, 3u,
+                   input.pressed(GameAction::start) || input.pressed(GameAction::pause));
+    set_psx_button(pad.buttons, 4u, input.pressed(GameAction::up));
+    set_psx_button(pad.buttons, 5u, input.pressed(GameAction::right));
+    set_psx_button(pad.buttons, 6u, input.pressed(GameAction::down));
+    set_psx_button(pad.buttons, 7u, input.pressed(GameAction::left));
+
+    // JoJo's original PlayStation defaults:
+    // Triangle=Medium, Circle=Heavy, Cross=Stand, Square=Light.
+    set_psx_button(pad.buttons, 12u, input.pressed(GameAction::attack_medium));
+    set_psx_button(pad.buttons, 13u, input.pressed(GameAction::attack_heavy));
+    set_psx_button(pad.buttons, 14u, input.pressed(GameAction::stand));
+    set_psx_button(pad.buttons, 15u, input.pressed(GameAction::attack_light));
+    return pad;
+}
+
+PsxDigitalPadFrame make_psx_digital_pad_frame(const ResolvedInputFrame& input) noexcept {
+    PsxDigitalPadFrame pads{};
+    for (std::size_t player = 0; player < pads.size(); ++player) {
+        pads[player] = make_psx_digital_pad_state(input[player]);
+    }
+    return pads;
+}
+
+PsxDigitalPadResponse psx_digital_pad_poll_response(const PsxDigitalPadState& pad) noexcept {
+    return {
+        0xffu,
+        0x41u,
+        0x5au,
+        static_cast<std::uint8_t>(pad.buttons),
+        static_cast<std::uint8_t>(pad.buttons >> 8u),
+    };
 }
 
 Result<InputBinding> capture_binding(std::string_view device_id,
