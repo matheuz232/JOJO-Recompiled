@@ -248,3 +248,7 @@ add_test(NAME jojo_psx_runtime_tests COMMAND jojo_psx_runtime_tests)
 add_executable(jojo_psx_gte_command_tests tests/test_psx_gte_commands.cpp)
 target_link_libraries(jojo_psx_gte_command_tests PRIVATE jojo_core)
 add_test(NAME jojo_psx_gte_command_tests COMMAND jojo_psx_gte_command_tests)
+
+add_executable(jojo_psx_cdrom_tests tests/test_psx_cdrom.cpp)
+target_link_libraries(jojo_psx_cdrom_tests PRIVATE jojo_core)
+add_test(NAME jojo_psx_cdrom_tests COMMAND jojo_psx_cdrom_tests)
