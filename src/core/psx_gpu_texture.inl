@@ -115,13 +115,19 @@ inline void psx_gpu_execute_textured_rectangle(PsxBus& bus) noexcept {
     const auto base_u = static_cast<std::uint8_t>(uv);
     const auto base_v = static_cast<std::uint8_t>(uv >> 8u);
     const auto clut = static_cast<std::uint16_t>(uv >> 16u);
+    const bool flip_x = (bus.gpu_draw_mode & (1u << 12u)) != 0u;
+    const bool flip_y = (bus.gpu_draw_mode & (1u << 13u)) != 0u;
 
     for (std::uint32_t row = 0u; row < height; ++row) {
         for (std::uint32_t column = 0u; column < width; ++column) {
+            const auto u_delta = static_cast<std::uint8_t>(column);
+            const auto v_delta = static_cast<std::uint8_t>(row);
             const auto u = static_cast<std::uint8_t>(
-                static_cast<std::uint32_t>(base_u) + column);
+                flip_x ? static_cast<std::uint8_t>(base_u - u_delta)
+                       : static_cast<std::uint8_t>(base_u + u_delta));
             const auto v = static_cast<std::uint8_t>(
-                static_cast<std::uint32_t>(base_v) + row);
+                flip_y ? static_cast<std::uint8_t>(base_v - v_delta)
+                       : static_cast<std::uint8_t>(base_v + v_delta));
             const auto pixel = psx_gpu_texture_detail::sample_texture(bus, u, v, clut);
             if (pixel == 0u) continue;
             psx_gpu_write_render_pixel(
