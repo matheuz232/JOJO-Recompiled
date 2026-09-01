@@ -122,6 +122,12 @@ struct PsxBus {
     static constexpr std::uint16_t interrupt_status_valid_bits = 0x07ffu;
     static constexpr std::uint16_t interrupt_mask_valid_bits = 0x07ffu;
     static constexpr std::uint16_t timer_mode_guest_bits = 0x1fffu;
+    static constexpr std::uint16_t timer_mode_control_bits = 0x03ffu;
+    static constexpr std::uint16_t timer_mode_interrupt_request = 1u << 10u;
+    static constexpr std::uint16_t timer_mode_reached_target = 1u << 11u;
+    static constexpr std::uint16_t timer_mode_reached_ffff = 1u << 12u;
+    static constexpr std::uint16_t timer_mode_read_clear_bits =
+        timer_mode_reached_target | timer_mode_reached_ffff;
     static constexpr std::uint16_t timer_mode_write_epoch = 0x8000u;
     static constexpr std::uint16_t timer_mode_valid_bits =
         timer_mode_guest_bits | timer_mode_write_epoch;
@@ -961,6 +967,18 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     return {PsxBusAccessReason::ok, value};
 }
 
+[[nodiscard]] inline PsxBusReadU16Result psx_bus_read_u16(PsxBus& bus,
+                                                           std::uint32_t address) noexcept {
+    const auto read_mode = [](std::uint16_t& mode) noexcept -> PsxBusReadU16Result {
+        const auto value = static_cast<std::uint16_t>(mode & PsxBus::timer_mode_guest_bits);
+        mode = static_cast<std::uint16_t>(mode & ~PsxBus::timer_mode_read_clear_bits);
+        return {PsxBusAccessReason::ok, value};
+    };
+    if (address == PsxBus::timer0_mode_address) return read_mode(bus.timer0_mode);
+    if (address == PsxBus::timer1_mode_address) return read_mode(bus.timer1_mode);
+    if (address == PsxBus::timer2_mode_address) return read_mode(bus.timer2_mode);
+    return psx_bus_read_u16(static_cast<const PsxBus&>(bus), address);
+}
 [[nodiscard]] inline std::uint32_t psx_gpu_status_value(const PsxBus& bus) noexcept {
     constexpr std::uint32_t data_request = 1u << 25u;
     constexpr std::uint32_t ready_command = 1u << 26u;
@@ -1058,6 +1076,12 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
 [[nodiscard]] inline PsxBusReadU32Result psx_bus_read_u32(PsxBus& bus,
                                                            std::uint32_t address) noexcept {
     if ((address & 3u) != 0u) return {PsxBusAccessReason::misaligned, 0u};
+    if (address == PsxBus::timer0_mode_address ||
+        address == PsxBus::timer1_mode_address ||
+        address == PsxBus::timer2_mode_address) {
+        const auto mode = psx_bus_read_u16(bus, address);
+        return {mode.reason, static_cast<std::uint32_t>(mode.value)};
+    }
     if (address == PsxBus::gpu_gp0_address && psx_gpu_vram_to_cpu_active(bus)) {
         return {PsxBusAccessReason::ok, psx_gpu_read_vram_to_cpu_word(bus)};
     }
@@ -1156,7 +1180,7 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     if (address == PsxBus::timer0_current_address) { bus.timer0_current = value; bus.timer0_reset_pending = false; return PsxBusAccessReason::ok; }
     if (address == PsxBus::timer0_mode_address) {
         const auto next_epoch = static_cast<std::uint16_t>((bus.timer0_mode ^ PsxBus::timer_mode_write_epoch) & PsxBus::timer_mode_write_epoch);
-        bus.timer0_mode = static_cast<std::uint16_t>((value & PsxBus::timer_mode_guest_bits) | next_epoch);
+        bus.timer0_mode = static_cast<std::uint16_t>((value & PsxBus::timer_mode_control_bits) | PsxBus::timer_mode_interrupt_request | next_epoch);
         bus.timer0_current = 0u;
         bus.timer0_reset_pending = false;
         bus.timer0_irq_fired = false;
@@ -1166,7 +1190,7 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     if (address == PsxBus::timer1_current_address) { bus.timer1_current = value; bus.timer1_reset_pending = false; return PsxBusAccessReason::ok; }
     if (address == PsxBus::timer1_mode_address) {
         const auto next_epoch = static_cast<std::uint16_t>((bus.timer1_mode ^ PsxBus::timer_mode_write_epoch) & PsxBus::timer_mode_write_epoch);
-        bus.timer1_mode = static_cast<std::uint16_t>((value & PsxBus::timer_mode_guest_bits) | next_epoch);
+        bus.timer1_mode = static_cast<std::uint16_t>((value & PsxBus::timer_mode_control_bits) | PsxBus::timer_mode_interrupt_request | next_epoch);
         bus.timer1_current = 0u;
         bus.timer1_reset_pending = false;
         bus.timer1_irq_fired = false;
@@ -1176,7 +1200,7 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     if (address == PsxBus::timer2_current_address) { bus.timer2_current = value; bus.timer2_reset_pending = false; return PsxBusAccessReason::ok; }
     if (address == PsxBus::timer2_mode_address) {
         const auto next_epoch = static_cast<std::uint16_t>((bus.timer2_mode ^ PsxBus::timer_mode_write_epoch) & PsxBus::timer_mode_write_epoch);
-        bus.timer2_mode = static_cast<std::uint16_t>((value & PsxBus::timer_mode_guest_bits) | next_epoch);
+        bus.timer2_mode = static_cast<std::uint16_t>((value & PsxBus::timer_mode_control_bits) | PsxBus::timer_mode_interrupt_request | next_epoch);
         bus.timer2_current = 0u;
         bus.timer2_reset_pending = false;
         bus.timer2_irq_fired = false;
@@ -1526,7 +1550,7 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
 
 inline void psx_bus_tick_root_counter(PsxBus& bus,
                                               std::uint16_t& current,
-                                              std::uint16_t mode,
+                                              std::uint16_t& mode,
                                               std::uint16_t target,
                                               bool& reset_pending,
                                               bool& irq_fired,
@@ -1545,6 +1569,8 @@ inline void psx_bus_tick_root_counter(PsxBus& bus,
         current = static_cast<std::uint16_t>(current + 1u);
         const bool hit_target = current == target;
         const bool hit_ffff = current == 0xffffu;
+        if (hit_target) mode = static_cast<std::uint16_t>(mode | PsxBus::timer_mode_reached_target);
+        if (hit_ffff) mode = static_cast<std::uint16_t>(mode | PsxBus::timer_mode_reached_ffff);
         const bool irq_enabled =
             (hit_target && (mode & irq_at_target) != 0u) ||
             (hit_ffff && (mode & irq_at_ffff) != 0u);

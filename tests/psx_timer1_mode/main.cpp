@@ -23,7 +23,7 @@ int main() {
 
     const auto mode = jojo::psx_bus_read_u16(bus, 0x1f801114u);
     CHECK(mode.reason == jojo::PsxBusAccessReason::ok);
-    CHECK(mode.value == 0x0100u);
+    CHECK(mode.value == 0x0500u);
 
     const auto counter = jojo::psx_bus_read_u16(bus, 0x1f801110u);
     CHECK(counter.reason == jojo::PsxBusAccessReason::ok);
@@ -38,7 +38,7 @@ int main() {
     CHECK(result.reason == jojo::PsxR3000aStepReason::ok);
     CHECK(cpu.pc == 0x8003cc50u);
     CHECK(cpu.next_pc == 0x8003cc54u);
-    CHECK(jojo::psx_bus_read_u16(bus, 0x1f801114u).value == 0x0100u);
+    CHECK(jojo::psx_bus_read_u16(bus, 0x1f801114u).value == 0x0500u);
 
     // Real SLUS_010.60 frontier at 8003C234h reads Timer 1 current with LW.
     // Hardware defines only bits 0-15; bits 16-31 are garbage, so assert only
