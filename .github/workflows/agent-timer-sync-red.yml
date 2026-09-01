@@ -1,4 +1,4 @@
-name: agent-timer-sync-red
+name: agent-timer-sync-patch
 
 on:
   push:
@@ -7,14 +7,216 @@ on:
     paths:
       - .github/workflows/agent-timer-sync-red.yml
 
+permissions:
+  contents: write
+
 jobs:
-  red:
+  patch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply root-counter sync edge behavior
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/core/psx_bus.h')
+          text = path.read_text()
+
+          def one(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              text = text.replace(old, new, 1)
+
+          one(
+              '    bool timer0_irq_fired{};\n'
+              '    bool timer1_irq_fired{};\n'
+              '    bool timer2_irq_fired{};\n'
+              '    std::uint8_t timer2_clock_phase{};\n',
+              '    bool timer0_irq_fired{};\n'
+              '    bool timer1_irq_fired{};\n'
+              '    bool timer2_irq_fired{};\n'
+              '    bool timer0_sync_started{};\n'
+              '    bool timer1_sync_started{};\n'
+              '    std::uint8_t timer2_clock_phase{};\n',
+              'sync state fields')
+
+          one(
+              '        bus.timer0_reset_pending = false;\n'
+              '        bus.timer0_irq_fired = false;\n'
+              '        return PsxBusAccessReason::ok;\n',
+              '        bus.timer0_reset_pending = false;\n'
+              '        bus.timer0_irq_fired = false;\n'
+              '        bus.timer0_sync_started = false;\n'
+              '        return PsxBusAccessReason::ok;\n',
+              'timer0 mode rearm')
+          one(
+              '        bus.timer1_reset_pending = false;\n'
+              '        bus.timer1_irq_fired = false;\n'
+              '        return PsxBusAccessReason::ok;\n',
+              '        bus.timer1_reset_pending = false;\n'
+              '        bus.timer1_irq_fired = false;\n'
+              '        bus.timer1_sync_started = false;\n'
+              '        return PsxBusAccessReason::ok;\n',
+              'timer1 mode rearm')
+
+          old_clock = '''    if ((bus.timer0_mode & synchronization_enable) == 0u) {
+        const auto source = static_cast<std::uint16_t>((bus.timer0_mode >> 8u) & 3u);
+        if (source == 0u || source == 2u) {
+            psx_bus_tick_root_counter(bus, bus.timer0_current, bus.timer0_mode,
+                                      bus.timer0_target, bus.timer0_reset_pending,
+                                      bus.timer0_irq_fired, timer0_interrupt, cpu_cycles);
+        }
+    }
+    if ((bus.timer1_mode & synchronization_enable) == 0u) {
+        const auto source = static_cast<std::uint16_t>((bus.timer1_mode >> 8u) & 3u);
+        if (source == 0u || source == 2u) {
+            psx_bus_tick_root_counter(bus, bus.timer1_current, bus.timer1_mode,
+                                      bus.timer1_target, bus.timer1_reset_pending,
+                                      bus.timer1_irq_fired, timer1_interrupt, cpu_cycles);
+        }
+    }
+    if ((bus.timer2_mode & synchronization_enable) == 0u) {
+        const auto source = static_cast<std::uint16_t>((bus.timer2_mode >> 8u) & 3u);
+        if (source == 0u || source == 1u) {
+            psx_bus_tick_root_counter(bus, bus.timer2_current, bus.timer2_mode,
+                                      bus.timer2_target, bus.timer2_reset_pending,
+                                      bus.timer2_irq_fired, timer2_interrupt, cpu_cycles);
+        } else {
+            const auto total = static_cast<std::uint64_t>(bus.timer2_clock_phase) + cpu_cycles;
+            const auto counter_ticks = static_cast<std::uint32_t>(total / 8u);
+            bus.timer2_clock_phase = static_cast<std::uint8_t>(total % 8u);
+            psx_bus_tick_root_counter(bus, bus.timer2_current, bus.timer2_mode,
+                                      bus.timer2_target, bus.timer2_reset_pending,
+                                      bus.timer2_irq_fired, timer2_interrupt, counter_ticks);
+        }
+    }
+'''
+          new_clock = '''    const auto sync_mode = [](std::uint16_t mode) noexcept {
+        return static_cast<std::uint16_t>((mode >> 1u) & 3u);
+    };
+    const bool timer0_sync = (bus.timer0_mode & synchronization_enable) != 0u;
+    const auto timer0_sync_mode = sync_mode(bus.timer0_mode);
+    const bool timer0_system_clock_allowed =
+        !timer0_sync || timer0_sync_mode == 1u ||
+        (timer0_sync_mode == 3u && bus.timer0_sync_started);
+    if (timer0_system_clock_allowed) {
+        const auto source = static_cast<std::uint16_t>((bus.timer0_mode >> 8u) & 3u);
+        if (source == 0u || source == 2u) {
+            psx_bus_tick_root_counter(bus, bus.timer0_current, bus.timer0_mode,
+                                      bus.timer0_target, bus.timer0_reset_pending,
+                                      bus.timer0_irq_fired, timer0_interrupt, cpu_cycles);
+        }
+    }
+
+    const bool timer1_sync = (bus.timer1_mode & synchronization_enable) != 0u;
+    const auto timer1_sync_mode = sync_mode(bus.timer1_mode);
+    const bool timer1_system_clock_allowed =
+        !timer1_sync || timer1_sync_mode == 1u ||
+        (timer1_sync_mode == 3u && bus.timer1_sync_started);
+    if (timer1_system_clock_allowed) {
+        const auto source = static_cast<std::uint16_t>((bus.timer1_mode >> 8u) & 3u);
+        if (source == 0u || source == 2u) {
+            psx_bus_tick_root_counter(bus, bus.timer1_current, bus.timer1_mode,
+                                      bus.timer1_target, bus.timer1_reset_pending,
+                                      bus.timer1_irq_fired, timer1_interrupt, cpu_cycles);
+        }
+    }
+
+    const bool timer2_sync = (bus.timer2_mode & synchronization_enable) != 0u;
+    const auto timer2_sync_mode = sync_mode(bus.timer2_mode);
+    const bool timer2_clock_allowed =
+        !timer2_sync || timer2_sync_mode == 1u || timer2_sync_mode == 2u;
+    if (timer2_clock_allowed) {
+        const auto source = static_cast<std::uint16_t>((bus.timer2_mode >> 8u) & 3u);
+        if (source == 0u || source == 1u) {
+            psx_bus_tick_root_counter(bus, bus.timer2_current, bus.timer2_mode,
+                                      bus.timer2_target, bus.timer2_reset_pending,
+                                      bus.timer2_irq_fired, timer2_interrupt, cpu_cycles);
+        } else {
+            const auto total = static_cast<std::uint64_t>(bus.timer2_clock_phase) + cpu_cycles;
+            const auto counter_ticks = static_cast<std::uint32_t>(total / 8u);
+            bus.timer2_clock_phase = static_cast<std::uint8_t>(total % 8u);
+            psx_bus_tick_root_counter(bus, bus.timer2_current, bus.timer2_mode,
+                                      bus.timer2_target, bus.timer2_reset_pending,
+                                      bus.timer2_irq_fired, timer2_interrupt, counter_ticks);
+        }
+    }
+'''
+          one(old_clock, new_clock, 'root counter clock selection')
+
+          old_hblank = '''    while (bus.video_clock_phase >= phase_per_hblank) {
+        bus.video_clock_phase -= phase_per_hblank;
+        if ((bus.timer1_mode & timer1_hblank_clock) != 0u) {
+            psx_bus_tick_root_counter(bus, bus.timer1_current, bus.timer1_mode,
+                                      bus.timer1_target, bus.timer1_reset_pending,
+                                      bus.timer1_irq_fired, timer1_interrupt, 1u);
+        }
+        bus.gpu_scanline = static_cast<std::uint16_t>(bus.gpu_scanline + 1u);
+        if (bus.gpu_scanline == ntsc_vblank_start_line) bus.interrupt_status = static_cast<std::uint16_t>(bus.interrupt_status | vblank_interrupt);
+        else if (bus.gpu_scanline == ntsc_scanlines_per_frame) bus.gpu_scanline = 0u;
+    }
+'''
+          new_hblank = '''    while (bus.video_clock_phase >= phase_per_hblank) {
+        bus.video_clock_phase -= phase_per_hblank;
+
+        if (timer0_sync) {
+            if (timer0_sync_mode == 1u) {
+                bus.timer0_current = 0u;
+                bus.timer0_reset_pending = false;
+            } else if (timer0_sync_mode == 3u) {
+                bus.timer0_sync_started = true;
+            }
+        }
+
+        if ((bus.timer1_mode & timer1_hblank_clock) != 0u) {
+            const bool timer1_hblank_clock_allowed =
+                !timer1_sync || timer1_sync_mode == 1u ||
+                (timer1_sync_mode == 3u && bus.timer1_sync_started);
+            if (timer1_hblank_clock_allowed) {
+                psx_bus_tick_root_counter(bus, bus.timer1_current, bus.timer1_mode,
+                                          bus.timer1_target, bus.timer1_reset_pending,
+                                          bus.timer1_irq_fired, timer1_interrupt, 1u);
+            }
+        }
+        bus.gpu_scanline = static_cast<std::uint16_t>(bus.gpu_scanline + 1u);
+        if (bus.gpu_scanline == ntsc_vblank_start_line) {
+            bus.interrupt_status = static_cast<std::uint16_t>(
+                bus.interrupt_status | vblank_interrupt);
+            if (timer1_sync) {
+                if (timer1_sync_mode == 1u) {
+                    bus.timer1_current = 0u;
+                    bus.timer1_reset_pending = false;
+                } else if (timer1_sync_mode == 3u) {
+                    bus.timer1_sync_started = true;
+                }
+            }
+        } else if (bus.gpu_scanline == ntsc_scanlines_per_frame) {
+            bus.gpu_scanline = 0u;
+        }
+    }
+'''
+          one(old_hblank, new_hblank, 'blank-edge synchronization')
+
+          path.write_text(text)
+          PY
+          git diff --check
+          git diff -- src/core/psx_bus.h
       - name: Configure timer sync contract
         run: cmake -S tests/psx_timer1_mode -B build/psx_timer1_mode -DCMAKE_BUILD_TYPE=Release
       - name: Build timer sync contract
         run: cmake --build build/psx_timer1_mode --parallel 2
       - name: Run timer sync contract
         run: ./build/psx_timer1_mode/jojo_psx_timer1_mode_tests
+      - name: Commit root-counter sync edge behavior
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/core/psx_bus.h
+          git commit -m 'feat: implement PS1 root-counter sync edges'
+          git push origin HEAD:feature/offline-product-rebuild
