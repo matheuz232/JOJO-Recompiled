@@ -130,12 +130,61 @@ void test_variable_texture_window_repeats_source_coordinates() {
     TEX_REQUIRE(bus.gpu_vram[90u * jojo::PsxBus::gpu_vram_width + 83u] == 0x4444u);
 }
 
+void test_rectangle_texture_xy_flip_decrements_uv() {
+    jojo::PsxBus bus{};
+    configure_full_drawing_area(bus);
+
+    constexpr std::uint32_t page_x = 320u;
+    constexpr std::uint32_t u = 10u;
+    constexpr std::uint32_t v = 10u;
+    gp0(bus, 0xe1003105u); // page X=320, 15-bit mode, X+Y flip.
+
+    // With both flips, a 2x2 sprite starting at UV(10,10) samples:
+    // (10,10), (9,10), (10,9), (9,9).
+    bus.gpu_vram[10u * jojo::PsxBus::gpu_vram_width + page_x + 10u] = 0x1111u;
+    bus.gpu_vram[10u * jojo::PsxBus::gpu_vram_width + page_x + 9u] = 0x2222u;
+    bus.gpu_vram[9u * jojo::PsxBus::gpu_vram_width + page_x + 10u] = 0x3333u;
+    bus.gpu_vram[9u * jojo::PsxBus::gpu_vram_width + page_x + 9u] = 0x4444u;
+
+    gp0(bus, 0x65000000u);
+    gp0(bus, vertex(100u, 120u));
+    gp0(bus, uv_word(u, v, 0u));
+    gp0(bus, (2u << 16u) | 2u);
+
+    TEX_REQUIRE(bus.gpu_vram[120u * jojo::PsxBus::gpu_vram_width + 100u] == 0x1111u);
+    TEX_REQUIRE(bus.gpu_vram[120u * jojo::PsxBus::gpu_vram_width + 101u] == 0x2222u);
+    TEX_REQUIRE(bus.gpu_vram[121u * jojo::PsxBus::gpu_vram_width + 100u] == 0x3333u);
+    TEX_REQUIRE(bus.gpu_vram[121u * jojo::PsxBus::gpu_vram_width + 101u] == 0x4444u);
+}
+
+void test_neutral_texture_modulation_preserves_texel() {
+    jojo::PsxBus bus{};
+    configure_full_drawing_area(bus);
+
+    constexpr std::uint32_t page_x = 384u;
+    constexpr std::uint32_t u = 5u;
+    constexpr std::uint32_t v = 6u;
+    constexpr std::uint16_t texel = 0x4210u;
+    gp0(bus, 0xe1000106u); // page X=384, direct 15-bit mode.
+    bus.gpu_vram[v * jojo::PsxBus::gpu_vram_width + page_x + u] = texel;
+
+    // Raw bit clear means modulation. RGB 80/80/80 is the hardware-neutral
+    // brightness because each channel is texel*128/128.
+    gp0(bus, 0x6c808080u);
+    gp0(bus, vertex(130u, 140u));
+    gp0(bus, uv_word(u, v, 0u));
+
+    TEX_REQUIRE(bus.gpu_vram[140u * jojo::PsxBus::gpu_vram_width + 130u] == texel);
+}
+
 struct TextureContractRunner {
     TextureContractRunner() {
         test_raw_4bit_clut_sprite();
         test_raw_8bit_clut_sprite();
         test_raw_15bit_sprite_and_zero_transparency();
         test_variable_texture_window_repeats_source_coordinates();
+        test_rectangle_texture_xy_flip_decrements_uv();
+        test_neutral_texture_modulation_preserves_texel();
     }
 };
 
