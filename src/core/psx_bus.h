@@ -49,12 +49,15 @@ struct PsxBus {
     static constexpr std::uint32_t interrupt_status_address = 0x1f801070u;
     static constexpr std::uint32_t interrupt_mask_address = 0x1f801074u;
     static constexpr std::uint16_t cdrom_interrupt_request = 1u << 2u;
-    static constexpr std::uint32_t dma4_base_address = 0x1f8010c0u;
-    static constexpr std::uint32_t dma4_block_control_address = 0x1f8010c4u;
-    static constexpr std::uint32_t dma4_channel_control_address = 0x1f8010c8u;
     static constexpr std::uint32_t dma2_base_address = 0x1f8010a0u;
     static constexpr std::uint32_t dma2_block_control_address = 0x1f8010a4u;
     static constexpr std::uint32_t dma2_channel_control_address = 0x1f8010a8u;
+    static constexpr std::uint32_t dma3_base_address = 0x1f8010b0u;
+    static constexpr std::uint32_t dma3_block_control_address = 0x1f8010b4u;
+    static constexpr std::uint32_t dma3_channel_control_address = 0x1f8010b8u;
+    static constexpr std::uint32_t dma4_base_address = 0x1f8010c0u;
+    static constexpr std::uint32_t dma4_block_control_address = 0x1f8010c4u;
+    static constexpr std::uint32_t dma4_channel_control_address = 0x1f8010c8u;
     static constexpr std::uint32_t dma6_base_address = 0x1f8010e0u;
     static constexpr std::uint32_t dma6_block_control_address = 0x1f8010e4u;
     static constexpr std::uint32_t dma6_channel_control_address = 0x1f8010e8u;
@@ -131,6 +134,9 @@ struct PsxBus {
     std::uint32_t dma2_base{};
     std::uint32_t dma2_block_control{};
     std::uint32_t dma2_channel_control{};
+    std::uint32_t dma3_base{};
+    std::uint32_t dma3_block_control{};
+    std::uint32_t dma3_channel_control{};
     std::uint32_t dma6_base{};
     std::uint32_t dma6_block_control{};
     std::uint32_t dma6_channel_control{};
@@ -650,6 +656,15 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     if (address == PsxBus::dma2_channel_control_address) {
         return {PsxBusAccessReason::ok, bus.dma2_channel_control};
     }
+    if (address == PsxBus::dma3_base_address) {
+        return {PsxBusAccessReason::ok, bus.dma3_base};
+    }
+    if (address == PsxBus::dma3_block_control_address) {
+        return {PsxBusAccessReason::ok, bus.dma3_block_control};
+    }
+    if (address == PsxBus::dma3_channel_control_address) {
+        return {PsxBusAccessReason::ok, bus.dma3_channel_control};
+    }
     if (address == PsxBus::dma6_base_address) {
         return {PsxBusAccessReason::ok, bus.dma6_base};
     }
@@ -977,6 +992,50 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
             return PsxBusAccessReason::unmapped;
         }
         bus.dma2_channel_control = value & PsxBus::dma2_channel_control_mask;
+        return PsxBusAccessReason::ok;
+    }
+    if (address == PsxBus::dma3_base_address) {
+        bus.dma3_base = value & 0x00ffffffu;
+        return PsxBusAccessReason::ok;
+    }
+    if (address == PsxBus::dma3_block_control_address) {
+        bus.dma3_block_control = value;
+        return PsxBusAccessReason::ok;
+    }
+    if (address == PsxBus::dma3_channel_control_address) {
+        constexpr std::uint32_t cdrom_burst_to_ram = 0x11000000u;
+        if ((value & PsxBus::dma_channel_start_busy) == 0u) {
+            bus.dma3_channel_control = value;
+            return PsxBusAccessReason::ok;
+        }
+        if (value != cdrom_burst_to_ram) return PsxBusAccessReason::unmapped;
+
+        const auto encoded_words = bus.dma3_block_control & 0xffffu;
+        const auto word_count = encoded_words == 0u ? 0x10000u : encoded_words;
+        const auto byte_count = static_cast<std::uint64_t>(word_count) * 4u;
+        if (byte_count > bus.cdrom_data_count) return PsxBusAccessReason::unmapped;
+
+        auto destination = static_cast<std::size_t>(
+            bus.dma3_base & (PsxBus::main_ram_size - 1u));
+        for (std::uint64_t i = 0u; i < byte_count; ++i) {
+            const auto data = psx_bus_read_u8(bus, PsxBus::cdrom_base_address + 2u);
+            if (data.reason != PsxBusAccessReason::ok) return data.reason;
+            bus.ram[destination] = data.value;
+            destination = (destination + 1u) & (PsxBus::main_ram_size - 1u);
+        }
+
+        // SyncMode 0 keeps MADR and BCR at their programmed start values.
+        bus.dma3_channel_control = value &
+            ~(PsxBus::dma_channel_start_busy | (1u << 28u));
+        const bool previous_master =
+            (psx_bus_dma_interrupt_value(bus) & PsxBus::dma_interrupt_master_flag) != 0u;
+        bus.dma_interrupt |= 1u << 27u;
+        const bool current_master =
+            (psx_bus_dma_interrupt_value(bus) & PsxBus::dma_interrupt_master_flag) != 0u;
+        if (!previous_master && current_master) {
+            bus.interrupt_status = static_cast<std::uint16_t>(
+                bus.interrupt_status | (1u << 3u));
+        }
         return PsxBusAccessReason::ok;
     }
     if (address == PsxBus::dma6_base_address) {
