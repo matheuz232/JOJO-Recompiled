@@ -18,6 +18,17 @@ void gp0(jojo::PsxBus& bus, std::uint32_t value) {
             jojo::PsxBusAccessReason::ok);
 }
 
+void gp1(jojo::PsxBus& bus, std::uint32_t value) {
+    REQUIRE(jojo::psx_bus_write_u32(bus, jojo::PsxBus::gpu_gp1_address, value) ==
+            jojo::PsxBusAccessReason::ok);
+}
+
+std::uint32_t gpu_read(const jojo::PsxBus& bus) {
+    const auto read = jojo::psx_bus_read_u32(bus, jojo::PsxBus::gpu_gp0_address);
+    REQUIRE(read.reason == jojo::PsxBusAccessReason::ok);
+    return read.value;
+}
+
 void test_cpu_to_vram_upload_and_parser_recovery() {
     jojo::PsxBus bus{};
 
@@ -60,10 +71,72 @@ void test_cpu_to_vram_odd_pixel_count_ignores_padding_halfword() {
     REQUIRE(bus.gpu_vram[10u * jojo::PsxBus::gpu_vram_width + 23u] == 0u);
 }
 
+void test_draw_environment_and_internal_register_reads() {
+    jojo::PsxBus bus{};
+
+    constexpr std::uint32_t draw_mode = 0x05a5u;
+    gp0(bus, 0xe1000000u | draw_mode);
+    const auto status = jojo::psx_bus_read_u32(bus, jojo::PsxBus::gpu_gp1_address);
+    REQUIRE(status.reason == jojo::PsxBusAccessReason::ok);
+    REQUIRE((status.value & 0x07ffu) == draw_mode);
+
+    constexpr std::uint32_t texture_window = 0x054321u & 0x000fffffu;
+    gp0(bus, 0xe2000000u | texture_window);
+    gp1(bus, 0x10000002u);
+    REQUIRE(gpu_read(bus) == texture_window);
+
+    constexpr std::uint32_t draw_top_left = 17u | (33u << 10u);
+    gp0(bus, 0xe3000000u | draw_top_left);
+    gp1(bus, 0x10000003u);
+    REQUIRE(gpu_read(bus) == draw_top_left);
+
+    constexpr std::uint32_t draw_bottom_right = 700u | (400u << 10u);
+    gp0(bus, 0xe4000000u | draw_bottom_right);
+    gp1(bus, 0x10000004u);
+    REQUIRE(gpu_read(bus) == draw_bottom_right);
+
+    constexpr std::uint32_t offset_x = static_cast<std::uint32_t>(-7) & 0x7ffu;
+    constexpr std::uint32_t offset_y = 9u & 0x7ffu;
+    constexpr std::uint32_t draw_offset = offset_x | (offset_y << 11u);
+    gp0(bus, 0xe5000000u | draw_offset);
+    gp1(bus, 0x10000005u);
+    REQUIRE(gpu_read(bus) == draw_offset);
+
+    gp0(bus, 0xe6000003u);
+    const auto masked_status = jojo::psx_bus_read_u32(bus, jojo::PsxBus::gpu_gp1_address);
+    REQUIRE(masked_status.reason == jojo::PsxBusAccessReason::ok);
+    REQUIRE(((masked_status.value >> 11u) & 3u) == 3u);
+}
+
+void test_mask_setting_applies_to_cpu_to_vram() {
+    jojo::PsxBus bus{};
+    constexpr std::size_t row = 5u;
+    constexpr std::size_t masked_column = 5u;
+    constexpr std::size_t force_mask_column = 6u;
+
+    bus.gpu_vram[row * jojo::PsxBus::gpu_vram_width + masked_column] = 0x8001u;
+
+    gp0(bus, 0xe6000002u); // Check old mask bit, do not force new mask bit.
+    gp0(bus, 0xa0000000u);
+    gp0(bus, (static_cast<std::uint32_t>(row) << 16u) | masked_column);
+    gp0(bus, 0x00010001u);
+    gp0(bus, 0x00001234u);
+    REQUIRE(bus.gpu_vram[row * jojo::PsxBus::gpu_vram_width + masked_column] == 0x8001u);
+
+    gp0(bus, 0xe6000001u); // Draw always and force mask bit on new data.
+    gp0(bus, 0xa0000000u);
+    gp0(bus, (static_cast<std::uint32_t>(row) << 16u) | force_mask_column);
+    gp0(bus, 0x00010001u);
+    gp0(bus, 0x00001234u);
+    REQUIRE(bus.gpu_vram[row * jojo::PsxBus::gpu_vram_width + force_mask_column] == 0x9234u);
+}
+
 struct GpuContractRunner {
     GpuContractRunner() {
         test_cpu_to_vram_upload_and_parser_recovery();
         test_cpu_to_vram_odd_pixel_count_ignores_padding_halfword();
+        test_draw_environment_and_internal_register_reads();
+        test_mask_setting_applies_to_cpu_to_vram();
     }
 };
 
