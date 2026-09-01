@@ -176,7 +176,7 @@ static void test_mvmva_reserved_matrix_uses_documented_garbage_matrix() {
 
 static void test_sqr_squares_ir_and_saturates_positive_results() {
     jojo::PsxRuntime runtime{};
-    runtime.gte.data[9] = 0xfffffffdu;  // -3
+    runtime.gte.data[9] = 0xfffffffdu;
     runtime.gte.data[10] = 4u;
     runtime.gte.data[11] = 0x100u;
 
@@ -196,9 +196,9 @@ static void test_op_uses_rotation_diagonal_as_second_vector() {
     runtime.gte.data[9] = 1u;
     runtime.gte.data[10] = 2u;
     runtime.gte.data[11] = 3u;
-    runtime.gte.control[0] = 4u; // RT11
-    runtime.gte.control[2] = 5u; // RT22
-    runtime.gte.control[4] = 6u; // RT33
+    runtime.gte.control[0] = 4u;
+    runtime.gte.control[2] = 5u;
+    runtime.gte.control[4] = 6u;
 
     const auto step = run_command(runtime, gte_math_instruction(0x0cu, false, false));
     CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
@@ -252,6 +252,105 @@ static void test_gpl_accumulates_existing_mac_before_fraction_shift() {
     CHECK(runtime.gte.data[10] == 22u);
     CHECK(runtime.gte.data[11] == 33u);
     CHECK((runtime.gte.data[22] >> 24u) == 0x34u);
+}
+
+static void test_rtps_projects_v0_and_advances_screen_depth_fifos() {
+    jojo::PsxRuntime runtime{};
+    set_identity_matrix(runtime.gte, 0u);
+    runtime.gte.data[0] = pack_sxy(100, 200);
+    runtime.gte.data[1] = 400u;
+    runtime.gte.data[12] = pack_sxy(1, 2);
+    runtime.gte.data[13] = pack_sxy(3, 4);
+    runtime.gte.data[14] = pack_sxy(5, 6);
+    runtime.gte.data[16] = 10u;
+    runtime.gte.data[17] = 20u;
+    runtime.gte.data[18] = 30u;
+    runtime.gte.data[19] = 40u;
+    runtime.gte.control[24] = 0u;
+    runtime.gte.control[25] = 0u;
+    runtime.gte.control[26] = 200u;
+    runtime.gte.control[27] = 0u;
+    runtime.gte.control[28] = 0u;
+
+    const auto step = run_command(runtime, 0x4a180001u);
+    CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.gte.data[25] == 100u);
+    CHECK(runtime.gte.data[26] == 200u);
+    CHECK(runtime.gte.data[27] == 400u);
+    CHECK(runtime.gte.data[9] == 100u);
+    CHECK(runtime.gte.data[10] == 200u);
+    CHECK(runtime.gte.data[11] == 400u);
+    CHECK(runtime.gte.data[16] == 20u);
+    CHECK(runtime.gte.data[17] == 30u);
+    CHECK(runtime.gte.data[18] == 40u);
+    CHECK(runtime.gte.data[19] == 400u);
+    CHECK(runtime.gte.data[12] == pack_sxy(3, 4));
+    CHECK(runtime.gte.data[13] == pack_sxy(5, 6));
+    CHECK(runtime.gte.data[14] == pack_sxy(50, 100));
+    CHECK(runtime.gte.data[8] == 0u);
+}
+
+static void test_rtps_applies_screen_offsets_and_depth_cue_factor() {
+    jojo::PsxRuntime runtime{};
+    set_identity_matrix(runtime.gte, 0u);
+    runtime.gte.data[0] = pack_sxy(100, 200);
+    runtime.gte.data[1] = 400u;
+    runtime.gte.control[24] = 10u * 0x10000u;
+    runtime.gte.control[25] = static_cast<std::uint32_t>(-20 * 0x10000);
+    runtime.gte.control[26] = 200u;
+    runtime.gte.control[27] = 0x0100u;
+    runtime.gte.control[28] = 0u;
+
+    const auto step = run_command(runtime, 0x4a180001u);
+    CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.gte.data[14] == pack_sxy(60, 80));
+    CHECK(runtime.gte.data[8] == 0x0800u);
+    CHECK(runtime.gte.data[24] == 0x00800000u);
+}
+
+static void test_rtps_near_clip_saturates_division_and_screen_x() {
+    jojo::PsxRuntime runtime{};
+    set_identity_matrix(runtime.gte, 0u);
+    runtime.gte.data[0] = pack_sxy(1000, 0);
+    runtime.gte.data[1] = 100u;
+    runtime.gte.control[26] = 200u;
+
+    const auto step = run_command(runtime, 0x4a180001u);
+    CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.gte.data[19] == 100u);
+    CHECK(static_cast<std::int16_t>(runtime.gte.data[14] & 0xffffu) == 0x03ff);
+    CHECK((runtime.gte.control[31] & (1u << 17u)) != 0u);
+    CHECK((runtime.gte.control[31] & (1u << 14u)) != 0u);
+    CHECK((runtime.gte.control[31] & 0x80000000u) != 0u);
+}
+
+static void test_rtpt_projects_three_vertices_and_leaves_final_vector_in_ir() {
+    jojo::PsxRuntime runtime{};
+    set_identity_matrix(runtime.gte, 0u);
+    runtime.gte.data[0] = pack_sxy(100, 0);
+    runtime.gte.data[1] = 400u;
+    runtime.gte.data[2] = pack_sxy(0, 100);
+    runtime.gte.data[3] = 400u;
+    runtime.gte.data[4] = pack_sxy(-100, -100);
+    runtime.gte.data[5] = 400u;
+    runtime.gte.data[16] = 10u;
+    runtime.gte.data[17] = 20u;
+    runtime.gte.data[18] = 30u;
+    runtime.gte.data[19] = 40u;
+    runtime.gte.control[26] = 200u;
+
+    const auto step = run_command(runtime, 0x4a280030u);
+    CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.gte.data[12] == pack_sxy(50, 0));
+    CHECK(runtime.gte.data[13] == pack_sxy(0, 50));
+    CHECK(runtime.gte.data[14] == pack_sxy(-50, -50));
+    CHECK(runtime.gte.data[16] == 40u);
+    CHECK(runtime.gte.data[17] == 400u);
+    CHECK(runtime.gte.data[18] == 400u);
+    CHECK(runtime.gte.data[19] == 400u);
+    CHECK(runtime.gte.data[9] == 0xffffff9cu);
+    CHECK(runtime.gte.data[10] == 0xffffff9cu);
+    CHECK(runtime.gte.data[11] == 400u);
 }
 
 static void test_lwc2_loads_ram_word_into_gte_data_register() {
@@ -345,6 +444,10 @@ int main() {
     test_op_uses_rotation_diagonal_as_second_vector();
     test_gpf_updates_ir_and_pushes_saturated_color_fifo();
     test_gpl_accumulates_existing_mac_before_fraction_shift();
+    test_rtps_projects_v0_and_advances_screen_depth_fifos();
+    test_rtps_applies_screen_offsets_and_depth_cue_factor();
+    test_rtps_near_clip_saturates_division_and_screen_x();
+    test_rtpt_projects_three_vertices_and_leaves_final_vector_in_ir();
     test_lwc2_loads_ram_word_into_gte_data_register();
     test_swc2_stores_gte_data_register_into_ram();
     test_lwc2_requires_enabled_cop2();
