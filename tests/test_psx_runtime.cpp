@@ -1,5 +1,7 @@
 #include "core/psx_runtime.h"
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <vector>
 
@@ -294,6 +296,45 @@ static void test_runtime_input_updates_both_sio0_pads() {
     CHECK((runtime.bus.sio0.pads[1].buttons & (1u << 15u)) != 0u);
 }
 
+static void test_runtime_step_services_mounted_cdrom_readn() {
+    const auto disc = std::filesystem::temp_directory_path() /
+                      "jojo_runtime_step_cdrom.iso";
+    std::error_code ec;
+    std::filesystem::remove(disc, ec);
+    std::vector<std::uint8_t> sector(jojo::PsxBus::cdrom_data_sector_size);
+    for (std::size_t i = 0; i < sector.size(); ++i) {
+        sector[i] = static_cast<std::uint8_t>((i * 3u) & 0xffu);
+    }
+    {
+        std::ofstream out(disc, std::ios::binary | std::ios::trunc);
+        CHECK(static_cast<bool>(out));
+        out.write(reinterpret_cast<const char*>(sector.data()),
+                  static_cast<std::streamsize>(sector.size()));
+        CHECK(static_cast<bool>(out));
+    }
+
+    jojo::PsxRuntime runtime{};
+    const auto mounted = jojo::mount_psx_cdrom_image(runtime, disc);
+    CHECK(mounted);
+    if (!mounted) {
+        std::filesystem::remove(disc, ec);
+        return;
+    }
+    runtime.bus.cdrom_reading = true;
+
+    const auto step = jojo::step_psx_runtime(runtime);
+    CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.bus.cdrom_sector_buffer_ready);
+    CHECK(runtime.bus.cdrom_interrupt_flags ==
+          jojo::PsxBus::cdrom_interrupt_data_ready);
+    CHECK(runtime.bus.cdrom_result_count == 1u);
+    CHECK(runtime.bus.cdrom_sector_buffer[0] == sector[0]);
+    CHECK(runtime.bus.cdrom_sector_buffer[1023] == sector[1023]);
+    CHECK(runtime.bus.cdrom_location_lba == 1u);
+
+    std::filesystem::remove(disc, ec);
+}
+
 int main() {
     test_loader_copies_payload_and_initializes_boot_registers();
     test_loader_materializes_scph1001_exception_control_blocks();
@@ -308,6 +349,7 @@ int main() {
     test_bios_b0_get_c0_table_materializes_scph1001_patch_surface();
     test_bios_c0_sysdeqintpr_matches_real_jojo_empty_priority2_frontier();
     test_runtime_input_updates_both_sio0_pads();
+    test_runtime_step_services_mounted_cdrom_readn();
     if (failures) return 1;
     std::cout << "PS-X EXE runtime loading/fetch assertions passed\n";
     return 0;

@@ -698,6 +698,7 @@ inline void advance_psx_timer1_hblank(PsxRuntime& runtime,
 }
 
 [[nodiscard]] inline PsxR3000aStepResult step_psx_runtime(PsxRuntime& runtime) noexcept {
+    service_psx_cdrom(runtime);
     const auto instruction_pc = runtime.cpu.pc;
 
     if (instruction_pc == 0x000000a0u && runtime.cpu.gpr[9] == 0x44u) {
