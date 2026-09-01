@@ -346,22 +346,28 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
     return psx_bus_write_u32(runtime.bus, node, old_head.value);
 }
 
+[[nodiscard]] inline PsxR3000aStepResult raise_psx_cop2_unusable(
+    PsxRuntime& runtime, std::uint32_t instruction) noexcept {
+    constexpr std::uint32_t cause_coprocessor_mask = 3u << 28u;
+    constexpr std::uint32_t cause_coprocessor_2 = 2u << 28u;
+    const auto instruction_pc = runtime.cpu.pc;
+    auto result = raise_psx_r3000a_exception(
+        runtime.cpu, PsxR3000aExceptionCode::coprocessor_unusable,
+        instruction_pc, instruction);
+    runtime.cpu.cop0.cause = (runtime.cpu.cop0.cause & ~cause_coprocessor_mask) |
+                             cause_coprocessor_2;
+    return result;
+}
+
 [[nodiscard]] inline PsxR3000aStepResult step_psx_gte_transfer(
     PsxRuntime& runtime, std::uint32_t instruction) noexcept {
     constexpr std::uint32_t cop2_enable = 1u << 30u;
-    constexpr std::uint32_t cause_coprocessor_mask = 3u << 28u;
-    constexpr std::uint32_t cause_coprocessor_2 = 2u << 28u;
 
     auto& cpu = runtime.cpu;
     const auto instruction_pc = cpu.pc;
 
     if ((cpu.cop0.status & cop2_enable) == 0u) {
-        auto result = raise_psx_r3000a_exception(
-            cpu, PsxR3000aExceptionCode::coprocessor_unusable,
-            instruction_pc, instruction);
-        cpu.cop0.cause = (cpu.cop0.cause & ~cause_coprocessor_mask) |
-                         cause_coprocessor_2;
-        return result;
+        return raise_psx_cop2_unusable(runtime, instruction);
     }
 
     const auto rs = static_cast<std::uint8_t>((instruction >> 21u) & 0x1fu);
@@ -422,6 +428,61 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
     cpu.gpr[0] = 0u;
     cpu.pc = sequential_pc;
     cpu.next_pc = following_pc;
+    cpu.current_instruction_is_branch_delay_slot = false;
+    cpu.branch_pc = 0u;
+    return {PsxR3000aStepReason::ok, instruction_pc, instruction};
+}
+
+[[nodiscard]] inline PsxR3000aStepResult step_psx_gte_memory_transfer(
+    PsxRuntime& runtime, std::uint32_t instruction) noexcept {
+    constexpr std::uint32_t cop2_enable = 1u << 30u;
+    constexpr std::uint8_t lwc2_opcode = 0x32u;
+    constexpr std::uint8_t swc2_opcode = 0x3au;
+
+    auto& cpu = runtime.cpu;
+    const auto instruction_pc = cpu.pc;
+    const auto opcode = static_cast<std::uint8_t>(instruction >> 26u);
+    if (opcode != lwc2_opcode && opcode != swc2_opcode) {
+        return {PsxR3000aStepReason::unsupported_instruction,
+                instruction_pc, instruction};
+    }
+
+    if ((cpu.cop0.status & cop2_enable) == 0u) {
+        return raise_psx_cop2_unusable(runtime, instruction);
+    }
+
+    const auto rs = static_cast<std::uint8_t>((instruction >> 21u) & 0x1fu);
+    const auto cop2_reg = static_cast<std::uint8_t>((instruction >> 16u) & 0x1fu);
+    const auto signed_immediate = static_cast<std::int32_t>(
+        static_cast<std::int16_t>(instruction & 0xffffu));
+    const auto address = cpu.gpr[rs] + static_cast<std::uint32_t>(signed_immediate);
+
+    if ((address & 3u) != 0u) {
+        const auto code = opcode == lwc2_opcode
+            ? PsxR3000aExceptionCode::address_error_load
+            : PsxR3000aExceptionCode::address_error_store;
+        return raise_psx_r3000a_exception(
+            cpu, code, instruction_pc, instruction, true, address);
+    }
+
+    if (opcode == lwc2_opcode) {
+        const auto loaded = psx_bus_read_u32(runtime.bus, address);
+        if (loaded.reason != PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, instruction};
+        }
+        psx_gte_write_data(runtime.gte, cop2_reg, loaded.value);
+    } else {
+        const auto value = psx_gte_read_data(runtime.gte, cop2_reg);
+        const auto stored = psx_bus_write_u32(runtime.bus, address, value);
+        if (stored != PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, instruction};
+        }
+    }
+
+    complete_psx_pending_load(cpu);
+    cpu.gpr[0] = 0u;
+    cpu.pc = cpu.next_pc;
+    cpu.next_pc = cpu.pc + 4u;
     cpu.current_instruction_is_branch_delay_slot = false;
     cpu.branch_pc = 0u;
     return {PsxR3000aStepReason::ok, instruction_pc, instruction};
@@ -694,9 +755,14 @@ inline void advance_psx_timer1_hblank(PsxRuntime& runtime,
         return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
     }
 
-    if ((fetched.value >> 26u) == 0x12u) {
+    const auto primary_opcode = static_cast<std::uint8_t>(fetched.value >> 26u);
+    if (primary_opcode == 0x12u) {
         return finish_psx_runtime_step(runtime,
                                        step_psx_gte_transfer(runtime, fetched.value));
+    }
+    if (primary_opcode == 0x32u || primary_opcode == 0x3au) {
+        return finish_psx_runtime_step(
+            runtime, step_psx_gte_memory_transfer(runtime, fetched.value));
     }
 
     const auto stepped = step_psx_r3000a(runtime.cpu, fetched.value, runtime.bus);
