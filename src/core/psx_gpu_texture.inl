@@ -136,6 +136,7 @@ inline void psx_gpu_execute_textured_rectangle(PsxBus& bus) noexcept {
     const auto clut = static_cast<std::uint16_t>(uv >> 16u);
     const bool flip_x = (bus.gpu_draw_mode & (1u << 12u)) != 0u;
     const bool flip_y = (bus.gpu_draw_mode & (1u << 13u)) != 0u;
+    const bool primitive_semi_transparent = (command & (1u << 25u)) != 0u;
 
     for (std::uint32_t row = 0u; row < height; ++row) {
         for (std::uint32_t column = 0u; column < width; ++column) {
@@ -150,11 +151,13 @@ inline void psx_gpu_execute_textured_rectangle(PsxBus& bus) noexcept {
             const auto texel = psx_gpu_texture_detail::sample_texture(bus, u, v, clut);
             if (texel == 0u) continue;
             const auto pixel = psx_gpu_texture_detail::modulate_texture(texel, command);
+            const bool blend = primitive_semi_transparent && (texel & 0x8000u) != 0u;
             psx_gpu_write_render_pixel(
                 bus,
                 origin_x + static_cast<std::int32_t>(column),
                 origin_y + static_cast<std::int32_t>(row),
-                pixel);
+                pixel,
+                blend);
         }
     }
 }
