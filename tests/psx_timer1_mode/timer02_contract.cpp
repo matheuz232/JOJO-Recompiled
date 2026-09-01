@@ -1,5 +1,6 @@
 #include "core/psx_bus.h"
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -24,6 +25,19 @@ constexpr std::uint32_t timer2_current = 0x1f801120u;
 constexpr std::uint32_t timer2_mode = 0x1f801124u;
 constexpr std::uint32_t timer2_target = 0x1f801128u;
 
+struct TimerCase {
+    std::uint32_t current;
+    std::uint32_t mode;
+    std::uint32_t target;
+    std::uint16_t irq_bit;
+};
+
+constexpr std::array<TimerCase, 3> timers{{
+    {timer0_current, timer0_mode, timer0_target, static_cast<std::uint16_t>(1u << 4u)},
+    {timer1_current, timer1_mode, timer1_target, static_cast<std::uint16_t>(1u << 5u)},
+    {timer2_current, timer2_mode, timer2_target, static_cast<std::uint16_t>(1u << 6u)},
+}};
+
 void require_write16(jojo::PsxBus& bus, std::uint32_t address, std::uint16_t value) {
     TIMER_REQUIRE(jojo::psx_bus_write_u16(bus, address, value) ==
                   jojo::PsxBusAccessReason::ok);
@@ -33,6 +47,13 @@ std::uint16_t read16(jojo::PsxBus& bus, std::uint32_t address) {
     const auto result = jojo::psx_bus_read_u16(bus, address);
     TIMER_REQUIRE(result.reason == jojo::PsxBusAccessReason::ok);
     return result.value;
+}
+
+void acknowledge_irq(jojo::PsxBus& bus, std::uint16_t irq_bit) {
+    const auto keep = static_cast<std::uint16_t>(
+        jojo::PsxBus::interrupt_status_valid_bits & ~irq_bit);
+    require_write16(bus, jojo::PsxBus::interrupt_status_address, keep);
+    TIMER_REQUIRE((bus.interrupt_status & irq_bit) == 0u);
 }
 
 void test_all_root_counter_registers_are_mapped() {
@@ -91,11 +112,88 @@ void test_timer2_system_clock_and_div8_preserve_phase() {
     TIMER_REQUIRE(read16(bus, timer2_current) == 3u);
 }
 
+void test_target_reset_and_repeated_irq_for_all_root_counters() {
+    constexpr std::uint16_t reset_at_target = 1u << 3u;
+    constexpr std::uint16_t irq_at_target = 1u << 4u;
+    constexpr std::uint16_t repeat_irq = 1u << 6u;
+    constexpr std::uint16_t mode = reset_at_target | irq_at_target | repeat_irq;
+
+    for (const auto& timer : timers) {
+        jojo::PsxBus bus{};
+        require_write16(bus, timer.target, 3u);
+        require_write16(bus, timer.mode, mode);
+
+        jojo::psx_bus_tick(bus, 2u);
+        TIMER_REQUIRE(read16(bus, timer.current) == 2u);
+        TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) == 0u);
+
+        jojo::psx_bus_tick(bus, 1u);
+        TIMER_REQUIRE(read16(bus, timer.current) == 3u);
+        TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
+
+        acknowledge_irq(bus, timer.irq_bit);
+        jojo::psx_bus_tick(bus, 1u);
+        TIMER_REQUIRE(read16(bus, timer.current) == 0u);
+        TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) == 0u);
+
+        jojo::psx_bus_tick(bus, 3u);
+        TIMER_REQUIRE(read16(bus, timer.current) == 3u);
+        TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
+    }
+}
+
+void test_ffff_wrap_and_irq() {
+    constexpr std::uint16_t irq_at_ffff = 1u << 5u;
+    constexpr std::uint16_t repeat_irq = 1u << 6u;
+
+    for (const auto& timer : timers) {
+        jojo::PsxBus bus{};
+        require_write16(bus, timer.mode, irq_at_ffff | repeat_irq);
+        require_write16(bus, timer.current, 0xfffeu);
+
+        jojo::psx_bus_tick(bus, 1u);
+        TIMER_REQUIRE(read16(bus, timer.current) == 0xffffu);
+        TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
+
+        acknowledge_irq(bus, timer.irq_bit);
+        jojo::psx_bus_tick(bus, 1u);
+        TIMER_REQUIRE(read16(bus, timer.current) == 0u);
+        TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) == 0u);
+    }
+}
+
+void test_one_shot_irq_rearms_only_on_mode_write() {
+    constexpr std::uint16_t reset_at_target = 1u << 3u;
+    constexpr std::uint16_t irq_at_target = 1u << 4u;
+    constexpr std::uint16_t one_shot_mode = reset_at_target | irq_at_target;
+
+    jojo::PsxBus bus{};
+    const auto& timer = timers[0];
+    require_write16(bus, timer.target, 2u);
+    require_write16(bus, timer.mode, one_shot_mode);
+
+    jojo::psx_bus_tick(bus, 2u);
+    TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
+    acknowledge_irq(bus, timer.irq_bit);
+
+    jojo::psx_bus_tick(bus, 1u); // target reset -> zero
+    jojo::psx_bus_tick(bus, 2u); // reaches target again
+    TIMER_REQUIRE(read16(bus, timer.current) == 2u);
+    TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) == 0u);
+
+    require_write16(bus, timer.mode, one_shot_mode);
+    jojo::psx_bus_tick(bus, 2u);
+    TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
+}
+
 struct TimerFoundationRunner {
     TimerFoundationRunner() {
         test_all_root_counter_registers_are_mapped();
         test_system_clock_free_run_advances_timer0_and_timer1();
         test_timer2_system_clock_and_div8_preserve_phase();
+        test_target_reset_and_repeated_irq_for_all_root_counters();
+        test_ffff_wrap_and_irq();
+        test_one_shot_irq_rearms_only_on_mode_write();
     }
 };
 
