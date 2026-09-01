@@ -7,7 +7,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(jojo_psx_timer1_mode_tests
   main.cpp
-  timer02_contract.cpp)
+  timer02_contract.cpp
+  bios_timer_contract.cpp)
 target_include_directories(jojo_psx_timer1_mode_tests PRIVATE ../../src)
 
 if(MSVC)
