@@ -213,10 +213,35 @@ struct PsxBus {
                : static_cast<std::int32_t>(value);
 }
 
+[[nodiscard]] inline std::uint16_t psx_gpu_blend_bgr555(
+    std::uint16_t back,
+    std::uint16_t front,
+    std::uint32_t mode) noexcept {
+    const auto blend_channel = [mode](std::uint32_t b, std::uint32_t f) noexcept {
+        switch (mode & 3u) {
+        case 0u:
+            return (b >> 1u) + (f >> 1u);
+        case 1u:
+            return std::min<std::uint32_t>(31u, b + f);
+        case 2u:
+            return b > f ? b - f : 0u;
+        default:
+            return std::min<std::uint32_t>(31u, b + (f >> 2u));
+        }
+    };
+
+    const auto red = blend_channel(back & 0x1fu, front & 0x1fu);
+    const auto green = blend_channel((back >> 5u) & 0x1fu, (front >> 5u) & 0x1fu);
+    const auto blue = blend_channel((back >> 10u) & 0x1fu, (front >> 10u) & 0x1fu);
+    return static_cast<std::uint16_t>(
+        (front & 0x8000u) | red | (green << 5u) | (blue << 10u));
+}
+
 inline void psx_gpu_write_render_pixel(PsxBus& bus,
                                        std::int32_t x,
                                        std::int32_t y,
-                                       std::uint16_t pixel) noexcept {
+                                       std::uint16_t pixel,
+                                       bool semi_transparent = false) noexcept {
     if (x < 0 || y < 0 ||
         x >= static_cast<std::int32_t>(PsxBus::gpu_vram_width) ||
         y >= static_cast<std::int32_t>(PsxBus::gpu_vram_height)) {
@@ -241,6 +266,10 @@ inline void psx_gpu_write_render_pixel(PsxBus& bus,
         static_cast<std::size_t>(x)];
     const bool check_mask = (bus.gpu_status & (1u << 12u)) != 0u;
     if (check_mask && (destination & 0x8000u) != 0u) return;
+    if (semi_transparent) {
+        pixel = psx_gpu_blend_bgr555(
+            destination, pixel, (bus.gpu_draw_mode >> 5u) & 3u);
+    }
     if ((bus.gpu_status & (1u << 11u)) != 0u) {
         pixel = static_cast<std::uint16_t>(pixel | 0x8000u);
     }
@@ -282,6 +311,7 @@ inline void psx_gpu_execute_render_rectangle(PsxBus& bus) noexcept {
     const auto origin_x = psx_gpu_sign_extend_11(position) + offset_x;
     const auto origin_y = psx_gpu_sign_extend_11(position >> 16u) + offset_y;
     const auto color = psx_gpu_bgr555(command & 0x00ffffffu);
+    const bool semi_transparent = (command & (1u << 25u)) != 0u;
 
     for (std::uint32_t row = 0u; row < height; ++row) {
         for (std::uint32_t column = 0u; column < width; ++column) {
@@ -289,7 +319,8 @@ inline void psx_gpu_execute_render_rectangle(PsxBus& bus) noexcept {
                 bus,
                 origin_x + static_cast<std::int32_t>(column),
                 origin_y + static_cast<std::int32_t>(row),
-                color);
+                color,
+                semi_transparent);
         }
     }
 }
@@ -383,10 +414,9 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
         const bool cpu_to_vram = (value >> 29u) == 5u;
         const bool rectangle = (value >> 29u) == 3u;
         const bool textured = (value & (1u << 26u)) != 0u;
-        const bool semi_transparent = (value & (1u << 25u)) != 0u;
         if (command == 0x02u || cpu_to_vram) {
             bus.gpu_gp0_packet_words = 3u;
-        } else if (rectangle && !semi_transparent) {
+        } else if (rectangle) {
             const auto size_mode = (value >> 27u) & 3u;
             if (textured) {
                 bus.gpu_gp0_packet_words = static_cast<std::uint8_t>(
