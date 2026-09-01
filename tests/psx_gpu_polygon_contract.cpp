@@ -64,10 +64,46 @@ void test_flat_untextured_quad_uses_documented_triangle_split() {
     POLY_REQUIRE(bus.gpu_vram[35u * jojo::PsxBus::gpu_vram_width + 36u] == 0u);
 }
 
+void test_gouraud_triangle_interpolates_vertex_colors() {
+    jojo::PsxBus bus{};
+    configure_full_drawing_area(bus);
+
+    gp0(bus, 0x300000ffu); // gouraud triangle: vertex 1 red
+    gp0(bus, vertex(40, 40));
+    gp0(bus, 0x0000ff00u); // vertex 2 green
+    gp0(bus, vertex(48, 40));
+    gp0(bus, 0x00ff0000u); // vertex 3 blue
+    gp0(bus, vertex(40, 48));
+
+    POLY_REQUIRE(bus.gpu_vram[40u * jojo::PsxBus::gpu_vram_width + 40u] == 0x043bu);
+    POLY_REQUIRE(bus.gpu_vram[42u * jojo::PsxBus::gpu_vram_width + 42u] == 0x252bu);
+    POLY_REQUIRE(bus.gpu_vram[40u * jojo::PsxBus::gpu_vram_width + 46u] == 0x0723u);
+    POLY_REQUIRE(bus.gpu_vram[46u * jojo::PsxBus::gpu_vram_width + 40u] == 0x6423u);
+}
+
+void test_gouraud_quad_interpolates_second_triangle() {
+    jojo::PsxBus bus{};
+    configure_full_drawing_area(bus);
+
+    gp0(bus, 0x380000ffu); // v1 red
+    gp0(bus, vertex(60, 60));
+    gp0(bus, 0x0000ff00u); // v2 green
+    gp0(bus, vertex(68, 60));
+    gp0(bus, 0x00ff0000u); // v3 blue
+    gp0(bus, vertex(60, 68));
+    gp0(bus, 0x00ffffffu); // v4 white
+    gp0(bus, vertex(68, 68));
+
+    POLY_REQUIRE(bus.gpu_vram[66u * jojo::PsxBus::gpu_vram_width + 66u] == 0x6733u);
+    POLY_REQUIRE(bus.gpu_vram[68u * jojo::PsxBus::gpu_vram_width + 68u] == 0u);
+}
+
 struct PolygonContractRunner {
     PolygonContractRunner() {
         test_flat_untextured_triangle_rasterizes_interior();
         test_flat_untextured_quad_uses_documented_triangle_split();
+        test_gouraud_triangle_interpolates_vertex_colors();
+        test_gouraud_quad_interpolates_second_triangle();
     }
 };
 
