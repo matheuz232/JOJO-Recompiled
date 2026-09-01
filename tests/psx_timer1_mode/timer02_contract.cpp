@@ -49,6 +49,12 @@ std::uint16_t read16(jojo::PsxBus& bus, std::uint32_t address) {
     return result.value;
 }
 
+std::uint32_t read32(jojo::PsxBus& bus, std::uint32_t address) {
+    const auto result = jojo::psx_bus_read_u32(bus, address);
+    TIMER_REQUIRE(result.reason == jojo::PsxBusAccessReason::ok);
+    return result.value;
+}
+
 void acknowledge_irq(jojo::PsxBus& bus, std::uint16_t irq_bit) {
     const auto keep = static_cast<std::uint16_t>(
         jojo::PsxBus::interrupt_status_valid_bits & ~irq_bit);
@@ -186,6 +192,37 @@ void test_one_shot_irq_rearms_only_on_mode_write() {
     TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
 }
 
+void test_mode_status_bits_and_clear_on_read() {
+    constexpr std::uint16_t irq_request_idle = 1u << 10u;
+    constexpr std::uint16_t reached_target = 1u << 11u;
+    constexpr std::uint16_t reached_ffff = 1u << 12u;
+
+    for (const auto& timer : timers) {
+        jojo::PsxBus bus{};
+        require_write16(bus, timer.mode, 0u);
+        const auto after_write = read16(bus, timer.mode);
+        TIMER_REQUIRE((after_write & irq_request_idle) != 0u);
+        TIMER_REQUIRE((after_write & (reached_target | reached_ffff)) == 0u);
+
+        require_write16(bus, timer.target, 2u);
+        jojo::psx_bus_tick(bus, 2u);
+        const auto target_first = read16(bus, timer.mode);
+        TIMER_REQUIRE((target_first & reached_target) != 0u);
+        TIMER_REQUIRE((target_first & reached_ffff) == 0u);
+        TIMER_REQUIRE((target_first & irq_request_idle) != 0u);
+        const auto target_second = read16(bus, timer.mode);
+        TIMER_REQUIRE((target_second & reached_target) == 0u);
+
+        require_write16(bus, timer.current, 0xfffeu);
+        jojo::psx_bus_tick(bus, 1u);
+        const auto ffff_first = read32(bus, timer.mode);
+        TIMER_REQUIRE((ffff_first & reached_ffff) != 0u);
+        TIMER_REQUIRE((ffff_first & irq_request_idle) != 0u);
+        const auto ffff_second = read32(bus, timer.mode);
+        TIMER_REQUIRE((ffff_second & reached_ffff) == 0u);
+    }
+}
+
 struct TimerFoundationRunner {
     TimerFoundationRunner() {
         test_all_root_counter_registers_are_mapped();
@@ -194,6 +231,7 @@ struct TimerFoundationRunner {
         test_target_reset_and_repeated_irq_for_all_root_counters();
         test_ffff_wrap_and_irq();
         test_one_shot_irq_rearms_only_on_mode_write();
+        test_mode_status_bits_and_clear_on_read();
     }
 };
 
