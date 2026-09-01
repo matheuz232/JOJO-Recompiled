@@ -10,7 +10,8 @@ add_executable(jojo_psx_dma_control_tests
   dma3_contract.cpp
   ../test_psx_gpu.cpp
   ../psx_gpu_texture_contract.cpp
-  ../psx_gpu_polygon_contract.cpp)
+  ../psx_gpu_polygon_contract.cpp
+  ../psx_gpu_line_contract.cpp)
 target_include_directories(jojo_psx_dma_control_tests PRIVATE ../../src)
 
 if(MSVC)
