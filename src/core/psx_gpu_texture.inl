@@ -77,6 +77,25 @@ struct TextureCoordinate {
         static_cast<std::size_t>(row) * PsxBus::gpu_vram_width + word_x];
 }
 
+[[nodiscard]] inline std::uint16_t modulate_texture(
+    std::uint16_t texel,
+    std::uint32_t command) noexcept {
+    if ((command & (1u << 24u)) != 0u) return texel;
+
+    const auto modulate_channel = [](std::uint32_t channel,
+                                     std::uint32_t brightness) noexcept {
+        return std::min<std::uint32_t>(31u, (channel * brightness) >> 7u);
+    };
+
+    const auto red = modulate_channel(texel & 0x1fu, command & 0xffu);
+    const auto green = modulate_channel((texel >> 5u) & 0x1fu,
+                                        (command >> 8u) & 0xffu);
+    const auto blue = modulate_channel((texel >> 10u) & 0x1fu,
+                                       (command >> 16u) & 0xffu);
+    return static_cast<std::uint16_t>(
+        (texel & 0x8000u) | red | (green << 5u) | (blue << 10u));
+}
+
 } // namespace psx_gpu_texture_detail
 
 inline void psx_gpu_execute_textured_rectangle(PsxBus& bus) noexcept {
@@ -128,8 +147,9 @@ inline void psx_gpu_execute_textured_rectangle(PsxBus& bus) noexcept {
             const auto v = static_cast<std::uint8_t>(
                 flip_y ? static_cast<std::uint8_t>(base_v - v_delta)
                        : static_cast<std::uint8_t>(base_v + v_delta));
-            const auto pixel = psx_gpu_texture_detail::sample_texture(bus, u, v, clut);
-            if (pixel == 0u) continue;
+            const auto texel = psx_gpu_texture_detail::sample_texture(bus, u, v, clut);
+            if (texel == 0u) continue;
+            const auto pixel = psx_gpu_texture_detail::modulate_texture(texel, command);
             psx_gpu_write_render_pixel(
                 bus,
                 origin_x + static_cast<std::int32_t>(column),
