@@ -11,6 +11,14 @@ static std::uint32_t pack_sxy(std::int16_t x, std::int16_t y) {
            (static_cast<std::uint32_t>(static_cast<std::uint16_t>(y)) << 16u);
 }
 
+static std::uint32_t pack_rgb(std::uint8_t r, std::uint8_t g,
+                              std::uint8_t b, std::uint8_t code = 0x2cu) {
+    return static_cast<std::uint32_t>(r) |
+           (static_cast<std::uint32_t>(g) << 8u) |
+           (static_cast<std::uint32_t>(b) << 16u) |
+           (static_cast<std::uint32_t>(code) << 24u);
+}
+
 static std::uint32_t gte_math_instruction(std::uint8_t command, bool sf, bool lm) {
     return 0x4a000000u |
            (sf ? (1u << 19u) : 0u) |
@@ -353,6 +361,165 @@ static void test_rtpt_projects_three_vertices_and_leaves_final_vector_in_ir() {
     CHECK(runtime.gte.data[11] == 400u);
 }
 
+static void seed_identity_lighting(jojo::PsxGteState& gte) {
+    set_identity_matrix(gte, 8u);
+    set_identity_matrix(gte, 16u);
+    gte.control[13] = 0u;
+    gte.control[14] = 0u;
+    gte.control[15] = 0u;
+    gte.data[6] = pack_rgb(16, 32, 48);
+}
+
+static void seed_far_color(jojo::PsxGteState& gte) {
+    gte.control[21] = 32u * 16u;
+    gte.control[22] = 64u * 16u;
+    gte.control[23] = 96u * 16u;
+    gte.data[8] = 0x0800u;
+}
+
+static void test_documented_gte_color_command_set() {
+    {
+        jojo::PsxRuntime runtime{};
+        runtime.gte.data[6] = pack_rgb(16, 32, 48);
+        seed_far_color(runtime.gte);
+        const auto step = run_command(runtime, gte_math_instruction(0x10u, true, false));
+        CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+        CHECK(runtime.gte.data[22] == pack_rgb(24, 48, 72));
+    }
+    {
+        jojo::PsxRuntime runtime{};
+        runtime.gte.data[9] = 0x0100u;
+        runtime.gte.data[10] = 0x0200u;
+        runtime.gte.data[11] = 0x0300u;
+        seed_far_color(runtime.gte);
+        runtime.gte.data[6] = pack_rgb(0, 0, 0);
+        const auto step = run_command(runtime, gte_math_instruction(0x11u, true, false));
+        CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+        CHECK(runtime.gte.data[25] == 0x0180u);
+        CHECK(runtime.gte.data[26] == 0x0300u);
+        CHECK(runtime.gte.data[27] == 0x0480u);
+    }
+    {
+        jojo::PsxRuntime runtime{};
+        runtime.gte.data[6] = pack_rgb(16, 32, 48);
+        runtime.gte.data[9] = 0x1000u;
+        runtime.gte.data[10] = 0x1000u;
+        runtime.gte.data[11] = 0x1000u;
+        seed_far_color(runtime.gte);
+        const auto step = run_command(runtime, gte_math_instruction(0x29u, true, false));
+        CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+        CHECK(runtime.gte.data[22] == pack_rgb(24, 48, 72));
+    }
+    {
+        jojo::PsxRuntime runtime{};
+        runtime.gte.data[6] = pack_rgb(0, 0, 0, 0x34u);
+        runtime.gte.data[8] = 0u;
+        runtime.gte.data[20] = pack_rgb(10, 20, 30, 1u);
+        runtime.gte.data[21] = pack_rgb(40, 50, 60, 2u);
+        runtime.gte.data[22] = pack_rgb(70, 80, 90, 3u);
+        const auto step = run_command(runtime, gte_math_instruction(0x2au, true, false));
+        CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+        CHECK(runtime.gte.data[20] == pack_rgb(10, 20, 30, 0x34u));
+        CHECK(runtime.gte.data[21] == pack_rgb(40, 50, 60, 0x34u));
+        CHECK(runtime.gte.data[22] == pack_rgb(70, 80, 90, 0x34u));
+    }
+    {
+        jojo::PsxRuntime runtime{};
+        seed_identity_lighting(runtime.gte);
+        runtime.gte.data[0] = pack_sxy(0x0100, 0x0200);
+        runtime.gte.data[1] = 0x0300u;
+        const auto step = run_command(runtime, gte_math_instruction(0x1eu, true, true));
+        CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+        CHECK(runtime.gte.data[22] == pack_rgb(16, 32, 48));
+    }
+    {
+        jojo::PsxRuntime runtime{};
+        seed_identity_lighting(runtime.gte);
+        runtime.gte.data[0] = pack_sxy(0x0100, 0);
+        runtime.gte.data[1] = 0u;
+        runtime.gte.data[2] = pack_sxy(0, 0x0200);
+        runtime.gte.data[3] = 0u;
+        runtime.gte.data[4] = pack_sxy(0, 0);
+        runtime.gte.data[5] = 0x0300u;
+        const auto step = run_command(runtime, gte_math_instruction(0x20u, true, true));
+        CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+        CHECK(runtime.gte.data[20] == pack_rgb(16, 0, 0));
+        CHECK(runtime.gte.data[21] == pack_rgb(0, 32, 0));
+        CHECK(runtime.gte.data[22] == pack_rgb(0, 0, 48));
+    }
+    {
+        jojo::PsxRuntime runtime{};
+        seed_identity_lighting(runtime.gte);
+        runtime.gte.data[0] = pack_sxy(0x1000, 0x1000);
+        runtime.gte.data[1] = 0x1000u;
+        const auto step = run_command(runtime, gte_math_instruction(0x1bu, true, true));
+        CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+        CHECK(runtime.gte.data[22] == pack_rgb(16, 32, 48));
+    }
+    {
+        jojo::PsxRuntime runtime{};
+        seed_identity_lighting(runtime.gte);
+        runtime.gte.data[0] = pack_sxy(0x1000, 0x1000);
+        runtime.gte.data[1] = 0x1000u;
+        runtime.gte.data[2] = runtime.gte.data[0];
+        runtime.gte.data[3] = runtime.gte.data[1];
+        runtime.gte.data[4] = runtime.gte.data[0];
+        runtime.gte.data[5] = runtime.gte.data[1];
+        const auto step = run_command(runtime, gte_math_instruction(0x3fu, true, true));
+        CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+        CHECK(runtime.gte.data[20] == pack_rgb(16, 32, 48));
+        CHECK(runtime.gte.data[21] == pack_rgb(16, 32, 48));
+        CHECK(runtime.gte.data[22] == pack_rgb(16, 32, 48));
+    }
+    {
+        jojo::PsxRuntime runtime{};
+        seed_identity_lighting(runtime.gte);
+        runtime.gte.data[0] = pack_sxy(0x1000, 0x1000);
+        runtime.gte.data[1] = 0x1000u;
+        seed_far_color(runtime.gte);
+        const auto step = run_command(runtime, gte_math_instruction(0x13u, true, true));
+        CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+        CHECK(runtime.gte.data[22] == pack_rgb(24, 48, 72));
+    }
+    {
+        jojo::PsxRuntime runtime{};
+        seed_identity_lighting(runtime.gte);
+        runtime.gte.data[0] = pack_sxy(0x1000, 0x1000);
+        runtime.gte.data[1] = 0x1000u;
+        runtime.gte.data[2] = runtime.gte.data[0];
+        runtime.gte.data[3] = runtime.gte.data[1];
+        runtime.gte.data[4] = runtime.gte.data[0];
+        runtime.gte.data[5] = runtime.gte.data[1];
+        seed_far_color(runtime.gte);
+        const auto step = run_command(runtime, gte_math_instruction(0x16u, true, true));
+        CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+        CHECK(runtime.gte.data[20] == pack_rgb(24, 48, 72));
+        CHECK(runtime.gte.data[21] == pack_rgb(24, 48, 72));
+        CHECK(runtime.gte.data[22] == pack_rgb(24, 48, 72));
+    }
+    {
+        jojo::PsxRuntime runtime{};
+        seed_identity_lighting(runtime.gte);
+        runtime.gte.data[9] = 0x1000u;
+        runtime.gte.data[10] = 0x1000u;
+        runtime.gte.data[11] = 0x1000u;
+        const auto step = run_command(runtime, gte_math_instruction(0x1cu, true, true));
+        CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+        CHECK(runtime.gte.data[22] == pack_rgb(16, 32, 48));
+    }
+    {
+        jojo::PsxRuntime runtime{};
+        seed_identity_lighting(runtime.gte);
+        runtime.gte.data[9] = 0x1000u;
+        runtime.gte.data[10] = 0x1000u;
+        runtime.gte.data[11] = 0x1000u;
+        seed_far_color(runtime.gte);
+        const auto step = run_command(runtime, gte_math_instruction(0x14u, true, true));
+        CHECK(step.reason == jojo::PsxR3000aStepReason::ok);
+        CHECK(runtime.gte.data[22] == pack_rgb(24, 48, 72));
+    }
+}
+
 static void test_lwc2_loads_ram_word_into_gte_data_register() {
     jojo::PsxRuntime runtime{};
     constexpr std::uint32_t pc = 0x80010000u;
@@ -448,6 +615,7 @@ int main() {
     test_rtps_applies_screen_offsets_and_depth_cue_factor();
     test_rtps_near_clip_saturates_division_and_screen_x();
     test_rtpt_projects_three_vertices_and_leaves_final_vector_in_ir();
+    test_documented_gte_color_command_set();
     test_lwc2_loads_ram_word_into_gte_data_register();
     test_swc2_stores_gte_data_register_into_ram();
     test_lwc2_requires_enabled_cop2();
