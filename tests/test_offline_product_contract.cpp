@@ -1,8 +1,10 @@
 #include "core/input.h"
 #include "core/presentation.h"
+#include "core/runtime.h"
 
 #include <array>
 #include <cassert>
+#include <filesystem>
 
 int main() {
     static_assert(jojo::input_player_count == 2);
@@ -39,4 +41,23 @@ int main() {
         assert(plan.value.viewport.height > 0u);
         assert(plan.value.uniform_presentation_scale);
     }
+
+    const auto missing = jojo::load_prepared_psx_runtime(
+        std::filesystem::temp_directory_path() / "jojo_recompiled_missing_runtime_contract");
+    assert(!missing);
+    assert(missing.error == jojo::ErrorCode::invalid_installation);
+
+    jojo::PsxRuntime runtime{};
+    jojo::reset_psx_r3000a(runtime.cpu, 0x1f801000u);
+    jojo::ResolvedInputFrame frame{};
+    frame[0].actions[jojo::GameAction::attack_light] = true;
+    frame[1].actions[jojo::GameAction::attack_heavy] = true;
+
+    const auto slice = jojo::run_psx_runtime_slice(runtime, frame, 64u);
+    assert(slice.executed_steps == 1u);
+    assert(!slice.reached_budget);
+    assert(slice.last_step.reason == jojo::PsxR3000aStepReason::memory_fault);
+    assert(slice.last_step.instruction_pc == 0x1f801000u);
+    assert((runtime.bus.sio0.pads[0].buttons & (1u << 15u)) == 0u);
+    assert((runtime.bus.sio0.pads[1].buttons & (1u << 13u)) == 0u);
 }

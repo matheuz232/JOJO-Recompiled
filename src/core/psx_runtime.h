@@ -60,6 +60,8 @@ struct PsxRuntime {
     PsxR3000aState cpu{};
     PsxGteState gte{};
     PsxBiosState bios{};
+    std::uint64_t timer1_hblank_phase{};
+    std::uint16_t timer1_hblank_mode_snapshot{};
 };
 
 [[nodiscard]] inline bool materialize_scph1001_exception_control_blocks(
@@ -442,38 +444,58 @@ struct PsxBiosEventDelivery {
     return psx_bus_write_u32(runtime.bus, node, old_head.value);
 }
 
+[[nodiscard]] inline PsxR3000aStepResult raise_psx_cop2_unusable(
+    PsxRuntime& runtime, std::uint32_t instruction) noexcept {
+    constexpr std::uint32_t cause_coprocessor_mask = 3u << 28u;
+    constexpr std::uint32_t cause_coprocessor_2 = 2u << 28u;
+    const auto instruction_pc = runtime.cpu.pc;
+    auto result = raise_psx_r3000a_exception(
+        runtime.cpu, PsxR3000aExceptionCode::coprocessor_unusable,
+        instruction_pc, instruction);
+    runtime.cpu.cop0.cause = (runtime.cpu.cop0.cause & ~cause_coprocessor_mask) |
+                             cause_coprocessor_2;
+    return result;
+}
+
 [[nodiscard]] inline PsxR3000aStepResult step_psx_gte_transfer(
     PsxRuntime& runtime, std::uint32_t instruction) noexcept {
     constexpr std::uint32_t cop2_enable = 1u << 30u;
-    constexpr std::uint32_t cause_coprocessor_mask = 3u << 28u;
-    constexpr std::uint32_t cause_coprocessor_2 = 2u << 28u;
 
     auto& cpu = runtime.cpu;
     const auto instruction_pc = cpu.pc;
 
     if ((cpu.cop0.status & cop2_enable) == 0u) {
-        auto result = raise_psx_r3000a_exception(
-            cpu, PsxR3000aExceptionCode::coprocessor_unusable,
-            instruction_pc, instruction);
-        cpu.cop0.cause = (cpu.cop0.cause & ~cause_coprocessor_mask) |
-                         cause_coprocessor_2;
-        return result;
+        return raise_psx_cop2_unusable(runtime, instruction);
     }
 
     const auto rs = static_cast<std::uint8_t>((instruction >> 21u) & 0x1fu);
     const auto rt = static_cast<std::uint8_t>((instruction >> 16u) & 0x1fu);
     const auto rd = static_cast<std::uint8_t>((instruction >> 11u) & 0x1fu);
+    const bool is_command = (instruction & 0x02000000u) != 0u;
     const bool canonical_move = (instruction & 0x7ffu) == 0u;
     const bool is_read = rs == 0x00u || rs == 0x02u;
     const bool is_write = rs == 0x04u || rs == 0x06u;
+    const auto sequential_pc = cpu.next_pc;
+    const auto following_pc = sequential_pc + 4u;
+
+    if (is_command) {
+        if (!execute_psx_gte_command(runtime.gte, instruction)) {
+            return {PsxR3000aStepReason::unsupported_instruction,
+                    instruction_pc, instruction};
+        }
+        complete_psx_pending_load(cpu);
+        cpu.gpr[0] = 0u;
+        cpu.pc = sequential_pc;
+        cpu.next_pc = following_pc;
+        cpu.current_instruction_is_branch_delay_slot = false;
+        cpu.branch_pc = 0u;
+        return {PsxR3000aStepReason::ok, instruction_pc, instruction};
+    }
 
     if (!canonical_move || (!is_read && !is_write)) {
         return {PsxR3000aStepReason::unsupported_instruction,
                 instruction_pc, instruction};
     }
-
-    const auto sequential_pc = cpu.next_pc;
-    const auto following_pc = sequential_pc + 4u;
 
     if (is_read) {
         const auto value = rs == 0x00u
@@ -504,6 +526,61 @@ struct PsxBiosEventDelivery {
     cpu.gpr[0] = 0u;
     cpu.pc = sequential_pc;
     cpu.next_pc = following_pc;
+    cpu.current_instruction_is_branch_delay_slot = false;
+    cpu.branch_pc = 0u;
+    return {PsxR3000aStepReason::ok, instruction_pc, instruction};
+}
+
+[[nodiscard]] inline PsxR3000aStepResult step_psx_gte_memory_transfer(
+    PsxRuntime& runtime, std::uint32_t instruction) noexcept {
+    constexpr std::uint32_t cop2_enable = 1u << 30u;
+    constexpr std::uint8_t lwc2_opcode = 0x32u;
+    constexpr std::uint8_t swc2_opcode = 0x3au;
+
+    auto& cpu = runtime.cpu;
+    const auto instruction_pc = cpu.pc;
+    const auto opcode = static_cast<std::uint8_t>(instruction >> 26u);
+    if (opcode != lwc2_opcode && opcode != swc2_opcode) {
+        return {PsxR3000aStepReason::unsupported_instruction,
+                instruction_pc, instruction};
+    }
+
+    if ((cpu.cop0.status & cop2_enable) == 0u) {
+        return raise_psx_cop2_unusable(runtime, instruction);
+    }
+
+    const auto rs = static_cast<std::uint8_t>((instruction >> 21u) & 0x1fu);
+    const auto cop2_reg = static_cast<std::uint8_t>((instruction >> 16u) & 0x1fu);
+    const auto signed_immediate = static_cast<std::int32_t>(
+        static_cast<std::int16_t>(instruction & 0xffffu));
+    const auto address = cpu.gpr[rs] + static_cast<std::uint32_t>(signed_immediate);
+
+    if ((address & 3u) != 0u) {
+        const auto code = opcode == lwc2_opcode
+            ? PsxR3000aExceptionCode::address_error_load
+            : PsxR3000aExceptionCode::address_error_store;
+        return raise_psx_r3000a_exception(
+            cpu, code, instruction_pc, instruction, true, address);
+    }
+
+    if (opcode == lwc2_opcode) {
+        const auto loaded = psx_bus_read_u32(runtime.bus, address);
+        if (loaded.reason != PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, instruction};
+        }
+        psx_gte_write_data(runtime.gte, cop2_reg, loaded.value);
+    } else {
+        const auto value = psx_gte_read_data(runtime.gte, cop2_reg);
+        const auto stored = psx_bus_write_u32(runtime.bus, address, value);
+        if (stored != PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, instruction};
+        }
+    }
+
+    complete_psx_pending_load(cpu);
+    cpu.gpr[0] = 0u;
+    cpu.pc = cpu.next_pc;
+    cpu.next_pc = cpu.pc + 4u;
     cpu.current_instruction_is_branch_delay_slot = false;
     cpu.branch_pc = 0u;
     return {PsxR3000aStepReason::ok, instruction_pc, instruction};
@@ -586,6 +663,38 @@ struct PsxBiosEventDelivery {
             runtime.bus.interrupt_status & ~vblank_interrupt);
     }
     return true;
+}
+
+inline void advance_psx_timer1_hblank(PsxRuntime& runtime,
+                                      std::uint32_t cpu_clocks = 1u) noexcept {
+    constexpr std::uint16_t hblank_clock_select = 1u << 8u;
+    constexpr std::uint64_t cpu_clock_hz = 33'868'800u;
+    constexpr std::uint64_t video_clock_hz = 53'693'175u;
+    constexpr std::uint64_t video_clocks_per_scanline = 3'413u;
+    constexpr std::uint64_t hblank_period_scaled =
+        cpu_clock_hz * video_clocks_per_scanline;
+
+    const auto mode = static_cast<std::uint16_t>(
+        runtime.bus.timer1_mode & PsxBus::timer_mode_valid_bits);
+    if (mode != runtime.timer1_hblank_mode_snapshot) {
+        runtime.timer1_hblank_mode_snapshot = mode;
+        runtime.timer1_hblank_phase = 0u;
+    }
+    if ((mode & hblank_clock_select) == 0u || cpu_clocks == 0u) return;
+
+    runtime.timer1_hblank_phase +=
+        video_clock_hz * static_cast<std::uint64_t>(cpu_clocks);
+    while (runtime.timer1_hblank_phase >= hblank_period_scaled) {
+        runtime.timer1_hblank_phase -= hblank_period_scaled;
+        runtime.bus.timer1_current = static_cast<std::uint16_t>(
+            runtime.bus.timer1_current + 1u);
+    }
+}
+
+[[nodiscard]] inline PsxR3000aStepResult finish_psx_runtime_step(
+    PsxRuntime& runtime, PsxR3000aStepResult result) noexcept {
+    (void)runtime;
+    return result;
 }
 
 [[nodiscard]] inline PsxR3000aStepResult step_psx_runtime(PsxRuntime& runtime) noexcept {
@@ -839,8 +948,14 @@ struct PsxBiosEventDelivery {
         return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
     }
 
-    if ((fetched.value >> 26u) == 0x12u) {
-        return step_psx_gte_transfer(runtime, fetched.value);
+    const auto primary_opcode = static_cast<std::uint8_t>(fetched.value >> 26u);
+    if (primary_opcode == 0x12u) {
+        return finish_psx_runtime_step(runtime,
+                                       step_psx_gte_transfer(runtime, fetched.value));
+    }
+    if (primary_opcode == 0x32u || primary_opcode == 0x3au) {
+        return finish_psx_runtime_step(
+            runtime, step_psx_gte_memory_transfer(runtime, fetched.value));
     }
 
     PsxR3000aState interrupted_state{};
@@ -861,7 +976,9 @@ struct PsxBiosEventDelivery {
     if (stepped.reason == PsxR3000aStepReason::exception &&
         stepped.exception_code == PsxR3000aExceptionCode::syscall &&
         handle_psx_syscall_exception(runtime)) {
-        return {PsxR3000aStepReason::ok, stepped.instruction_pc, stepped.instruction};
+        return finish_psx_runtime_step(
+            runtime,
+            {PsxR3000aStepReason::ok, stepped.instruction_pc, stepped.instruction});
     }
     if (stepped.reason == PsxR3000aStepReason::exception &&
         stepped.exception_code == PsxR3000aExceptionCode::interrupt &&
@@ -869,7 +986,7 @@ struct PsxBiosEventDelivery {
         handle_psx_interrupt_exception(runtime, interrupted_state)) {
         return {PsxR3000aStepReason::ok, stepped.instruction_pc, stepped.instruction};
     }
-    return stepped;
+    return finish_psx_runtime_step(runtime, stepped);
 }
 
 }

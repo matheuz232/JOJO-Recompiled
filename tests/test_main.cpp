@@ -3,9 +3,11 @@
 #include "core/input.h"
 #include "core/disc_image.h"
 #include "core/conversion.h"
+#include "core/iso9660.h"
 #include "core/runtime.h"
 #include "core/device_id.h"
 #include "iso_fixture.h"
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -40,6 +42,15 @@ static jojo::ConversionOptions synthetic_conversion_options() {
     jojo::ConversionOptions options{};
     options.revision_profiles.push_back(synthetic_revision_profile());
     return options;
+}
+
+static std::uint64_t fnv1a64(const std::vector<std::uint8_t>& bytes) {
+    std::uint64_t hash = 14695981039346656037ull;
+    for (const auto byte : bytes) {
+        hash ^= byte;
+        hash *= 1099511628211ull;
+    }
+    return hash;
 }
 
 static void test_version() {
@@ -199,6 +210,66 @@ static void test_conversion_creates_source_independent_installation() {
     fs::remove_all(install, ec);
 }
 
+static void test_psx_conversion_materializes_prepared_runtime() {
+    const auto source = temp_file("psx_prepared.iso");
+    const auto install = fs::temp_directory_path() / "jojo_recompiled_psx_prepared_test";
+    std::error_code ec;
+    fs::remove_all(install, ec);
+    test_iso::write_psx_image(source);
+
+    const auto image = jojo::open_iso9660(source);
+    CHECK(image);
+    if (!image) {
+        fs::remove(source, ec);
+        return;
+    }
+    const auto system = jojo::read_iso9660_file(image.value, "/SYSTEM.CNF");
+    const auto executable = jojo::read_iso9660_file(image.value, "/SLUS_010.60");
+    CHECK(system);
+    CHECK(executable);
+    if (!system || !executable) {
+        fs::remove(source, ec);
+        return;
+    }
+
+    jojo::ConversionOptions options{};
+    options.validate_psx_boot = true;
+    options.revision_profiles.push_back({
+        "synthetic-psx-runtime",
+        {
+            {"/SYSTEM.CNF", system.value.size(), fnv1a64(system.value)},
+            {"/SLUS_010.60", executable.value.size(), fnv1a64(executable.value)},
+        }});
+
+    const auto converted = jojo::convert_image(source, install, options);
+    CHECK(converted);
+    if (converted) {
+        CHECK(converted.value.backend == "psx-runtime-prepared");
+    }
+    CHECK(fs::exists(install / "data" / "SYSTEM.CNF"));
+    CHECK(fs::exists(install / "data" / "PSX.EXE"));
+    const auto prepared_disc = install / "data" / "DISC.ISO";
+    CHECK(fs::exists(prepared_disc));
+
+    fs::remove(source, ec);
+    CHECK(!fs::exists(source));
+    const auto boot = jojo::bootstrap_runtime(install);
+    CHECK(boot);
+
+    const auto prepared_image = jojo::open_iso9660(prepared_disc);
+    CHECK(prepared_image);
+    if (prepared_image) {
+        const auto prepared_system = jojo::read_iso9660_file(prepared_image.value, "/SYSTEM.CNF");
+        const auto prepared_executable = jojo::read_iso9660_file(prepared_image.value, "/SLUS_010.60");
+        CHECK(prepared_system);
+        CHECK(prepared_executable);
+        if (prepared_system) CHECK(prepared_system.value == system.value);
+        if (prepared_executable) CHECK(prepared_executable.value == executable.value);
+    }
+
+    fs::remove_all(install, ec);
+}
+
 static void test_conversion_rejects_unknown_revision_before_installation() {
     const auto source = temp_file("unknown_revision.iso");
     const auto install = fs::temp_directory_path() / "jojo_recompiled_unknown_revision_test";
@@ -347,6 +418,7 @@ int main() {
     test_disc_extension_detection();
     test_disc_fingerprint_is_deterministic();
     test_conversion_creates_source_independent_installation();
+    test_psx_conversion_materializes_prepared_runtime();
     test_conversion_rejects_unknown_revision_before_installation();
     test_conversion_reports_real_monotonic_progress();
     test_conversion_accepts_bin_cue_and_gdi_media();

@@ -1,11 +1,14 @@
 #include "core/conversion.h"
 #include "core/disc_image.h"
+#include "core/disc_media.h"
 #include "core/psx_boot.h"
 #include "core/psx_revision.h"
 #include "core/version.h"
+#include <algorithm>
 #include <charconv>
 #include <fstream>
 #include <system_error>
+#include <vector>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
@@ -39,16 +42,94 @@ Result<void> replace_file(const std::filesystem::path& temp,
                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         return Result<void>::success();
     }
-    return Result<void>::failure(ErrorCode::io_error, "failed to replace manifest file");
+    return Result<void>::failure(ErrorCode::io_error, "failed to replace prepared file");
 #else
     std::error_code ec;
     std::filesystem::rename(temp, target, ec);
     if (ec) {
         return Result<void>::failure(ErrorCode::io_error,
-                                     "failed to replace manifest file: " + ec.message());
+                                     "failed to replace prepared file: " + ec.message());
     }
     return Result<void>::success();
 #endif
+}
+
+Result<void> save_binary_atomic(const std::filesystem::path& path,
+                                const std::vector<std::uint8_t>& bytes) {
+    std::error_code ec;
+    if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+        return Result<void>::failure(ErrorCode::io_error,
+                                     "failed to create prepared-data directory: " + ec.message());
+    }
+
+    auto temp = path;
+    temp += ".tmp";
+    {
+        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            return Result<void>::failure(ErrorCode::io_error,
+                                         "failed to create temporary prepared file");
+        }
+        if (!bytes.empty()) {
+            out.write(reinterpret_cast<const char*>(bytes.data()),
+                      static_cast<std::streamsize>(bytes.size()));
+        }
+        out.flush();
+        if (!out) {
+            return Result<void>::failure(ErrorCode::io_error,
+                                         "failed while writing prepared file");
+        }
+    }
+    return replace_file(temp, path);
+}
+
+Result<void> save_logical_disc_atomic(const std::filesystem::path& path,
+                                      const LogicalSectorSource& source) {
+    std::error_code ec;
+    if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+        return Result<void>::failure(ErrorCode::io_error,
+                                     "failed to create prepared-disc directory: " + ec.message());
+    }
+
+    auto temp = path;
+    temp += ".tmp";
+    {
+        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            return Result<void>::failure(ErrorCode::io_error,
+                                         "failed to create temporary normalized PS1 disc");
+        }
+
+        constexpr std::uint32_t sectors_per_chunk = 256u;
+        std::uint64_t lba = 0u;
+        while (lba < source.logical_sector_count) {
+            const auto remaining = source.logical_sector_count - lba;
+            const auto count = static_cast<std::uint32_t>(
+                std::min<std::uint64_t>(sectors_per_chunk, remaining));
+            auto bytes = read_logical_sectors(source, lba, count);
+            if (!bytes) {
+                return Result<void>::failure(bytes.error,
+                                             "failed to normalize PS1 disc: " + bytes.detail);
+            }
+            if (!bytes.value.empty()) {
+                out.write(reinterpret_cast<const char*>(bytes.value.data()),
+                          static_cast<std::streamsize>(bytes.value.size()));
+                if (!out) {
+                    return Result<void>::failure(ErrorCode::io_error,
+                                                 "failed while writing normalized PS1 disc");
+                }
+            }
+            lba += count;
+        }
+        out.flush();
+        if (!out) {
+            return Result<void>::failure(ErrorCode::io_error,
+                                         "failed while finalizing normalized PS1 disc");
+        }
+    }
+    return replace_file(temp, path);
 }
 }
 
@@ -154,11 +235,13 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
         return Result<ConversionManifest>::failure(filesystem.error, filesystem.detail);
     }
 
+    std::string psx_executable_path;
     if (options.validate_psx_boot) {
         auto boot = analyze_psx_boot(filesystem.value);
         if (!boot) {
             return Result<ConversionManifest>::failure(boot.error, boot.detail);
         }
+        psx_executable_path = boot.value.executable_path;
     }
 
     report(ConversionStage::identifying_revision, 45, "identify_revision",
@@ -186,13 +269,50 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
     manifest.hash_hex = fp.value.hash_hex;
     manifest.revision_id = revision.value.revision_id;
 
+    if (options.validate_psx_boot) {
+        report(ConversionStage::preparing_installation, 75, "materialize_psx_runtime",
+               "Extraindo os arquivos de boot PS1 validados para a instalação local.");
+
+        auto system_file = read_iso9660_file(filesystem.value, "/SYSTEM.CNF");
+        if (!system_file) {
+            return Result<ConversionManifest>::failure(system_file.error, system_file.detail);
+        }
+        auto executable_file = read_iso9660_file(filesystem.value, psx_executable_path);
+        if (!executable_file) {
+            return Result<ConversionManifest>::failure(executable_file.error, executable_file.detail);
+        }
+
+        auto saved_system = save_binary_atomic(install_dir / "data" / "SYSTEM.CNF",
+                                               system_file.value);
+        if (!saved_system) {
+            return Result<ConversionManifest>::failure(saved_system.error, saved_system.detail);
+        }
+        auto saved_executable = save_binary_atomic(install_dir / "data" / "PSX.EXE",
+                                                   executable_file.value);
+        if (!saved_executable) {
+            return Result<ConversionManifest>::failure(saved_executable.error,
+                                                       saved_executable.detail);
+        }
+
+        report(ConversionStage::preparing_installation, 82, "normalize_psx_disc",
+               "Normalizando a trilha de dados PS1 para setores lógicos de 2048 bytes.");
+        auto saved_disc = save_logical_disc_atomic(install_dir / "data" / "DISC.ISO",
+                                                   filesystem.value.sectors);
+        if (!saved_disc) {
+            return Result<ConversionManifest>::failure(saved_disc.error, saved_disc.detail);
+        }
+        manifest.backend = "psx-runtime-prepared";
+    }
+
     report(ConversionStage::writing_manifest, 90, "write_manifest",
            "Gravando os metadados da instalação.");
     auto saved = save_conversion_manifest_atomic(install_dir / "game_manifest.ini", manifest);
     if (!saved) return Result<ConversionManifest>::failure(saved.error, saved.detail);
 
     report(ConversionStage::completed, 100, "conversion_complete",
-           "Preparação base concluída; o backend específico do jogo ainda será adicionado.");
+           options.validate_psx_boot
+               ? "Preparação PS1 concluída; boot e trilha de dados validados estão disponíveis localmente."
+               : "Preparação base concluída; o backend específico do jogo ainda será adicionado.");
     return Result<ConversionManifest>::success(std::move(manifest));
 }
 

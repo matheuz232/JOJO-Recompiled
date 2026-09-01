@@ -1,4 +1,7 @@
 #include "core/input.h"
+#include "core/psx_bus.h"
+#include "core/psx_pad.h"
+#include "core/psx_sio0.h"
 #include "core/settings.h"
 #include "core/settings_menu.h"
 
@@ -134,6 +137,133 @@ static void test_per_player_resolution_handles_buttons_and_axes() {
     CHECK(resolved[1].pressed(jojo::GameAction::attack_heavy));
 }
 
+static void test_ps1_pad_translation_is_per_player_and_matches_game_defaults() {
+    jojo::ResolvedInputFrame input{};
+    input[0].actions[jojo::GameAction::up] = true;
+    input[0].actions[jojo::GameAction::left] = true;
+    input[0].actions[jojo::GameAction::attack_light] = true;
+    input[0].actions[jojo::GameAction::stand] = true;
+    input[0].actions[jojo::GameAction::pause] = true;
+
+    input[1].actions[jojo::GameAction::right] = true;
+    input[1].actions[jojo::GameAction::down] = true;
+    input[1].actions[jojo::GameAction::attack_medium] = true;
+    input[1].actions[jojo::GameAction::attack_heavy] = true;
+    input[1].actions[jojo::GameAction::start] = true;
+
+    const auto pads = jojo::make_psx_digital_pad_frame(input);
+    CHECK((pads[0].buttons & (1u << 3u)) == 0u);
+    CHECK((pads[0].buttons & (1u << 4u)) == 0u);
+    CHECK((pads[0].buttons & (1u << 7u)) == 0u);
+    CHECK((pads[0].buttons & (1u << 14u)) == 0u);
+    CHECK((pads[0].buttons & (1u << 15u)) == 0u);
+    CHECK((pads[0].buttons & (1u << 12u)) != 0u);
+
+    CHECK((pads[1].buttons & (1u << 3u)) == 0u);
+    CHECK((pads[1].buttons & (1u << 5u)) == 0u);
+    CHECK((pads[1].buttons & (1u << 6u)) == 0u);
+    CHECK((pads[1].buttons & (1u << 12u)) == 0u);
+    CHECK((pads[1].buttons & (1u << 13u)) == 0u);
+    CHECK((pads[1].buttons & (1u << 15u)) != 0u);
+
+    const auto response = jojo::psx_digital_pad_poll_response(pads[0]);
+    CHECK(response[0] == 0xffu);
+    CHECK(response[1] == 0x41u);
+    CHECK(response[2] == 0x5au);
+    CHECK(response[3] == static_cast<std::uint8_t>(pads[0].buttons));
+    CHECK(response[4] == static_cast<std::uint8_t>(pads[0].buttons >> 8u));
+}
+
+static void test_ps1_sio0_polls_both_controller_ports() {
+    jojo::PsxSio0State sio{};
+    jojo::PsxDigitalPadFrame pads{};
+    pads[0].buttons = 0x7fef;
+    pads[1].buttons = 0xdfff;
+    jojo::psx_sio0_set_pads(sio, pads);
+    jojo::psx_sio0_write_mode(sio, 0x000du);
+    jojo::psx_sio0_write_baud(sio, 0x0088u);
+
+    const auto poll = [&](std::uint16_t port_select,
+                          const jojo::PsxDigitalPadState& expected) {
+        jojo::psx_sio0_write_control(
+            sio, static_cast<std::uint16_t>(
+                     jojo::psx_sio0_control_tx_enable |
+                     jojo::psx_sio0_control_dtr |
+                     port_select));
+        CHECK((jojo::psx_sio0_status(sio) & jojo::psx_sio0_status_tx_ready_1) != 0u);
+        CHECK((jojo::psx_sio0_status(sio) & jojo::psx_sio0_status_tx_ready_2) != 0u);
+
+        const std::uint8_t tx[5] = {0x01u, 0x42u, 0xffu, 0xffu, 0xffu};
+        const auto expected_response = jojo::psx_digital_pad_poll_response(expected);
+        for (std::size_t i = 0; i < 5; ++i) {
+            CHECK(jojo::psx_sio0_write_data(sio, tx[i]));
+            CHECK((jojo::psx_sio0_status(sio) & jojo::psx_sio0_status_rx_not_empty) != 0u);
+            CHECK(jojo::psx_sio0_read_data(sio) == expected_response[i]);
+        }
+        CHECK((jojo::psx_sio0_status(sio) & jojo::psx_sio0_status_rx_not_empty) == 0u);
+        jojo::psx_sio0_write_control(sio, 0u);
+    };
+
+    poll(0u, pads[0]);
+    poll(jojo::psx_sio0_control_port_2, pads[1]);
+
+    jojo::psx_sio0_write_control(
+        sio, jojo::psx_sio0_control_tx_enable | jojo::psx_sio0_control_dtr);
+    CHECK(jojo::psx_sio0_write_data(sio, 0x01u));
+    CHECK(jojo::psx_sio0_read_data(sio) == 0xffu);
+    jojo::psx_sio0_write_control(sio, jojo::psx_sio0_control_reset);
+    CHECK((jojo::psx_sio0_status(sio) & jojo::psx_sio0_status_rx_not_empty) == 0u);
+    CHECK(sio.pad_phase == 0u);
+}
+
+static void test_ps1_sio0_is_reachable_through_bus_mmio() {
+    jojo::PsxBus bus{};
+    jojo::PsxDigitalPadFrame pads{};
+    pads[0].buttons = 0x7fefu;
+    pads[1].buttons = 0xdfffu;
+    jojo::psx_sio0_set_pads(bus.sio0, pads);
+
+    CHECK(jojo::psx_bus_write_u16(bus, jojo::PsxBus::sio0_mode_address, 0x000du) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u16(bus, jojo::PsxBus::sio0_baud_address, 0x0088u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u16(
+              bus, jojo::PsxBus::sio0_control_address,
+              jojo::psx_sio0_control_tx_enable | jojo::psx_sio0_control_dtr) ==
+          jojo::PsxBusAccessReason::ok);
+
+    const std::uint8_t tx[5] = {0x01u, 0x42u, 0xffu, 0xffu, 0xffu};
+    const auto expected = jojo::psx_digital_pad_poll_response(pads[0]);
+    for (std::size_t i = 0; i < 5; ++i) {
+        CHECK(jojo::psx_bus_write_u8(bus, jojo::PsxBus::sio0_data_address, tx[i]) ==
+              jojo::PsxBusAccessReason::ok);
+        const auto stat = jojo::psx_bus_read_u32(bus, jojo::PsxBus::sio0_status_address);
+        CHECK(stat.reason == jojo::PsxBusAccessReason::ok);
+        CHECK((stat.value & jojo::psx_sio0_status_rx_not_empty) != 0u);
+        const auto data = jojo::psx_bus_read_u8(bus, jojo::PsxBus::sio0_data_address);
+        CHECK(data.reason == jojo::PsxBusAccessReason::ok);
+        CHECK(data.value == expected[i]);
+    }
+
+    CHECK(jojo::psx_bus_write_u16(
+              bus, jojo::PsxBus::sio0_control_address,
+              jojo::psx_sio0_control_tx_enable | jojo::psx_sio0_control_dtr |
+                  jojo::psx_sio0_control_port_2) == jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(bus, jojo::PsxBus::sio0_data_address, 0x01u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_read_u8(bus, jojo::PsxBus::sio0_data_address).value == 0xffu);
+    CHECK(jojo::psx_bus_write_u8(bus, jojo::PsxBus::sio0_data_address, 0x42u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_read_u8(bus, jojo::PsxBus::sio0_data_address).value == 0x41u);
+    CHECK(jojo::psx_bus_write_u8(bus, jojo::PsxBus::sio0_data_address, 0xffu) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_read_u8(bus, jojo::PsxBus::sio0_data_address).value == 0x5au);
+    CHECK(jojo::psx_bus_write_u8(bus, jojo::PsxBus::sio0_data_address, 0xffu) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_read_u8(bus, jojo::PsxBus::sio0_data_address).value ==
+          static_cast<std::uint8_t>(pads[1].buttons));
+}
+
 static void test_binding_capture_detects_new_button_and_axis_direction() {
     jojo::InputFrame before{};
     before.devices.push_back({"xinput:0", jojo::DeviceKind::xinput, {}, {{"LX", 0.0f}}});
@@ -199,6 +329,9 @@ int main() {
     test_legacy_player_one_keys_still_load();
     test_device_registry_reports_hotplug_changes();
     test_per_player_resolution_handles_buttons_and_axes();
+    test_ps1_pad_translation_is_per_player_and_matches_game_defaults();
+    test_ps1_sio0_polls_both_controller_ports();
+    test_ps1_sio0_is_reachable_through_bus_mmio();
     test_binding_capture_detects_new_button_and_axis_direction();
     test_settings_menu_uses_draft_commit_and_discard();
 
