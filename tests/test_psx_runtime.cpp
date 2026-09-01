@@ -276,6 +276,24 @@ static void test_bios_c0_sysdeqintpr_matches_real_jojo_empty_priority2_frontier(
     CHECK(jojo::psx_bus_read_u32(runtime.bus, priority2_entry).value == 0u);
 }
 
+static void test_runtime_input_updates_both_sio0_pads() {
+    jojo::PsxRuntime runtime{};
+    jojo::ResolvedInputFrame input{};
+    input[0].actions[jojo::GameAction::up] = true;
+    input[0].actions[jojo::GameAction::attack_light] = true;
+    input[1].actions[jojo::GameAction::down] = true;
+    input[1].actions[jojo::GameAction::attack_heavy] = true;
+
+    jojo::update_psx_runtime_input(runtime, input);
+
+    CHECK((runtime.bus.sio0.pads[0].buttons & (1u << 4u)) == 0u);
+    CHECK((runtime.bus.sio0.pads[0].buttons & (1u << 15u)) == 0u);
+    CHECK((runtime.bus.sio0.pads[0].buttons & (1u << 13u)) != 0u);
+    CHECK((runtime.bus.sio0.pads[1].buttons & (1u << 6u)) == 0u);
+    CHECK((runtime.bus.sio0.pads[1].buttons & (1u << 13u)) == 0u);
+    CHECK((runtime.bus.sio0.pads[1].buttons & (1u << 15u)) != 0u);
+}
+
 int main() {
     test_loader_copies_payload_and_initializes_boot_registers();
     test_loader_materializes_scph1001_exception_control_blocks();
@@ -289,6 +307,7 @@ int main() {
     test_bios_b0_hook_entry_int_records_context_pointer_and_returns_to_ra();
     test_bios_b0_get_c0_table_materializes_scph1001_patch_surface();
     test_bios_c0_sysdeqintpr_matches_real_jojo_empty_priority2_frontier();
+    test_runtime_input_updates_both_sio0_pads();
     if (failures) return 1;
     std::cout << "PS-X EXE runtime loading/fetch assertions passed\n";
     return 0;
