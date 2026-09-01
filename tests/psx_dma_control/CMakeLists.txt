@@ -7,7 +7,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(jojo_psx_dma_control_tests
   main.cpp
-  dma3_contract.cpp)
+  dma3_contract.cpp
+  ../test_psx_gpu.cpp)
 target_include_directories(jojo_psx_dma_control_tests PRIVATE ../../src)
 
 if(MSVC)
