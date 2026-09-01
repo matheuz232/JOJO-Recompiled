@@ -163,6 +163,167 @@ inline void psx_gte_store_otz(PsxGteState& gte, std::int64_t value) noexcept {
     }
 }
 
+using PsxGteVector = std::array<std::int32_t, 3>;
+using PsxGteMatrix = std::array<PsxGteVector, 3>;
+
+[[nodiscard]] inline PsxGteVector psx_gte_vector(const PsxGteState& gte,
+                                                  std::uint8_t selector) noexcept {
+    switch (selector & 3u) {
+    case 0u:
+        return {psx_gte_s16(gte.data[0]),
+                psx_gte_s16(gte.data[0] >> 16u),
+                psx_gte_s16(gte.data[1])};
+    case 1u:
+        return {psx_gte_s16(gte.data[2]),
+                psx_gte_s16(gte.data[2] >> 16u),
+                psx_gte_s16(gte.data[3])};
+    case 2u:
+        return {psx_gte_s16(gte.data[4]),
+                psx_gte_s16(gte.data[4] >> 16u),
+                psx_gte_s16(gte.data[5])};
+    default:
+        return {psx_gte_s16(gte.data[9]),
+                psx_gte_s16(gte.data[10]),
+                psx_gte_s16(gte.data[11])};
+    }
+}
+
+[[nodiscard]] inline PsxGteMatrix psx_gte_matrix_from_control(
+    const PsxGteState& gte, std::uint8_t base) noexcept {
+    return {{
+        {psx_gte_s16(gte.control[base + 0u]),
+         psx_gte_s16(gte.control[base + 0u] >> 16u),
+         psx_gte_s16(gte.control[base + 1u])},
+        {psx_gte_s16(gte.control[base + 1u] >> 16u),
+         psx_gte_s16(gte.control[base + 2u]),
+         psx_gte_s16(gte.control[base + 2u] >> 16u)},
+        {psx_gte_s16(gte.control[base + 3u]),
+         psx_gte_s16(gte.control[base + 3u] >> 16u),
+         psx_gte_s16(gte.control[base + 4u])}
+    }};
+}
+
+[[nodiscard]] inline PsxGteMatrix psx_gte_matrix(const PsxGteState& gte,
+                                                   std::uint8_t selector) noexcept {
+    switch (selector & 3u) {
+    case 0u:
+        return psx_gte_matrix_from_control(gte, 0u);
+    case 1u:
+        return psx_gte_matrix_from_control(gte, 8u);
+    case 2u:
+        return psx_gte_matrix_from_control(gte, 16u);
+    default: {
+        const auto r = static_cast<std::int32_t>(gte.data[6] & 0xffu);
+        const auto ir0 = psx_gte_s16(gte.data[8]);
+        const auto rt13 = psx_gte_s16(gte.control[1]);
+        const auto rt22 = psx_gte_s16(gte.control[2]);
+        return {{{-r * 0x10, r * 0x10, ir0},
+                 {rt13, rt13, rt13},
+                 {rt22, rt22, rt22}}};
+    }
+    }
+}
+
+[[nodiscard]] inline PsxGteVector psx_gte_translation(const PsxGteState& gte,
+                                                       std::uint8_t selector) noexcept {
+    const auto signed32 = [](std::uint32_t value) noexcept {
+        return static_cast<std::int32_t>(value);
+    };
+    switch (selector & 3u) {
+    case 0u:
+        return {signed32(gte.control[5]), signed32(gte.control[6]), signed32(gte.control[7])};
+    case 1u:
+        return {signed32(gte.control[13]), signed32(gte.control[14]), signed32(gte.control[15])};
+    case 2u:
+        return {signed32(gte.control[21]), signed32(gte.control[22]), signed32(gte.control[23])};
+    default:
+        return {0, 0, 0};
+    }
+}
+
+inline void psx_gte_check_mac123_overflow(PsxGteState& gte,
+                                           std::uint8_t component,
+                                           std::int64_t value) noexcept {
+    constexpr std::int64_t max_mac44 = (std::int64_t{1} << 43u) - 1;
+    constexpr std::int64_t min_mac44 = -(std::int64_t{1} << 43u);
+    const auto positive_bit = static_cast<std::uint32_t>(30u - component);
+    const auto negative_bit = static_cast<std::uint32_t>(27u - component);
+    if (value > max_mac44) {
+        gte.control[31] |= std::uint32_t{1} << positive_bit;
+    } else if (value < min_mac44) {
+        gte.control[31] |= std::uint32_t{1} << negative_bit;
+    }
+}
+
+inline void psx_gte_store_mac_ir(PsxGteState& gte,
+                                 std::uint8_t component,
+                                 std::int64_t raw_value,
+                                 bool shift_fraction,
+                                 bool limit_mode) noexcept {
+    psx_gte_check_mac123_overflow(gte, component, raw_value);
+    const auto value = shift_fraction ? psx_gte_sar12(raw_value) : raw_value;
+    gte.data[25u + component] = static_cast<std::uint32_t>(value);
+
+    const auto minimum = limit_mode ? std::int64_t{0} : std::int64_t{-0x8000};
+    constexpr std::int64_t maximum = 0x7fff;
+    auto saturated = value;
+    if (saturated < minimum) {
+        saturated = minimum;
+        gte.control[31] |= std::uint32_t{1} << (24u - component);
+    } else if (saturated > maximum) {
+        saturated = maximum;
+        gte.control[31] |= std::uint32_t{1} << (24u - component);
+    }
+    gte.data[9u + component] = static_cast<std::uint32_t>(
+        static_cast<std::int32_t>(saturated));
+}
+
+inline void psx_gte_execute_mvmva(PsxGteState& gte,
+                                  std::uint32_t instruction) noexcept {
+    const bool sf = (instruction & (1u << 19u)) != 0u;
+    const auto mx = static_cast<std::uint8_t>((instruction >> 17u) & 3u);
+    const auto v = static_cast<std::uint8_t>((instruction >> 15u) & 3u);
+    const auto cv = static_cast<std::uint8_t>((instruction >> 13u) & 3u);
+    const bool lm = (instruction & (1u << 10u)) != 0u;
+
+    const auto matrix = psx_gte_matrix(gte, mx);
+    const auto vector = psx_gte_vector(gte, v);
+    const auto translation = psx_gte_translation(gte, cv);
+
+    for (std::uint8_t row = 0u; row < 3u; ++row) {
+        const auto full_value =
+            static_cast<std::int64_t>(translation[row]) * 0x1000ll +
+            static_cast<std::int64_t>(matrix[row][0]) * vector[0] +
+            static_cast<std::int64_t>(matrix[row][1]) * vector[1] +
+            static_cast<std::int64_t>(matrix[row][2]) * vector[2];
+
+        // Real GTE hardware has a documented MVMVA quirk for cv=2 (far color):
+        // the translation and first matrix product participate in internal flag
+        // behavior, but the final MAC result retains only the last two products.
+        const auto result_value = cv == 2u
+            ? static_cast<std::int64_t>(matrix[row][1]) * vector[1] +
+              static_cast<std::int64_t>(matrix[row][2]) * vector[2]
+            : full_value;
+
+        psx_gte_check_mac123_overflow(gte, row, full_value);
+        const auto shifted = sf ? psx_gte_sar12(result_value) : result_value;
+        gte.data[25u + row] = static_cast<std::uint32_t>(shifted);
+
+        const auto minimum = lm ? std::int64_t{0} : std::int64_t{-0x8000};
+        constexpr std::int64_t maximum = 0x7fff;
+        auto saturated = shifted;
+        if (saturated < minimum) {
+            saturated = minimum;
+            gte.control[31] |= std::uint32_t{1} << (24u - row);
+        } else if (saturated > maximum) {
+            saturated = maximum;
+            gte.control[31] |= std::uint32_t{1} << (24u - row);
+        }
+        gte.data[9u + row] = static_cast<std::uint32_t>(
+            static_cast<std::int32_t>(saturated));
+    }
+}
+
 [[nodiscard]] inline bool execute_psx_gte_command(PsxGteState& gte,
                                                    std::uint32_t instruction) noexcept {
     gte.control[31] = 0u;
@@ -187,6 +348,10 @@ inline void psx_gte_store_otz(PsxGteState& gte, std::int64_t value) noexcept {
         psx_gte_finalize_flags(gte);
         return true;
     }
+    case 0x12u: // MVMVA
+        psx_gte_execute_mvmva(gte, instruction);
+        psx_gte_finalize_flags(gte);
+        return true;
     case 0x2du: { // AVSZ3
         const auto zsf3 = static_cast<std::int32_t>(gte.control[29]);
         const auto sum = static_cast<std::int64_t>(gte.data[17] & 0xffffu) +
