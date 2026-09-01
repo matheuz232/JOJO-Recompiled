@@ -185,13 +185,14 @@ struct PsxBus {
     std::uint32_t gpu_gp0_write_latch{};
     std::uint32_t gpu_read_latch{};
     std::uint32_t gpu_status{gpu_status_reset};
+    std::uint32_t gpu_draw_mode{};
     std::uint32_t gpu_texture_window{};
     std::uint32_t gpu_drawing_area_top_left{};
     std::uint32_t gpu_drawing_area_bottom_right{};
     std::uint32_t gpu_drawing_offset{};
     std::vector<std::uint16_t> gpu_vram =
         std::vector<std::uint16_t>(gpu_vram_width * gpu_vram_height, 0u);
-    std::array<std::uint32_t, 3> gpu_gp0_packet{};
+    std::array<std::uint32_t, 4> gpu_gp0_packet{};
     std::uint8_t gpu_gp0_packet_count{};
     std::uint8_t gpu_gp0_packet_words{};
     std::array<std::uint16_t, spu_register_count> spu_registers{};
@@ -245,6 +246,8 @@ inline void psx_gpu_write_render_pixel(PsxBus& bus,
     }
     destination = pixel;
 }
+
+#include "core/psx_gpu_texture.inl"
 
 inline void psx_gpu_execute_render_rectangle(PsxBus& bus) noexcept {
     const auto command = bus.gpu_gp0_packet[0];
@@ -351,7 +354,11 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
         const auto command = static_cast<std::uint8_t>(value >> 24u);
         switch (command) {
         case 0xe1u:
-            bus.gpu_status = (bus.gpu_status & ~0x000007ffu) | (value & 0x000007ffu);
+            bus.gpu_draw_mode = value & 0x00003fffu;
+            bus.gpu_status =
+                (bus.gpu_status & ~(0x000007ffu | (1u << 15u))) |
+                (value & 0x000007ffu) |
+                (((value >> 11u) & 1u) << 15u);
             return;
         case 0xe2u:
             bus.gpu_texture_window = value & 0x000fffffu;
@@ -377,12 +384,18 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
         const bool rectangle = (value >> 29u) == 3u;
         const bool textured = (value & (1u << 26u)) != 0u;
         const bool semi_transparent = (value & (1u << 25u)) != 0u;
+        const bool raw_texture = (value & (1u << 24u)) != 0u;
         if (command == 0x02u || cpu_to_vram) {
             bus.gpu_gp0_packet_words = 3u;
-        } else if (rectangle && !textured && !semi_transparent) {
+        } else if (rectangle && !semi_transparent && (!textured || raw_texture)) {
             const auto size_mode = (value >> 27u) & 3u;
-            bus.gpu_gp0_packet_words = static_cast<std::uint8_t>(
-                size_mode == 0u ? 3u : 2u);
+            if (textured) {
+                bus.gpu_gp0_packet_words = static_cast<std::uint8_t>(
+                    size_mode == 0u ? 4u : 3u);
+            } else {
+                bus.gpu_gp0_packet_words = static_cast<std::uint8_t>(
+                    size_mode == 0u ? 3u : 2u);
+            }
         } else {
             return;
         }
@@ -407,7 +420,11 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
     }
 
     if ((bus.gpu_gp0_packet[0] >> 29u) == 3u) {
-        psx_gpu_execute_render_rectangle(bus);
+        if ((bus.gpu_gp0_packet[0] & (1u << 26u)) != 0u) {
+            psx_gpu_execute_textured_rectangle(bus);
+        } else {
+            psx_gpu_execute_render_rectangle(bus);
+        }
     } else {
         psx_gpu_execute_fill_rectangle(bus);
     }
@@ -475,8 +492,6 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     psx_bus_latch_cdrom_irq_rising_edge(bus, was_active);
     return true;
 }
-
-inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept;
 
 [[nodiscard]] inline bool psx_bus_cdrom_valid_bcd(std::uint8_t value) noexcept {
     return (value & 0x0fu) <= 9u && ((value >> 4u) & 0x0fu) <= 9u;
@@ -1128,6 +1143,7 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept;
         if (command == 0x00u) {
             bus.gpu_status = PsxBus::gpu_status_reset;
             bus.gpu_read_latch = 0u;
+            bus.gpu_draw_mode = 0u;
             bus.gpu_texture_window = 0u;
             bus.gpu_drawing_area_top_left = 0u;
             bus.gpu_drawing_area_bottom_right = 0u;
