@@ -1,8 +1,10 @@
 #include "core/conversion.h"
 #include "core/disc_image.h"
+#include "core/disc_media.h"
 #include "core/psx_boot.h"
 #include "core/psx_revision.h"
 #include "core/version.h"
+#include <algorithm>
 #include <charconv>
 #include <fstream>
 #include <system_error>
@@ -77,6 +79,54 @@ Result<void> save_binary_atomic(const std::filesystem::path& path,
         if (!out) {
             return Result<void>::failure(ErrorCode::io_error,
                                          "failed while writing prepared file");
+        }
+    }
+    return replace_file(temp, path);
+}
+
+Result<void> save_logical_disc_atomic(const std::filesystem::path& path,
+                                      const LogicalSectorSource& source) {
+    std::error_code ec;
+    if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+        return Result<void>::failure(ErrorCode::io_error,
+                                     "failed to create prepared-disc directory: " + ec.message());
+    }
+
+    auto temp = path;
+    temp += ".tmp";
+    {
+        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            return Result<void>::failure(ErrorCode::io_error,
+                                         "failed to create temporary normalized PS1 disc");
+        }
+
+        constexpr std::uint32_t sectors_per_chunk = 256u;
+        std::uint64_t lba = 0u;
+        while (lba < source.logical_sector_count) {
+            const auto remaining = source.logical_sector_count - lba;
+            const auto count = static_cast<std::uint32_t>(
+                std::min<std::uint64_t>(sectors_per_chunk, remaining));
+            auto bytes = read_logical_sectors(source, lba, count);
+            if (!bytes) {
+                return Result<void>::failure(bytes.error,
+                                             "failed to normalize PS1 disc: " + bytes.detail);
+            }
+            if (!bytes.value.empty()) {
+                out.write(reinterpret_cast<const char*>(bytes.value.data()),
+                          static_cast<std::streamsize>(bytes.value.size()));
+                if (!out) {
+                    return Result<void>::failure(ErrorCode::io_error,
+                                                 "failed while writing normalized PS1 disc");
+                }
+            }
+            lba += count;
+        }
+        out.flush();
+        if (!out) {
+            return Result<void>::failure(ErrorCode::io_error,
+                                         "failed while finalizing normalized PS1 disc");
         }
     }
     return replace_file(temp, path);
@@ -243,6 +293,14 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
             return Result<ConversionManifest>::failure(saved_executable.error,
                                                        saved_executable.detail);
         }
+
+        report(ConversionStage::preparing_installation, 82, "normalize_psx_disc",
+               "Normalizando a trilha de dados PS1 para setores lógicos de 2048 bytes.");
+        auto saved_disc = save_logical_disc_atomic(install_dir / "data" / "DISC.ISO",
+                                                   filesystem.value.sectors);
+        if (!saved_disc) {
+            return Result<ConversionManifest>::failure(saved_disc.error, saved_disc.detail);
+        }
         manifest.backend = "psx-runtime-prepared";
     }
 
@@ -253,7 +311,7 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
 
     report(ConversionStage::completed, 100, "conversion_complete",
            options.validate_psx_boot
-               ? "Preparação PS1 concluída; os arquivos de boot validados estão disponíveis localmente."
+               ? "Preparação PS1 concluída; boot e trilha de dados validados estão disponíveis localmente."
                : "Preparação base concluída; o backend específico do jogo ainda será adicionado.");
     return Result<ConversionManifest>::success(std::move(manifest));
 }
