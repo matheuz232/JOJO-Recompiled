@@ -106,6 +106,10 @@ struct PsxBus {
     static constexpr std::uint32_t spu_transfer_address_register = 0x1f801da6u;
     static constexpr std::uint32_t gpu_status_reset = 0x14802000u;
     static constexpr std::uint32_t gpu_status_display_disabled = 1u << 23u;
+    static constexpr std::uint32_t gpu_horizontal_display_range_reset =
+        0x200u | ((0x200u + 256u * 10u) << 12u);
+    static constexpr std::uint32_t gpu_vertical_display_range_reset =
+        0x010u | ((0x010u + 240u) << 10u);
     static constexpr std::size_t gpu_vram_width = 1024u;
     static constexpr std::size_t gpu_vram_height = 512u;
     static constexpr std::uint16_t interrupt_status_valid_bits = 0x07ffu;
@@ -191,6 +195,10 @@ struct PsxBus {
     std::uint32_t gpu_drawing_area_top_left{};
     std::uint32_t gpu_drawing_area_bottom_right{};
     std::uint32_t gpu_drawing_offset{};
+    std::uint32_t gpu_display_vram_start{};
+    std::uint32_t gpu_horizontal_display_range{gpu_horizontal_display_range_reset};
+    std::uint32_t gpu_vertical_display_range{gpu_vertical_display_range_reset};
+    std::uint8_t gpu_display_mode{};
     std::vector<std::uint16_t> gpu_vram =
         std::vector<std::uint16_t>(gpu_vram_width * gpu_vram_height, 0u);
     std::array<std::uint32_t, 12> gpu_gp0_packet{};
@@ -392,6 +400,9 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
     if (bus.gpu_gp0_packet_count == 0u) {
         const auto command = static_cast<std::uint8_t>(value >> 24u);
         switch (command) {
+        case 0x1fu:
+            bus.gpu_status |= 1u << 24u;
+            return;
         case 0xe1u:
             bus.gpu_draw_mode = value & 0x00003fffu;
             bus.gpu_status =
@@ -1228,12 +1239,52 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
             bus.gpu_drawing_area_top_left = 0u;
             bus.gpu_drawing_area_bottom_right = 0u;
             bus.gpu_drawing_offset = 0u;
+            bus.gpu_display_vram_start = 0u;
+            bus.gpu_horizontal_display_range = PsxBus::gpu_horizontal_display_range_reset;
+            bus.gpu_vertical_display_range = PsxBus::gpu_vertical_display_range_reset;
+            bus.gpu_display_mode = 0u;
             bus.gpu_gp0_packet = {};
             bus.gpu_gp0_packet_count = 0u;
             bus.gpu_gp0_packet_words = 0u;
             bus.gpu_polyline_active = false;
             bus.gpu_polyline_gouraud = false;
             bus.gpu_polyline_expect_color = false;
+            return PsxBusAccessReason::ok;
+        }
+        if (command == 0x01u) {
+            bus.gpu_gp0_packet = {};
+            bus.gpu_gp0_packet_count = 0u;
+            bus.gpu_gp0_packet_words = 0u;
+            bus.gpu_polyline_active = false;
+            bus.gpu_polyline_gouraud = false;
+            bus.gpu_polyline_expect_color = false;
+            return PsxBusAccessReason::ok;
+        }
+        if (command == 0x02u) {
+            bus.gpu_status &= ~(1u << 24u);
+            return PsxBusAccessReason::ok;
+        }
+        if (command == 0x05u) {
+            bus.gpu_display_vram_start = value & 0x0007ffffu;
+            return PsxBusAccessReason::ok;
+        }
+        if (command == 0x06u) {
+            bus.gpu_horizontal_display_range = value & 0x00ffffffu;
+            return PsxBusAccessReason::ok;
+        }
+        if (command == 0x07u) {
+            bus.gpu_vertical_display_range = value & 0x000fffffu;
+            return PsxBusAccessReason::ok;
+        }
+        if (command == 0x08u) {
+            const auto mode = static_cast<std::uint8_t>(value & 0xffu);
+            bus.gpu_display_mode = mode;
+            constexpr std::uint32_t display_status_mask = 0x007f0000u;
+            const auto display_status =
+                (static_cast<std::uint32_t>(mode & 0x03u) << 17u) |
+                (static_cast<std::uint32_t>(mode & 0x3cu) << 17u) |
+                (static_cast<std::uint32_t>(mode & 0x40u) << 10u);
+            bus.gpu_status = (bus.gpu_status & ~display_status_mask) | display_status;
             return PsxBusAccessReason::ok;
         }
         if (command == 0x10u) {
