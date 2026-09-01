@@ -367,17 +367,31 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
     const auto rs = static_cast<std::uint8_t>((instruction >> 21u) & 0x1fu);
     const auto rt = static_cast<std::uint8_t>((instruction >> 16u) & 0x1fu);
     const auto rd = static_cast<std::uint8_t>((instruction >> 11u) & 0x1fu);
+    const bool is_command = (instruction & 0x02000000u) != 0u;
     const bool canonical_move = (instruction & 0x7ffu) == 0u;
     const bool is_read = rs == 0x00u || rs == 0x02u;
     const bool is_write = rs == 0x04u || rs == 0x06u;
+    const auto sequential_pc = cpu.next_pc;
+    const auto following_pc = sequential_pc + 4u;
+
+    if (is_command) {
+        if (!execute_psx_gte_command(runtime.gte, instruction)) {
+            return {PsxR3000aStepReason::unsupported_instruction,
+                    instruction_pc, instruction};
+        }
+        complete_psx_pending_load(cpu);
+        cpu.gpr[0] = 0u;
+        cpu.pc = sequential_pc;
+        cpu.next_pc = following_pc;
+        cpu.current_instruction_is_branch_delay_slot = false;
+        cpu.branch_pc = 0u;
+        return {PsxR3000aStepReason::ok, instruction_pc, instruction};
+    }
 
     if (!canonical_move || (!is_read && !is_write)) {
         return {PsxR3000aStepReason::unsupported_instruction,
                 instruction_pc, instruction};
     }
-
-    const auto sequential_pc = cpu.next_pc;
-    const auto following_pc = sequential_pc + 4u;
 
     if (is_read) {
         const auto value = rs == 0x00u

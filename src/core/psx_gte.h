@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <limits>
 
 namespace jojo {
 
@@ -119,6 +120,99 @@ inline void psx_gte_write_data(PsxGteState& gte,
         return component(9u) | (component(10u) << 5u) | (component(11u) << 10u);
     }
     return gte.data[index];
+}
+
+[[nodiscard]] inline std::int32_t psx_gte_s16(std::uint32_t value) noexcept {
+    return static_cast<std::int32_t>(static_cast<std::int16_t>(value & 0xffffu));
+}
+
+[[nodiscard]] inline std::int64_t psx_gte_sar12(std::int64_t value) noexcept {
+    if (value >= 0) return value / 0x1000ll;
+    return -(((-value) + 0xfffll) / 0x1000ll);
+}
+
+inline void psx_gte_finalize_flags(PsxGteState& gte) noexcept {
+    constexpr std::uint32_t error_summary_mask = 0x7f87e000u;
+    gte.control[31] &= 0x7ffff000u;
+    if ((gte.control[31] & error_summary_mask) != 0u) {
+        gte.control[31] |= 0x80000000u;
+    }
+}
+
+inline void psx_gte_store_mac0(PsxGteState& gte, std::int64_t value) noexcept {
+    constexpr std::uint32_t mac0_positive_overflow = 1u << 16u;
+    constexpr std::uint32_t mac0_negative_overflow = 1u << 15u;
+    if (value > std::numeric_limits<std::int32_t>::max()) {
+        gte.control[31] |= mac0_positive_overflow;
+    } else if (value < std::numeric_limits<std::int32_t>::min()) {
+        gte.control[31] |= mac0_negative_overflow;
+    }
+    gte.data[24] = static_cast<std::uint32_t>(value);
+}
+
+inline void psx_gte_store_otz(PsxGteState& gte, std::int64_t value) noexcept {
+    constexpr std::uint32_t sz_otz_saturation = 1u << 18u;
+    if (value < 0) {
+        gte.data[7] = 0u;
+        gte.control[31] |= sz_otz_saturation;
+    } else if (value > 0xffff) {
+        gte.data[7] = 0xffffu;
+        gte.control[31] |= sz_otz_saturation;
+    } else {
+        gte.data[7] = static_cast<std::uint32_t>(value);
+    }
+}
+
+[[nodiscard]] inline bool execute_psx_gte_command(PsxGteState& gte,
+                                                   std::uint32_t instruction) noexcept {
+    gte.control[31] = 0u;
+    const auto command = static_cast<std::uint8_t>(instruction & 0x3fu);
+
+    switch (command) {
+    case 0x06u: { // NCLIP
+        const auto sx0 = psx_gte_s16(gte.data[12]);
+        const auto sy0 = psx_gte_s16(gte.data[12] >> 16u);
+        const auto sx1 = psx_gte_s16(gte.data[13]);
+        const auto sy1 = psx_gte_s16(gte.data[13] >> 16u);
+        const auto sx2 = psx_gte_s16(gte.data[14]);
+        const auto sy2 = psx_gte_s16(gte.data[14] >> 16u);
+        const std::int64_t mac0 =
+            static_cast<std::int64_t>(sx0) * sy1 +
+            static_cast<std::int64_t>(sx1) * sy2 +
+            static_cast<std::int64_t>(sx2) * sy0 -
+            static_cast<std::int64_t>(sx0) * sy2 -
+            static_cast<std::int64_t>(sx1) * sy0 -
+            static_cast<std::int64_t>(sx2) * sy1;
+        psx_gte_store_mac0(gte, mac0);
+        psx_gte_finalize_flags(gte);
+        return true;
+    }
+    case 0x2du: { // AVSZ3
+        const auto zsf3 = static_cast<std::int32_t>(gte.control[29]);
+        const auto sum = static_cast<std::int64_t>(gte.data[17] & 0xffffu) +
+                         static_cast<std::int64_t>(gte.data[18] & 0xffffu) +
+                         static_cast<std::int64_t>(gte.data[19] & 0xffffu);
+        const auto mac0 = static_cast<std::int64_t>(zsf3) * sum;
+        psx_gte_store_mac0(gte, mac0);
+        psx_gte_store_otz(gte, psx_gte_sar12(mac0));
+        psx_gte_finalize_flags(gte);
+        return true;
+    }
+    case 0x2eu: { // AVSZ4
+        const auto zsf4 = static_cast<std::int32_t>(gte.control[30]);
+        const auto sum = static_cast<std::int64_t>(gte.data[16] & 0xffffu) +
+                         static_cast<std::int64_t>(gte.data[17] & 0xffffu) +
+                         static_cast<std::int64_t>(gte.data[18] & 0xffffu) +
+                         static_cast<std::int64_t>(gte.data[19] & 0xffffu);
+        const auto mac0 = static_cast<std::int64_t>(zsf4) * sum;
+        psx_gte_store_mac0(gte, mac0);
+        psx_gte_store_otz(gte, psx_gte_sar12(mac0));
+        psx_gte_finalize_flags(gte);
+        return true;
+    }
+    default:
+        return false;
+    }
 }
 
 } // namespace jojo
