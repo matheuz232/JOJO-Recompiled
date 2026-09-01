@@ -384,10 +384,9 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
         const bool rectangle = (value >> 29u) == 3u;
         const bool textured = (value & (1u << 26u)) != 0u;
         const bool semi_transparent = (value & (1u << 25u)) != 0u;
-        const bool raw_texture = (value & (1u << 24u)) != 0u;
         if (command == 0x02u || cpu_to_vram) {
             bus.gpu_gp0_packet_words = 3u;
-        } else if (rectangle && !semi_transparent && (!textured || raw_texture)) {
+        } else if (rectangle && !semi_transparent) {
             const auto size_mode = (value >> 27u) & 3u;
             if (textured) {
                 bus.gpu_gp0_packet_words = static_cast<std::uint8_t>(
