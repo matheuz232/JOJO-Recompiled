@@ -930,6 +930,40 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     return {PsxBusAccessReason::ok, value};
 }
 
+[[nodiscard]] inline std::uint32_t psx_gpu_status_value(const PsxBus& bus) noexcept {
+    constexpr std::uint32_t data_request = 1u << 25u;
+    constexpr std::uint32_t ready_command = 1u << 26u;
+    constexpr std::uint32_t ready_vram_to_cpu = 1u << 27u;
+    constexpr std::uint32_t ready_dma_block = 1u << 28u;
+
+    auto value = bus.gpu_status & ~data_request;
+    const bool command_ready =
+        bus.gpu_gp0_packet_count == 0u && !bus.gpu_polyline_active;
+    if (command_ready) value |= ready_command;
+    else value &= ~ready_command;
+
+    bool dma_block_ready = true;
+    if (psx_gpu_vram_to_cpu_active(bus) || bus.gpu_polyline_active) {
+        dma_block_ready = false;
+    } else if (bus.gpu_gp0_packet_count != 0u &&
+               bus.gpu_gp0_packet_count < 0xfeu) {
+        const auto group = bus.gpu_gp0_packet[0] >> 29u;
+        if (group == 1u || group == 2u) dma_block_ready = false;
+    }
+    if (dma_block_ready) value |= ready_dma_block;
+    else value &= ~ready_dma_block;
+
+    bool request = false;
+    switch ((value >> 29u) & 3u) {
+    case 0u: request = false; break;
+    case 1u: request = true; break;
+    case 2u: request = dma_block_ready; break;
+    default: request = (value & ready_vram_to_cpu) != 0u; break;
+    }
+    if (request) value |= data_request;
+    return value;
+}
+
 [[nodiscard]] inline PsxBusReadU32Result psx_bus_read_u32(const PsxBus& bus,
                                                            std::uint32_t address) noexcept {
     if ((address & 3u) != 0u) return {PsxBusAccessReason::misaligned, 0u};
@@ -961,7 +995,9 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     if (address == PsxBus::dma_interrupt_address) return {PsxBusAccessReason::ok, psx_bus_dma_interrupt_value(bus)};
     if (address == PsxBus::timer1_current_address) return {PsxBusAccessReason::ok, static_cast<std::uint32_t>(bus.timer1_current)};
     if (address == PsxBus::gpu_gp0_address) return {PsxBusAccessReason::ok, bus.gpu_read_latch};
-    if (address == PsxBus::gpu_gp1_address) return {PsxBusAccessReason::ok, bus.gpu_status};
+    if (address == PsxBus::gpu_gp1_address) {
+        return {PsxBusAccessReason::ok, psx_gpu_status_value(bus)};
+    }
     std::size_t scratchpad_offset = 0;
     if (psx_bus_scratchpad_offset(address, 4u, scratchpad_offset) == PsxBusAccessReason::ok) {
         const auto value = static_cast<std::uint32_t>(bus.scratchpad[scratchpad_offset]) |

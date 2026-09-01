@@ -194,8 +194,9 @@ int main() {
     const auto gpu_cpu_to_gp0 = jojo::psx_bus_read_u32(bus, 0x1f801814u);
     CHECK(gpu_cpu_to_gp0.reason == jojo::PsxBusAccessReason::ok);
     CHECK(((gpu_cpu_to_gp0.value >> 29u) & 3u) == 2u);
-    CHECK((gpu_cpu_to_gp0.value & 0x1fffffffu) ==
-          (reset_status.value & 0x1fffffffu));
+    CHECK((gpu_cpu_to_gp0.value & 0x1dffffffu) ==
+          (reset_status.value & 0x1dffffffu));
+    CHECK((gpu_cpu_to_gp0.value & (1u << 25u)) != 0u);
 
     // The following instruction programs DMA2/GPU MADR with a KSEG0 pointer.
     jojo::reset_psx_r3000a(cpu, 0x80037db8u);
