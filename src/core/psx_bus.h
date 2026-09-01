@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
@@ -195,6 +196,9 @@ struct PsxBus {
     std::array<std::uint32_t, 12> gpu_gp0_packet{};
     std::uint8_t gpu_gp0_packet_count{};
     std::uint8_t gpu_gp0_packet_words{};
+    bool gpu_polyline_active{};
+    bool gpu_polyline_gouraud{};
+    bool gpu_polyline_expect_color{};
     std::array<std::uint16_t, spu_register_count> spu_registers{};
     std::vector<std::uint8_t> spu_ram = std::vector<std::uint8_t>(spu_ram_size, 0u);
 };
@@ -278,6 +282,7 @@ inline void psx_gpu_write_render_pixel(PsxBus& bus,
 
 #include "core/psx_gpu_texture.inl"
 #include "core/psx_gpu_polygon.inl"
+#include "core/psx_gpu_line.inl"
 
 inline void psx_gpu_execute_render_rectangle(PsxBus& bus) noexcept {
     const auto command = bus.gpu_gp0_packet[0];
@@ -347,6 +352,8 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
     constexpr std::uint8_t image_payload_state = 0xffu;
     bus.gpu_gp0_write_latch = value;
 
+    if (psx_gpu_consume_polyline_word(bus, value)) return;
+
     if (bus.gpu_gp0_packet_count == image_payload_state) {
         const auto destination = bus.gpu_gp0_packet[0];
         const auto dimensions = bus.gpu_gp0_packet[1];
@@ -414,6 +421,7 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
 
         const bool cpu_to_vram = (value >> 29u) == 5u;
         const bool polygon = (value >> 29u) == 1u;
+        const bool line = (value >> 29u) == 2u;
         const bool rectangle = (value >> 29u) == 3u;
         const bool gouraud = (value & (1u << 28u)) != 0u;
         const bool quad = (value & (1u << 27u)) != 0u;
@@ -432,6 +440,8 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
             } else {
                 bus.gpu_gp0_packet_words = static_cast<std::uint8_t>(quad ? 5u : 4u);
             }
+        } else if (line) {
+            bus.gpu_gp0_packet_words = static_cast<std::uint8_t>(gouraud ? 4u : 3u);
         } else if (rectangle) {
             const auto size_mode = (value >> 27u) & 3u;
             if (textured) {
@@ -472,6 +482,22 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
             psx_gpu_execute_gouraud_polygon(bus);
         } else {
             psx_gpu_execute_flat_polygon(bus);
+        }
+    } else if (primitive_group == 2u) {
+        psx_gpu_execute_line(bus);
+        if ((bus.gpu_gp0_packet[0] & (1u << 27u)) != 0u) {
+            const bool gouraud = (bus.gpu_gp0_packet[0] & (1u << 28u)) != 0u;
+            bus.gpu_polyline_active = true;
+            bus.gpu_polyline_gouraud = gouraud;
+            bus.gpu_polyline_expect_color = gouraud;
+            if (gouraud) {
+                bus.gpu_gp0_packet[1] = bus.gpu_gp0_packet[3];
+            } else {
+                bus.gpu_gp0_packet[1] = bus.gpu_gp0_packet[2];
+            }
+            bus.gpu_gp0_packet_count = 0u;
+            bus.gpu_gp0_packet_words = 0u;
+            return;
         }
     } else if (primitive_group == 3u) {
         if ((bus.gpu_gp0_packet[0] & (1u << 26u)) != 0u) {
@@ -1205,6 +1231,9 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
             bus.gpu_gp0_packet = {};
             bus.gpu_gp0_packet_count = 0u;
             bus.gpu_gp0_packet_words = 0u;
+            bus.gpu_polyline_active = false;
+            bus.gpu_polyline_gouraud = false;
+            bus.gpu_polyline_expect_color = false;
             return PsxBusAccessReason::ok;
         }
         if (command == 0x10u) {
