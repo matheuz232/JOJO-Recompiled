@@ -1,5 +1,6 @@
 #pragma once
 #include "core/conversion.h"
+#include "core/psx_runtime.h"
 #include "core/result.h"
 #include <filesystem>
 
@@ -11,6 +12,7 @@ struct InstallationInfo {
 };
 
 [[nodiscard]] Result<InstallationInfo> validate_installation(const std::filesystem::path& install_dir);
+[[nodiscard]] Result<PsxRuntime> load_prepared_psx_runtime(const std::filesystem::path& install_dir);
 [[nodiscard]] Result<void> bootstrap_runtime(const std::filesystem::path& install_dir);
 
 }
