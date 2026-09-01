@@ -103,8 +103,16 @@ void refresh_install(){
     auto i=jojo::validate_installation(game_dir); converted=static_cast<bool>(i);
     if(!i){percent=0;status=L"Selecione a imagem da sua própria cópia do jogo.";add_log(L"Aguardando preparação inicial.");SetWindowTextW(prepare_btn,L"PREPARAR JOGO");return;}
     percent=100; SetWindowTextW(prepare_btn,L"REFAZER PREPARAÇÃO");
-    if(i.value.manifest.backend=="native-ready"){status=L"Instalação nativa pronta.";add_log(L"Backend nativo detectado.");}
-    else {status=L"Preparação base detectada. Backend específico do jogo ainda pendente.";add_log(L"Instalação convertida encontrada.");}
+    if(i.value.manifest.backend=="native-ready"){
+        status=L"Instalação nativa pronta.";
+        add_log(L"Backend nativo detectado.");
+    }else if(i.value.manifest.backend=="psx-runtime-prepared"){
+        status=L"Runtime PS1 preparado localmente. Boot comercial ainda em desenvolvimento.";
+        add_log(L"Boot PS1 e trilha de dados preparados; R2 ainda não foi concluído.");
+    }else{
+        status=L"Preparação base detectada. Backend específico do jogo ainda pendente.";
+        add_log(L"Instalação convertida encontrada.");
+    }
 }
 
 void start_conversion(){
@@ -148,7 +156,7 @@ LRESULT CALLBACK proc(HWND h,UINT m,WPARAM w,LPARAM l){
         if(LOWORD(w)==ID_SELECT){auto p=choose_image();if(!p.empty()){source=p;SetWindowTextW(path_box,p.c_str());status=L"Imagem selecionada. Pronto para preparar.";add_log(L"Imagem selecionada.");InvalidateRect(h,nullptr,FALSE);}return 0;}
         if(LOWORD(w)==ID_PREPARE){start_conversion();return 0;}break;
     case WM_PROGRESS:{std::unique_ptr<ProgressMsg> p(reinterpret_cast<ProgressMsg*>(l));if(p){percent=std::clamp(p->p.percent,0,100);status=wide(p->p.detail);add_log(L"["+std::to_wstring(percent)+L"%] "+wide(p->p.detail));InvalidateRect(h,nullptr,FALSE);}return 0;}
-    case WM_FINISHED:{std::unique_ptr<FinishMsg> p(reinterpret_cast<FinishMsg*>(l));running=false;set_enabled(true);if(!p||!p->r){status=L"Falha na preparação."+(p?L" "+wide(p->r.detail):L"");if(p)add_log(L"ERRO: "+wide(p->r.detail));}else{percent=100;converted=true;SetWindowTextW(prepare_btn,L"REFAZER PREPARAÇÃO");auto r=jojo::bootstrap_runtime(game_dir);if(!r&&r.error==jojo::ErrorCode::backend_unavailable){status=L"Preparação base concluída. O backend nativo é o próximo marco.";add_log(L"Conversão base concluída.");}else if(!r){status=L"Validação do runtime falhou: "+wide(r.detail);}else status=L"Instalação nativa pronta.";}InvalidateRect(h,nullptr,FALSE);return 0;}
+    case WM_FINISHED:{std::unique_ptr<FinishMsg> p(reinterpret_cast<FinishMsg*>(l));running=false;set_enabled(true);if(!p||!p->r){status=L"Falha na preparação."+(p?L" "+wide(p->r.detail):L"");if(p)add_log(L"ERRO: "+wide(p->r.detail));}else{percent=100;converted=true;SetWindowTextW(prepare_btn,L"REFAZER PREPARAÇÃO");auto r=jojo::bootstrap_runtime(game_dir);if(!r&&r.error==jojo::ErrorCode::backend_unavailable){status=L"Preparação base concluída. O backend nativo é o próximo marco.";add_log(L"Conversão base concluída.");}else if(!r){status=L"Validação do runtime falhou: "+wide(r.detail);}else if(p->r.value.backend=="native-ready"){status=L"Instalação nativa pronta.";add_log(L"Backend nativo validado.");}else if(p->r.value.backend=="psx-runtime-prepared"){status=L"Runtime PS1 preparado localmente. Boot comercial ainda em desenvolvimento.";add_log(L"Preparação PS1 validada; R2 ainda requer boot comercial real.");}else{status=L"Preparação concluída, mas o backend final ainda não está pronto.";}}InvalidateRect(h,nullptr,FALSE);return 0;}
     case WM_DRAWITEM:draw_button(reinterpret_cast<DRAWITEMSTRUCT*>(l));return TRUE;
     case WM_CTLCOLOREDIT:case WM_CTLCOLORSTATIC:{HDC dc=reinterpret_cast<HDC>(w);SetTextColor(dc,TEXT);SetBkColor(dc,PANEL);return reinterpret_cast<INT_PTR>(edit_brush);}
     case WM_ERASEBKGND:return 1;
