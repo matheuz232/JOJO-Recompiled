@@ -1,5 +1,6 @@
 #include "core/psx_bus.h"
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -32,6 +33,13 @@ std::uint32_t gpu_read(const jojo::PsxBus& bus) {
 constexpr std::uint32_t vertex(std::int32_t x, std::int32_t y) {
     return (static_cast<std::uint32_t>(x) & 0x7ffu) |
            ((static_cast<std::uint32_t>(y) & 0x7ffu) << 16u);
+}
+
+void configure_full_drawing_area(jojo::PsxBus& bus) {
+    gp0(bus, 0xe3000000u);
+    gp0(bus, 0xe4000000u | 1023u | (511u << 10u));
+    gp0(bus, 0xe5000000u);
+    gp0(bus, 0xe6000000u);
 }
 
 void test_cpu_to_vram_upload_and_parser_recovery() {
@@ -187,6 +195,67 @@ void test_untextured_fixed_rectangle_sizes_and_force_mask() {
     REQUIRE(bus.gpu_vram[86u * jojo::PsxBus::gpu_vram_width + 75u] == 0u);
 }
 
+void test_untextured_rectangle_abr_modes() {
+    constexpr std::array<std::uint16_t, 4> expected{
+        0x1910u, // B/2 + F/2
+        0x321fu, // B + F, red clamped to 31
+        0x1000u, // B - F, red/green clamped to zero
+        0x254eu, // B + F/4
+    };
+
+    for (std::uint32_t mode = 0u; mode < expected.size(); ++mode) {
+        jojo::PsxBus bus{};
+        configure_full_drawing_area(bus);
+        gp0(bus, 0xe1000000u | (mode << 5u));
+
+        constexpr std::uint32_t x = 200u;
+        constexpr std::uint32_t y = 180u;
+        auto& destination = bus.gpu_vram[y * jojo::PsxBus::gpu_vram_width + x];
+        destination = 0x2108u; // B: R=8, G=8, B=8.
+
+        gp0(bus, 0x6a2040c0u); // semi-transparent 1x1; F: R=24,G=8,B=4.
+        gp0(bus, vertex(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)));
+        REQUIRE(destination == expected[mode]);
+    }
+}
+
+void test_textured_semi_transparency_uses_texel_stp() {
+    jojo::PsxBus bus{};
+    configure_full_drawing_area(bus);
+
+    constexpr std::uint32_t page_x = 64u;
+    constexpr std::uint32_t u = 3u;
+    constexpr std::uint32_t v = 2u;
+    // Page X=64, ABR=B+F, direct 15-bit texture mode.
+    gp0(bus, 0xe1000121u);
+
+    bus.gpu_vram[v * jojo::PsxBus::gpu_vram_width + page_x + u] = 0x001fu;
+    bus.gpu_vram[v * jojo::PsxBus::gpu_vram_width + page_x + u + 1u] = 0x801fu;
+    bus.gpu_vram[v * jojo::PsxBus::gpu_vram_width + page_x + u + 2u] = 0x0000u;
+
+    constexpr std::uint32_t y = 210u;
+    auto& opaque_destination = bus.gpu_vram[y * jojo::PsxBus::gpu_vram_width + 220u];
+    opaque_destination = 0x7c00u;
+    gp0(bus, 0x6f000000u); // semi-transparent, raw textured 1x1.
+    gp0(bus, vertex(220, static_cast<std::int32_t>(y)));
+    gp0(bus, u | (v << 8u));
+    REQUIRE(opaque_destination == 0x001fu); // STP=0: draw opaque even for semi command.
+
+    auto& blended_destination = bus.gpu_vram[y * jojo::PsxBus::gpu_vram_width + 221u];
+    blended_destination = 0x7c00u;
+    gp0(bus, 0x6f000000u);
+    gp0(bus, vertex(221, static_cast<std::int32_t>(y)));
+    gp0(bus, (u + 1u) | (v << 8u));
+    REQUIRE(blended_destination == 0xfc1fu); // STP=1: B+F and retain texture bit15.
+
+    auto& transparent_destination = bus.gpu_vram[y * jojo::PsxBus::gpu_vram_width + 222u];
+    transparent_destination = 0x1234u;
+    gp0(bus, 0x6f000000u);
+    gp0(bus, vertex(222, static_cast<std::int32_t>(y)));
+    gp0(bus, (u + 2u) | (v << 8u));
+    REQUIRE(transparent_destination == 0x1234u); // 0000h remains fully transparent.
+}
+
 struct GpuContractRunner {
     GpuContractRunner() {
         test_cpu_to_vram_upload_and_parser_recovery();
@@ -195,6 +264,8 @@ struct GpuContractRunner {
         test_mask_setting_applies_to_cpu_to_vram();
         test_untextured_variable_rectangle_applies_offset_clip_and_mask();
         test_untextured_fixed_rectangle_sizes_and_force_mask();
+        test_untextured_rectangle_abr_modes();
+        test_textured_semi_transparency_uses_texel_stp();
     }
 };
 
