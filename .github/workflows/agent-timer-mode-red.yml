@@ -106,9 +106,23 @@ jobs:
               'mutable 32-bit timer mode read')
 
           path.write_text(text)
+
+          test_path = Path('tests/psx_timer1_mode/main.cpp')
+          test_text = test_path.read_text()
+          replacements = [
+              ('CHECK(mode.value == 0x0100u);', 'CHECK(mode.value == 0x0500u);'),
+              ('CHECK(jojo::psx_bus_read_u16(bus, 0x1f801114u).value == 0x0100u);',
+               'CHECK(jojo::psx_bus_read_u16(bus, 0x1f801114u).value == 0x0500u);'),
+          ]
+          for old, new in replacements:
+              count = test_text.count(old)
+              if count != 1:
+                  raise SystemExit(f'legacy MODE expectation: expected one match for {old!r}, found {count}')
+              test_text = test_text.replace(old, new, 1)
+          test_path.write_text(test_text)
           PY
           git diff --check
-          git diff -- src/core/psx_bus.h
+          git diff -- src/core/psx_bus.h tests/psx_timer1_mode/main.cpp
       - name: Configure timer contract
         run: cmake -S tests/psx_timer1_mode -B build/psx_timer1_mode -DCMAKE_BUILD_TYPE=Release
       - name: Build timer contract
@@ -120,6 +134,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/core/psx_bus.h
+          git add src/core/psx_bus.h tests/psx_timer1_mode/main.cpp
           git commit -m 'feat: implement PS1 root-counter mode status flags'
           git push origin HEAD:feature/offline-product-rebuild
