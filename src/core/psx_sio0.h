@@ -45,6 +45,17 @@ inline void clear_psx_sio0_transaction(PsxSio0State& sio) noexcept {
     return true;
 }
 
+[[nodiscard]] inline PsxDigitalPadResponse make_psx_sio0_pad_response(
+    const PsxDigitalPadState& pad) noexcept {
+    return {
+        0xffu,
+        0x41u,
+        0x5au,
+        static_cast<std::uint8_t>(pad.buttons),
+        static_cast<std::uint8_t>(pad.buttons >> 8u),
+    };
+}
+
 }
 
 inline void reset_psx_sio0(PsxSio0State& sio) noexcept {
@@ -104,7 +115,7 @@ inline void psx_sio0_write_baud(PsxSio0State& sio, std::uint16_t value) noexcept
     }
 
     const auto port = (sio.control & psx_sio0_control_port_2) != 0u ? 1u : 0u;
-    const auto response = psx_digital_pad_poll_response(sio.pads[port]);
+    const auto response = detail::make_psx_sio0_pad_response(sio.pads[port]);
     std::uint8_t rx = 0xffu;
 
     switch (sio.pad_phase) {
