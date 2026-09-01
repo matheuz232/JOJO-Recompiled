@@ -175,6 +175,8 @@ struct PsxBus {
     bool timer0_irq_fired{};
     bool timer1_irq_fired{};
     bool timer2_irq_fired{};
+    bool timer0_sync_started{};
+    bool timer1_sync_started{};
     std::uint8_t timer2_clock_phase{};
     std::uint64_t video_clock_phase{};
     std::uint16_t gpu_scanline{};
@@ -1184,6 +1186,7 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
         bus.timer0_current = 0u;
         bus.timer0_reset_pending = false;
         bus.timer0_irq_fired = false;
+        bus.timer0_sync_started = false;
         return PsxBusAccessReason::ok;
     }
     if (address == PsxBus::timer0_target_address) { bus.timer0_target = value; return PsxBusAccessReason::ok; }
@@ -1194,6 +1197,7 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
         bus.timer1_current = 0u;
         bus.timer1_reset_pending = false;
         bus.timer1_irq_fired = false;
+        bus.timer1_sync_started = false;
         return PsxBusAccessReason::ok;
     }
     if (address == PsxBus::timer1_target_address) { bus.timer1_target = value; return PsxBusAccessReason::ok; }
@@ -1591,7 +1595,15 @@ inline void psx_bus_tick(PsxBus& bus, std::uint32_t cpu_cycles) noexcept {
     constexpr std::uint16_t timer0_interrupt = 1u << 4u;
     constexpr std::uint16_t timer1_interrupt = 1u << 5u;
     constexpr std::uint16_t timer2_interrupt = 1u << 6u;
-    if ((bus.timer0_mode & synchronization_enable) == 0u) {
+    const auto sync_mode = [](std::uint16_t mode) noexcept {
+        return static_cast<std::uint16_t>((mode >> 1u) & 3u);
+    };
+    const bool timer0_sync = (bus.timer0_mode & synchronization_enable) != 0u;
+    const auto timer0_sync_mode = sync_mode(bus.timer0_mode);
+    const bool timer0_system_clock_allowed =
+        !timer0_sync || timer0_sync_mode == 1u ||
+        (timer0_sync_mode == 3u && bus.timer0_sync_started);
+    if (timer0_system_clock_allowed) {
         const auto source = static_cast<std::uint16_t>((bus.timer0_mode >> 8u) & 3u);
         if (source == 0u || source == 2u) {
             psx_bus_tick_root_counter(bus, bus.timer0_current, bus.timer0_mode,
@@ -1599,7 +1611,13 @@ inline void psx_bus_tick(PsxBus& bus, std::uint32_t cpu_cycles) noexcept {
                                       bus.timer0_irq_fired, timer0_interrupt, cpu_cycles);
         }
     }
-    if ((bus.timer1_mode & synchronization_enable) == 0u) {
+
+    const bool timer1_sync = (bus.timer1_mode & synchronization_enable) != 0u;
+    const auto timer1_sync_mode = sync_mode(bus.timer1_mode);
+    const bool timer1_system_clock_allowed =
+        !timer1_sync || timer1_sync_mode == 1u ||
+        (timer1_sync_mode == 3u && bus.timer1_sync_started);
+    if (timer1_system_clock_allowed) {
         const auto source = static_cast<std::uint16_t>((bus.timer1_mode >> 8u) & 3u);
         if (source == 0u || source == 2u) {
             psx_bus_tick_root_counter(bus, bus.timer1_current, bus.timer1_mode,
@@ -1607,7 +1625,12 @@ inline void psx_bus_tick(PsxBus& bus, std::uint32_t cpu_cycles) noexcept {
                                       bus.timer1_irq_fired, timer1_interrupt, cpu_cycles);
         }
     }
-    if ((bus.timer2_mode & synchronization_enable) == 0u) {
+
+    const bool timer2_sync = (bus.timer2_mode & synchronization_enable) != 0u;
+    const auto timer2_sync_mode = sync_mode(bus.timer2_mode);
+    const bool timer2_clock_allowed =
+        !timer2_sync || timer2_sync_mode == 1u || timer2_sync_mode == 2u;
+    if (timer2_clock_allowed) {
         const auto source = static_cast<std::uint16_t>((bus.timer2_mode >> 8u) & 3u);
         if (source == 0u || source == 1u) {
             psx_bus_tick_root_counter(bus, bus.timer2_current, bus.timer2_mode,
@@ -1632,14 +1655,41 @@ inline void psx_bus_tick(PsxBus& bus, std::uint32_t cpu_cycles) noexcept {
     bus.video_clock_phase += static_cast<std::uint64_t>(cpu_cycles) * video_clock_hz;
     while (bus.video_clock_phase >= phase_per_hblank) {
         bus.video_clock_phase -= phase_per_hblank;
+
+        if (timer0_sync) {
+            if (timer0_sync_mode == 1u) {
+                bus.timer0_current = 0u;
+                bus.timer0_reset_pending = false;
+            } else if (timer0_sync_mode == 3u) {
+                bus.timer0_sync_started = true;
+            }
+        }
+
         if ((bus.timer1_mode & timer1_hblank_clock) != 0u) {
-            psx_bus_tick_root_counter(bus, bus.timer1_current, bus.timer1_mode,
-                                      bus.timer1_target, bus.timer1_reset_pending,
-                                      bus.timer1_irq_fired, timer1_interrupt, 1u);
+            const bool timer1_hblank_clock_allowed =
+                !timer1_sync || timer1_sync_mode == 1u ||
+                (timer1_sync_mode == 3u && bus.timer1_sync_started);
+            if (timer1_hblank_clock_allowed) {
+                psx_bus_tick_root_counter(bus, bus.timer1_current, bus.timer1_mode,
+                                          bus.timer1_target, bus.timer1_reset_pending,
+                                          bus.timer1_irq_fired, timer1_interrupt, 1u);
+            }
         }
         bus.gpu_scanline = static_cast<std::uint16_t>(bus.gpu_scanline + 1u);
-        if (bus.gpu_scanline == ntsc_vblank_start_line) bus.interrupt_status = static_cast<std::uint16_t>(bus.interrupt_status | vblank_interrupt);
-        else if (bus.gpu_scanline == ntsc_scanlines_per_frame) bus.gpu_scanline = 0u;
+        if (bus.gpu_scanline == ntsc_vblank_start_line) {
+            bus.interrupt_status = static_cast<std::uint16_t>(
+                bus.interrupt_status | vblank_interrupt);
+            if (timer1_sync) {
+                if (timer1_sync_mode == 1u) {
+                    bus.timer1_current = 0u;
+                    bus.timer1_reset_pending = false;
+                } else if (timer1_sync_mode == 3u) {
+                    bus.timer1_sync_started = true;
+                }
+            }
+        } else if (bus.gpu_scanline == ntsc_scanlines_per_frame) {
+            bus.gpu_scanline = 0u;
+        }
     }
     if (bus.cdrom_async_cycles != 0u) {
         if (cpu_cycles < bus.cdrom_async_cycles) bus.cdrom_async_cycles -= cpu_cycles;
