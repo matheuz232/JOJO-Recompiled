@@ -1,0 +1,129 @@
+name: agent-vram-transfer-patch
+
+on:
+  push:
+    branches:
+      - feature/offline-product-rebuild
+    paths:
+      - .github/workflows/agent-vram-transfer-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply narrow VRAM transfer integration
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/core/psx_bus.h')
+          text = path.read_text()
+
+          def replace_once(old, new):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one match, found {count}: {old[:100]!r}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              '#include "core/psx_gpu_line.inl"\n',
+              '#include "core/psx_gpu_line.inl"\n#include "core/psx_gpu_transfer.inl"\n')
+
+          replace_once(
+              '    bus.gpu_gp0_write_latch = value;\n\n    if (psx_gpu_consume_polyline_word(bus, value)) return;\n',
+              '    bus.gpu_gp0_write_latch = value;\n\n'
+              '    if (psx_gpu_vram_to_cpu_active(bus)) return;\n'
+              '    if (psx_gpu_consume_polyline_word(bus, value)) return;\n')
+
+          replace_once(
+              '        const bool cpu_to_vram = (value >> 29u) == 5u;\n'
+              '        const bool polygon = (value >> 29u) == 1u;\n',
+              '        const bool vram_to_vram = (value >> 29u) == 4u;\n'
+              '        const bool cpu_to_vram = (value >> 29u) == 5u;\n'
+              '        const bool vram_to_cpu = (value >> 29u) == 6u;\n'
+              '        const bool polygon = (value >> 29u) == 1u;\n')
+
+          replace_once(
+              '        if (command == 0x02u || cpu_to_vram) {\n'
+              '            bus.gpu_gp0_packet_words = 3u;\n'
+              '        } else if (polygon) {\n',
+              '        if (command == 0x02u || cpu_to_vram || vram_to_cpu) {\n'
+              '            bus.gpu_gp0_packet_words = 3u;\n'
+              '        } else if (vram_to_vram) {\n'
+              '            bus.gpu_gp0_packet_words = 4u;\n'
+              '        } else if (polygon) {\n')
+
+          replace_once(
+              '    if ((bus.gpu_gp0_packet[0] >> 29u) == 5u) {\n',
+              '    const auto transfer_group = bus.gpu_gp0_packet[0] >> 29u;\n'
+              '    if (transfer_group == 4u) {\n'
+              '        psx_gpu_execute_vram_to_vram(bus);\n'
+              '        bus.gpu_gp0_packet_count = 0u;\n'
+              '        bus.gpu_gp0_packet_words = 0u;\n'
+              '        return;\n'
+              '    }\n'
+              '    if (transfer_group == 6u) {\n'
+              '        psx_gpu_begin_vram_to_cpu(bus);\n'
+              '        return;\n'
+              '    }\n'
+              '    if (transfer_group == 5u) {\n')
+
+          replace_once(
+              '    return {PsxBusAccessReason::ok, value};\n'
+              '}\n\n'
+              '[[nodiscard]] inline PsxBusAccessReason psx_bus_write_u8(PsxBus& bus,\n',
+              '    return {PsxBusAccessReason::ok, value};\n'
+              '}\n\n'
+              '[[nodiscard]] inline PsxBusReadU32Result psx_bus_read_u32(PsxBus& bus,\n'
+              '                                                           std::uint32_t address) noexcept {\n'
+              '    if ((address & 3u) != 0u) return {PsxBusAccessReason::misaligned, 0u};\n'
+              '    if (address == PsxBus::gpu_gp0_address && psx_gpu_vram_to_cpu_active(bus)) {\n'
+              '        return {PsxBusAccessReason::ok, psx_gpu_read_vram_to_cpu_word(bus)};\n'
+              '    }\n'
+              '    return psx_bus_read_u32(static_cast<const PsxBus&>(bus), address);\n'
+              '}\n\n'
+              '[[nodiscard]] inline PsxBusAccessReason psx_bus_write_u8(PsxBus& bus,\n')
+
+          replace_once(
+              '            bus.gpu_polyline_active = false;\n'
+              '            bus.gpu_polyline_gouraud = false;\n'
+              '            bus.gpu_polyline_expect_color = false;\n'
+              '            return PsxBusAccessReason::ok;\n'
+              '        }\n'
+              '        if (command == 0x02u) {\n',
+              '            bus.gpu_polyline_active = false;\n'
+              '            bus.gpu_polyline_gouraud = false;\n'
+              '            bus.gpu_polyline_expect_color = false;\n'
+              '            bus.gpu_status &= ~(1u << 27u);\n'
+              '            return PsxBusAccessReason::ok;\n'
+              '        }\n'
+              '        if (command == 0x02u) {\n')
+
+          path.write_text(text)
+          PY
+          git diff --check
+          git diff -- src/core/psx_bus.h
+      - name: Build GPU/DMA contract
+        shell: bash
+        run: |
+          cmake -S tests/psx_dma_control -B build/psx_dma_control -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/psx_dma_control --parallel 2
+      - name: Run GPU/DMA contract
+        shell: bash
+        run: ./build/psx_dma_control/jojo_psx_dma_control_tests
+      - name: Commit VRAM transfer integration
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/core/psx_bus.h
+          git commit -m 'feat: integrate PS1 GPU VRAM transfers'
+          git push origin HEAD:feature/offline-product-rebuild
