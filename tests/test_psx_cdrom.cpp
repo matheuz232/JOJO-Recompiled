@@ -1,7 +1,10 @@
-#include "core/psx_bus.h"
+#include "core/psx_runtime.h"
 
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <vector>
 
 static int failures = 0;
 #define CHECK(expr) do { if (!(expr)) { std::cerr << __FILE__ << ':' << __LINE__ << " CHECK failed: " #expr "\n"; ++failures; } } while (0)
@@ -55,7 +58,7 @@ void test_parameter_fifo_and_setloc() {
     CHECK((before.value & jojo::PsxBus::cdrom_hsts_parameter_empty) == 0u);
     CHECK((before.value & jojo::PsxBus::cdrom_hsts_parameter_write_ready) != 0u);
 
-    send_command(bus, 0x02u); // Setloc 00:02:00 = logical LBA 0.
+    send_command(bus, 0x02u);
     CHECK(irq_flags(bus) == 0x03u);
     CHECK(read_result(bus) == jojo::PsxBus::cdrom_status_motor_on);
 
@@ -68,19 +71,19 @@ void test_setmode_setfilter_and_getparam() {
     jojo::PsxBus bus{};
 
     send_parameter(bus, 0x80u);
-    send_command(bus, 0x0eu); // Setmode
+    send_command(bus, 0x0eu);
     CHECK(irq_flags(bus) == 0x03u);
     CHECK(read_result(bus) == jojo::PsxBus::cdrom_status_motor_on);
     acknowledge(bus);
 
     send_parameter(bus, 0x11u);
     send_parameter(bus, 0x22u);
-    send_command(bus, 0x0du); // Setfilter
+    send_command(bus, 0x0du);
     CHECK(irq_flags(bus) == 0x03u);
     CHECK(read_result(bus) == jojo::PsxBus::cdrom_status_motor_on);
     acknowledge(bus);
 
-    send_command(bus, 0x0fu); // Getparam
+    send_command(bus, 0x0fu);
     CHECK(irq_flags(bus) == 0x03u);
     CHECK(read_result(bus) == jojo::PsxBus::cdrom_status_motor_on);
     CHECK(read_result(bus) == 0x80u);
@@ -92,10 +95,87 @@ void test_setmode_setfilter_and_getparam() {
 
 void test_pause_accepts_empty_parameter_fifo() {
     jojo::PsxBus bus{};
-    send_command(bus, 0x09u); // Pause: first response is INT3(status).
+    send_command(bus, 0x09u);
     CHECK(irq_flags(bus) == 0x03u);
     CHECK(read_result(bus) == jojo::PsxBus::cdrom_status_motor_on);
     acknowledge(bus);
+}
+
+void test_readn_streams_prepared_2048_byte_sectors() {
+    const auto disc_path = std::filesystem::current_path() / "jojo_psx_cdrom_contract_disc.iso";
+    std::error_code ec;
+    std::filesystem::remove(disc_path, ec);
+
+    std::vector<std::uint8_t> image(4096u);
+    for (std::size_t i = 0; i < 2048u; ++i) {
+        image[i] = static_cast<std::uint8_t>(i & 0xffu);
+        image[2048u + i] = static_cast<std::uint8_t>(0x80u | (i & 0x7fu));
+    }
+    {
+        std::ofstream out(disc_path, std::ios::binary | std::ios::trunc);
+        CHECK(static_cast<bool>(out));
+        out.write(reinterpret_cast<const char*>(image.data()),
+                  static_cast<std::streamsize>(image.size()));
+        CHECK(static_cast<bool>(out));
+    }
+
+    jojo::PsxRuntime runtime{};
+    const auto mounted = jojo::mount_psx_cdrom_image(runtime, disc_path);
+    CHECK(static_cast<bool>(mounted));
+
+    send_parameter(runtime.bus, 0x00u);
+    send_parameter(runtime.bus, 0x02u);
+    send_parameter(runtime.bus, 0x00u);
+    send_command(runtime.bus, 0x02u);
+    CHECK(irq_flags(runtime.bus) == 0x03u);
+    CHECK(read_result(runtime.bus) == jojo::PsxBus::cdrom_status_motor_on);
+    acknowledge(runtime.bus);
+
+    send_parameter(runtime.bus, 0x80u);
+    send_command(runtime.bus, 0x0eu);
+    CHECK(irq_flags(runtime.bus) == 0x03u);
+    CHECK(read_result(runtime.bus) == jojo::PsxBus::cdrom_status_motor_on);
+    acknowledge(runtime.bus);
+
+    send_command(runtime.bus, 0x06u);
+    CHECK(irq_flags(runtime.bus) == 0x03u);
+    CHECK(read_result(runtime.bus) == jojo::PsxBus::cdrom_status_motor_on);
+    acknowledge(runtime.bus);
+
+    jojo::service_psx_cdrom(runtime);
+    CHECK(irq_flags(runtime.bus) == 0x01u);
+    CHECK(read_result(runtime.bus) == jojo::PsxBus::cdrom_status_motor_on);
+
+    auto hsts = jojo::psx_bus_read_u8(runtime.bus, cd);
+    CHECK((hsts.value & jojo::PsxBus::cdrom_hsts_data_request) == 0u);
+    select_bank(runtime.bus, 0u);
+    CHECK(jojo::psx_bus_write_u8(runtime.bus, cd + 3u, 0x80u) ==
+          jojo::PsxBusAccessReason::ok);
+    hsts = jojo::psx_bus_read_u8(runtime.bus, cd);
+    CHECK((hsts.value & jojo::PsxBus::cdrom_hsts_data_request) != 0u);
+
+    for (std::size_t i = 0; i < 2048u; ++i) {
+        const auto byte = jojo::psx_bus_read_u8(runtime.bus, cd + 2u);
+        CHECK(byte.reason == jojo::PsxBusAccessReason::ok);
+        CHECK(byte.value == static_cast<std::uint8_t>(i & 0xffu));
+    }
+    hsts = jojo::psx_bus_read_u8(runtime.bus, cd);
+    CHECK((hsts.value & jojo::PsxBus::cdrom_hsts_data_request) == 0u);
+    acknowledge(runtime.bus);
+
+    jojo::service_psx_cdrom(runtime);
+    CHECK(irq_flags(runtime.bus) == 0x01u);
+    CHECK(read_result(runtime.bus) == jojo::PsxBus::cdrom_status_motor_on);
+    select_bank(runtime.bus, 0u);
+    CHECK(jojo::psx_bus_write_u8(runtime.bus, cd + 3u, 0x80u) ==
+          jojo::PsxBusAccessReason::ok);
+    for (std::size_t i = 0; i < 16u; ++i) {
+        const auto byte = jojo::psx_bus_read_u8(runtime.bus, cd + 2u);
+        CHECK(byte.reason == jojo::PsxBusAccessReason::ok);
+        CHECK(byte.value == static_cast<std::uint8_t>(0x80u | (i & 0x7fu)));
+    }
+
+    std::filesystem::remove(disc_path, ec);
 }
 
 } // namespace
@@ -104,7 +184,8 @@ int main() {
     test_parameter_fifo_and_setloc();
     test_setmode_setfilter_and_getparam();
     test_pause_accepts_empty_parameter_fifo();
+    test_readn_streams_prepared_2048_byte_sectors();
     if (failures != 0) return 1;
-    std::cout << "PS1 CD-ROM command foundation assertions passed\n";
+    std::cout << "PS1 CD-ROM command and streaming assertions passed\n";
     return 0;
 }
