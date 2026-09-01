@@ -64,8 +64,15 @@ struct PsxBus {
     static constexpr std::uint32_t dma6_channel_control_address = 0x1f8010e8u;
     static constexpr std::uint32_t dma_control_address = 0x1f8010f0u;
     static constexpr std::uint32_t dma_interrupt_address = 0x1f8010f4u;
+    static constexpr std::uint32_t timer0_current_address = 0x1f801100u;
+    static constexpr std::uint32_t timer0_mode_address = 0x1f801104u;
+    static constexpr std::uint32_t timer0_target_address = 0x1f801108u;
     static constexpr std::uint32_t timer1_current_address = 0x1f801110u;
     static constexpr std::uint32_t timer1_mode_address = 0x1f801114u;
+    static constexpr std::uint32_t timer1_target_address = 0x1f801118u;
+    static constexpr std::uint32_t timer2_current_address = 0x1f801120u;
+    static constexpr std::uint32_t timer2_mode_address = 0x1f801124u;
+    static constexpr std::uint32_t timer2_target_address = 0x1f801128u;
     static constexpr std::uint32_t cdrom_base_address = 0x1f801800u;
     static constexpr std::uint32_t cdrom_end_address = cdrom_base_address + 3u;
     static constexpr std::uint8_t cdrom_bank_mask = 0x03u;
@@ -147,8 +154,16 @@ struct PsxBus {
     std::uint32_t dma6_channel_control{};
     std::uint32_t dma_control{};
     std::uint32_t dma_interrupt{};
+    std::uint16_t timer0_current{};
+    std::uint16_t timer0_mode{};
+    std::uint16_t timer0_target{};
     std::uint16_t timer1_current{};
     std::uint16_t timer1_mode{};
+    std::uint16_t timer1_target{};
+    std::uint16_t timer2_current{};
+    std::uint16_t timer2_mode{};
+    std::uint16_t timer2_target{};
+    std::uint8_t timer2_clock_phase{};
     std::uint64_t video_clock_phase{};
     std::uint16_t gpu_scanline{};
     std::uint8_t cdrom_index{};
@@ -908,11 +923,15 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
         return {PsxBusAccessReason::ok,
                 static_cast<std::uint16_t>(bus.interrupt_mask & PsxBus::interrupt_mask_valid_bits)};
     }
+    if (address == PsxBus::timer0_current_address) return {PsxBusAccessReason::ok, bus.timer0_current};
+    if (address == PsxBus::timer0_mode_address) return {PsxBusAccessReason::ok, static_cast<std::uint16_t>(bus.timer0_mode & PsxBus::timer_mode_guest_bits)};
+    if (address == PsxBus::timer0_target_address) return {PsxBusAccessReason::ok, bus.timer0_target};
     if (address == PsxBus::timer1_current_address) return {PsxBusAccessReason::ok, bus.timer1_current};
-    if (address == PsxBus::timer1_mode_address) {
-        return {PsxBusAccessReason::ok,
-                static_cast<std::uint16_t>(bus.timer1_mode & PsxBus::timer_mode_guest_bits)};
-    }
+    if (address == PsxBus::timer1_mode_address) return {PsxBusAccessReason::ok, static_cast<std::uint16_t>(bus.timer1_mode & PsxBus::timer_mode_guest_bits)};
+    if (address == PsxBus::timer1_target_address) return {PsxBusAccessReason::ok, bus.timer1_target};
+    if (address == PsxBus::timer2_current_address) return {PsxBusAccessReason::ok, bus.timer2_current};
+    if (address == PsxBus::timer2_mode_address) return {PsxBusAccessReason::ok, static_cast<std::uint16_t>(bus.timer2_mode & PsxBus::timer_mode_guest_bits)};
+    if (address == PsxBus::timer2_target_address) return {PsxBusAccessReason::ok, bus.timer2_target};
     if (address >= PsxBus::spu_register_base &&
         address <= PsxBus::spu_register_end - 1u) {
         const auto index = static_cast<std::size_t>(
@@ -999,7 +1018,15 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     if (address == PsxBus::dma6_channel_control_address) return {PsxBusAccessReason::ok, bus.dma6_channel_control};
     if (address == PsxBus::dma_control_address) return {PsxBusAccessReason::ok, bus.dma_control};
     if (address == PsxBus::dma_interrupt_address) return {PsxBusAccessReason::ok, psx_bus_dma_interrupt_value(bus)};
+    if (address == PsxBus::timer0_current_address) return {PsxBusAccessReason::ok, static_cast<std::uint32_t>(bus.timer0_current)};
+    if (address == PsxBus::timer0_mode_address) return {PsxBusAccessReason::ok, static_cast<std::uint32_t>(bus.timer0_mode & PsxBus::timer_mode_guest_bits)};
+    if (address == PsxBus::timer0_target_address) return {PsxBusAccessReason::ok, static_cast<std::uint32_t>(bus.timer0_target)};
     if (address == PsxBus::timer1_current_address) return {PsxBusAccessReason::ok, static_cast<std::uint32_t>(bus.timer1_current)};
+    if (address == PsxBus::timer1_mode_address) return {PsxBusAccessReason::ok, static_cast<std::uint32_t>(bus.timer1_mode & PsxBus::timer_mode_guest_bits)};
+    if (address == PsxBus::timer1_target_address) return {PsxBusAccessReason::ok, static_cast<std::uint32_t>(bus.timer1_target)};
+    if (address == PsxBus::timer2_current_address) return {PsxBusAccessReason::ok, static_cast<std::uint32_t>(bus.timer2_current)};
+    if (address == PsxBus::timer2_mode_address) return {PsxBusAccessReason::ok, static_cast<std::uint32_t>(bus.timer2_mode & PsxBus::timer_mode_guest_bits)};
+    if (address == PsxBus::timer2_target_address) return {PsxBusAccessReason::ok, static_cast<std::uint32_t>(bus.timer2_target)};
     if (address == PsxBus::gpu_gp0_address) return {PsxBusAccessReason::ok, bus.gpu_read_latch};
     if (address == PsxBus::gpu_gp1_address) {
         return {PsxBusAccessReason::ok, psx_gpu_status_value(bus)};
@@ -1120,6 +1147,14 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
         return PsxBusAccessReason::ok;
     }
     if (address == PsxBus::interrupt_mask_address) { bus.interrupt_mask = static_cast<std::uint16_t>(value & PsxBus::interrupt_mask_valid_bits); return PsxBusAccessReason::ok; }
+    if (address == PsxBus::timer0_current_address) { bus.timer0_current = value; return PsxBusAccessReason::ok; }
+    if (address == PsxBus::timer0_mode_address) {
+        const auto next_epoch = static_cast<std::uint16_t>((bus.timer0_mode ^ PsxBus::timer_mode_write_epoch) & PsxBus::timer_mode_write_epoch);
+        bus.timer0_mode = static_cast<std::uint16_t>((value & PsxBus::timer_mode_guest_bits) | next_epoch);
+        bus.timer0_current = 0u;
+        return PsxBusAccessReason::ok;
+    }
+    if (address == PsxBus::timer0_target_address) { bus.timer0_target = value; return PsxBusAccessReason::ok; }
     if (address == PsxBus::timer1_current_address) { bus.timer1_current = value; return PsxBusAccessReason::ok; }
     if (address == PsxBus::timer1_mode_address) {
         const auto next_epoch = static_cast<std::uint16_t>((bus.timer1_mode ^ PsxBus::timer_mode_write_epoch) & PsxBus::timer_mode_write_epoch);
@@ -1127,6 +1162,16 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
         bus.timer1_current = 0u;
         return PsxBusAccessReason::ok;
     }
+    if (address == PsxBus::timer1_target_address) { bus.timer1_target = value; return PsxBusAccessReason::ok; }
+    if (address == PsxBus::timer2_current_address) { bus.timer2_current = value; return PsxBusAccessReason::ok; }
+    if (address == PsxBus::timer2_mode_address) {
+        const auto next_epoch = static_cast<std::uint16_t>((bus.timer2_mode ^ PsxBus::timer_mode_write_epoch) & PsxBus::timer_mode_write_epoch);
+        bus.timer2_mode = static_cast<std::uint16_t>((value & PsxBus::timer_mode_guest_bits) | next_epoch);
+        bus.timer2_current = 0u;
+        bus.timer2_clock_phase = 0u;
+        return PsxBusAccessReason::ok;
+    }
+    if (address == PsxBus::timer2_target_address) { bus.timer2_target = value; return PsxBusAccessReason::ok; }
     if (address >= PsxBus::spu_register_base && address <= PsxBus::spu_register_end - 1u) {
         const auto index = static_cast<std::size_t>((address - PsxBus::spu_register_base) / 2u);
         bus.spu_registers[index] = value;
@@ -1357,7 +1402,11 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
         if (!previous_master && current_master) bus.interrupt_status = static_cast<std::uint16_t>(bus.interrupt_status | (1u << 3u));
         return PsxBusAccessReason::ok;
     }
-    if (address == PsxBus::timer1_mode_address) return psx_bus_write_u16(bus, address, static_cast<std::uint16_t>(value));
+    if (address == PsxBus::timer0_current_address || address == PsxBus::timer0_mode_address || address == PsxBus::timer0_target_address ||
+        address == PsxBus::timer1_current_address || address == PsxBus::timer1_mode_address || address == PsxBus::timer1_target_address ||
+        address == PsxBus::timer2_current_address || address == PsxBus::timer2_mode_address || address == PsxBus::timer2_target_address) {
+        return psx_bus_write_u16(bus, address, static_cast<std::uint16_t>(value));
+    }
     if (address == PsxBus::gpu_gp0_address) { psx_gpu_write_gp0(bus, value); return PsxBusAccessReason::ok; }
     if (address >= PsxBus::spu_register_base && address <= PsxBus::spu_register_end - 3u) {
         const auto low = psx_bus_write_u16(bus, address, static_cast<std::uint16_t>(value));
@@ -1464,7 +1513,30 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
 }
 
 inline void psx_bus_tick(PsxBus& bus, std::uint32_t cpu_cycles) noexcept {
+    constexpr std::uint16_t synchronization_enable = 1u << 0u;
     constexpr std::uint16_t timer1_hblank_clock = 1u << 8u;
+    if ((bus.timer0_mode & synchronization_enable) == 0u) {
+        const auto source = static_cast<std::uint16_t>((bus.timer0_mode >> 8u) & 3u);
+        if (source == 0u || source == 2u) {
+            bus.timer0_current = static_cast<std::uint16_t>(bus.timer0_current + cpu_cycles);
+        }
+    }
+    if ((bus.timer1_mode & synchronization_enable) == 0u) {
+        const auto source = static_cast<std::uint16_t>((bus.timer1_mode >> 8u) & 3u);
+        if (source == 0u || source == 2u) {
+            bus.timer1_current = static_cast<std::uint16_t>(bus.timer1_current + cpu_cycles);
+        }
+    }
+    if ((bus.timer2_mode & synchronization_enable) == 0u) {
+        const auto source = static_cast<std::uint16_t>((bus.timer2_mode >> 8u) & 3u);
+        if (source == 0u || source == 1u) {
+            bus.timer2_current = static_cast<std::uint16_t>(bus.timer2_current + cpu_cycles);
+        } else {
+            const auto total = static_cast<std::uint64_t>(bus.timer2_clock_phase) + cpu_cycles;
+            bus.timer2_current = static_cast<std::uint16_t>(bus.timer2_current + total / 8u);
+            bus.timer2_clock_phase = static_cast<std::uint8_t>(total % 8u);
+        }
+    }
     constexpr std::uint16_t vblank_interrupt = 1u << 0u;
     constexpr std::uint16_t ntsc_vblank_start_line = 240u;
     constexpr std::uint16_t ntsc_scanlines_per_frame = 263u;
