@@ -126,9 +126,16 @@ inline void psx_gte_write_data(PsxGteState& gte,
     return static_cast<std::int32_t>(static_cast<std::int16_t>(value & 0xffffu));
 }
 
+[[nodiscard]] inline std::int64_t psx_gte_sar(std::int64_t value,
+                                               std::uint32_t shift) noexcept {
+    if (shift == 0u) return value;
+    const auto divisor = std::int64_t{1} << shift;
+    if (value >= 0) return value / divisor;
+    return -(((-value) + divisor - 1) / divisor);
+}
+
 [[nodiscard]] inline std::int64_t psx_gte_sar12(std::int64_t value) noexcept {
-    if (value >= 0) return value / 0x1000ll;
-    return -(((-value) + 0xfffll) / 0x1000ll);
+    return psx_gte_sar(value, 12u);
 }
 
 inline void psx_gte_finalize_flags(PsxGteState& gte) noexcept {
@@ -395,12 +402,177 @@ inline void psx_gte_execute_gpf_gpl(PsxGteState& gte,
     psx_gte_push_color_fifo(gte);
 }
 
+[[nodiscard]] inline std::uint32_t psx_gte_unr_table_value(std::uint32_t index) noexcept {
+    const auto denominator = index + 0x100u;
+    const auto value = static_cast<std::int32_t>(
+        ((0x40000u / denominator + 1u) / 2u)) - 0x101;
+    return value > 0 ? static_cast<std::uint32_t>(value) : 0u;
+}
+
+[[nodiscard]] inline std::uint32_t psx_gte_perspective_divide(
+    PsxGteState& gte, std::uint32_t h, std::uint32_t sz3) noexcept {
+    h &= 0xffffu;
+    sz3 &= 0xffffu;
+    if (static_cast<std::uint64_t>(h) >= static_cast<std::uint64_t>(sz3) * 2u) {
+        gte.control[31] |= 1u << 17u;
+        return 0x1ffffu;
+    }
+
+    std::uint32_t z = 0u;
+    for (std::uint32_t mask = 0x8000u; mask != 0u && (sz3 & mask) == 0u; mask >>= 1u) {
+        ++z;
+    }
+    const auto n = h << z;
+    auto d = sz3 << z;
+    const auto index = (d - 0x7fc0u) >> 7u;
+    const auto u = psx_gte_unr_table_value(index) + 0x101u;
+    d = (0x2000080u - d * u) >> 8u;
+    d = (0x0000080u + d * u) >> 8u;
+    const auto result = (static_cast<std::uint64_t>(n) * d + 0x8000u) >> 16u;
+    return static_cast<std::uint32_t>(std::min<std::uint64_t>(0x1ffffu, result));
+}
+
+inline void psx_gte_push_sz(PsxGteState& gte, std::int64_t value) noexcept {
+    constexpr std::uint32_t saturation_flag = 1u << 18u;
+    auto saturated = value;
+    if (saturated < 0) {
+        saturated = 0;
+        gte.control[31] |= saturation_flag;
+    } else if (saturated > 0xffff) {
+        saturated = 0xffff;
+        gte.control[31] |= saturation_flag;
+    }
+    gte.data[16] = gte.data[17];
+    gte.data[17] = gte.data[18];
+    gte.data[18] = gte.data[19];
+    gte.data[19] = static_cast<std::uint32_t>(saturated);
+}
+
+[[nodiscard]] inline std::int16_t psx_gte_saturate_screen(PsxGteState& gte,
+                                                           std::int64_t value,
+                                                           std::uint32_t flag_bit) noexcept {
+    if (value < -0x400) {
+        gte.control[31] |= 1u << flag_bit;
+        return static_cast<std::int16_t>(-0x400);
+    }
+    if (value > 0x3ff) {
+        gte.control[31] |= 1u << flag_bit;
+        return static_cast<std::int16_t>(0x3ff);
+    }
+    return static_cast<std::int16_t>(value);
+}
+
+inline void psx_gte_push_sxy(PsxGteState& gte,
+                             std::uint32_t divide_result) noexcept {
+    const auto ir1 = static_cast<std::int32_t>(gte.data[9]);
+    const auto ir2 = static_cast<std::int32_t>(gte.data[10]);
+    const auto ofx = static_cast<std::int32_t>(gte.control[24]);
+    const auto ofy = static_cast<std::int32_t>(gte.control[25]);
+
+    const auto mac0x = static_cast<std::int64_t>(divide_result) * ir1 + ofx;
+    psx_gte_store_mac0(gte, mac0x);
+    const auto sx = psx_gte_saturate_screen(gte, psx_gte_sar(mac0x, 16u), 14u);
+
+    const auto mac0y = static_cast<std::int64_t>(divide_result) * ir2 + ofy;
+    psx_gte_store_mac0(gte, mac0y);
+    const auto sy = psx_gte_saturate_screen(gte, psx_gte_sar(mac0y, 16u), 13u);
+
+    gte.data[12] = gte.data[13];
+    gte.data[13] = gte.data[14];
+    gte.data[14] = static_cast<std::uint16_t>(sx) |
+                   (static_cast<std::uint32_t>(static_cast<std::uint16_t>(sy)) << 16u);
+}
+
+inline void psx_gte_update_ir0(PsxGteState& gte,
+                               std::uint32_t divide_result) noexcept {
+    const auto dqa = psx_gte_s16(gte.control[27]);
+    const auto dqb = static_cast<std::int32_t>(gte.control[28]);
+    const auto mac0 = static_cast<std::int64_t>(divide_result) * dqa + dqb;
+    psx_gte_store_mac0(gte, mac0);
+    auto ir0 = psx_gte_sar12(mac0);
+    if (ir0 < 0) {
+        ir0 = 0;
+        gte.control[31] |= 1u << 12u;
+    } else if (ir0 > 0x1000) {
+        ir0 = 0x1000;
+        gte.control[31] |= 1u << 12u;
+    }
+    gte.data[8] = static_cast<std::uint32_t>(ir0);
+}
+
+inline void psx_gte_transform_project_vertex(PsxGteState& gte,
+                                             std::uint8_t vector_selector,
+                                             std::uint32_t instruction,
+                                             bool update_ir0) noexcept {
+    const bool sf = (instruction & (1u << 19u)) != 0u;
+    const bool lm = (instruction & (1u << 10u)) != 0u;
+    const auto matrix = psx_gte_matrix_from_control(gte, 0u);
+    const auto vector = psx_gte_vector(gte, vector_selector);
+    const PsxGteVector translation{
+        static_cast<std::int32_t>(gte.control[5]),
+        static_cast<std::int32_t>(gte.control[6]),
+        static_cast<std::int32_t>(gte.control[7]),
+    };
+
+    std::array<std::int64_t, 3> mac{};
+    for (std::uint8_t row = 0u; row < 3u; ++row) {
+        const auto raw =
+            static_cast<std::int64_t>(translation[row]) * 0x1000ll +
+            static_cast<std::int64_t>(matrix[row][0]) * vector[0] +
+            static_cast<std::int64_t>(matrix[row][1]) * vector[1] +
+            static_cast<std::int64_t>(matrix[row][2]) * vector[2];
+        psx_gte_check_mac123_overflow(gte, row, raw);
+        mac[row] = sf ? psx_gte_sar12(raw) : raw;
+        gte.data[25u + row] = static_cast<std::uint32_t>(mac[row]);
+
+        const auto minimum = lm ? std::int64_t{0} : std::int64_t{-0x8000};
+        constexpr std::int64_t maximum = 0x7fff;
+        auto saturated = mac[row];
+        if (saturated < minimum) {
+            saturated = minimum;
+            gte.control[31] |= 1u << (24u - row);
+        } else if (saturated > maximum) {
+            saturated = maximum;
+            gte.control[31] |= 1u << (24u - row);
+        }
+        gte.data[9u + row] = static_cast<std::uint32_t>(static_cast<std::int32_t>(saturated));
+    }
+
+    const auto ir3_flag_value = sf ? mac[2] : psx_gte_sar12(mac[2]);
+    if (ir3_flag_value < -0x8000 || ir3_flag_value > 0x7fff) {
+        gte.control[31] |= 1u << 22u;
+    }
+
+    const auto screen_z = sf ? mac[2] : psx_gte_sar12(mac[2]);
+    psx_gte_push_sz(gte, screen_z);
+    const auto divide_result = psx_gte_perspective_divide(
+        gte, gte.control[26] & 0xffffu, gte.data[19]);
+    psx_gte_push_sxy(gte, divide_result);
+    if (update_ir0) psx_gte_update_ir0(gte, divide_result);
+}
+
+inline void psx_gte_execute_rtps(PsxGteState& gte,
+                                 std::uint32_t instruction) noexcept {
+    psx_gte_transform_project_vertex(gte, 0u, instruction, true);
+}
+
+inline void psx_gte_execute_rtpt(PsxGteState& gte,
+                                 std::uint32_t instruction) noexcept {
+    psx_gte_transform_project_vertex(gte, 0u, instruction, false);
+    psx_gte_transform_project_vertex(gte, 1u, instruction, false);
+    psx_gte_transform_project_vertex(gte, 2u, instruction, true);
+}
+
 [[nodiscard]] inline bool execute_psx_gte_command(PsxGteState& gte,
                                                    std::uint32_t instruction) noexcept {
     gte.control[31] = 0u;
     const auto command = static_cast<std::uint8_t>(instruction & 0x3fu);
 
     switch (command) {
+    case 0x01u:
+        psx_gte_execute_rtps(gte, instruction);
+        psx_gte_finalize_flags(gte);
+        return true;
     case 0x06u: {
         const auto sx0 = psx_gte_s16(gte.data[12]);
         const auto sy0 = psx_gte_s16(gte.data[12] >> 16u);
@@ -454,6 +626,10 @@ inline void psx_gte_execute_gpf_gpl(PsxGteState& gte,
         psx_gte_finalize_flags(gte);
         return true;
     }
+    case 0x30u:
+        psx_gte_execute_rtpt(gte, instruction);
+        psx_gte_finalize_flags(gte);
+        return true;
     case 0x3du:
         psx_gte_execute_gpf_gpl(gte, instruction, false);
         psx_gte_finalize_flags(gte);
