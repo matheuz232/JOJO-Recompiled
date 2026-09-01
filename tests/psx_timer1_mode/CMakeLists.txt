@@ -9,7 +9,8 @@ add_executable(jojo_psx_timer1_mode_tests
   main.cpp
   timer02_contract.cpp
   bios_timer_contract.cpp
-  timer_sync_contract.cpp)
+  timer_sync_contract.cpp
+  timer_dotclock_contract.cpp)
 target_include_directories(jojo_psx_timer1_mode_tests PRIVATE ../../src)
 
 if(MSVC)
