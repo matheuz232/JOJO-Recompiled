@@ -1,9 +1,13 @@
 #pragma once
 #include "core/psx_sio0.h"
+#include "core/result.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <initializer_list>
+#include <system_error>
 #include <vector>
 
 namespace jojo {
@@ -63,6 +67,7 @@ struct PsxBus {
     static constexpr std::uint8_t cdrom_sound_map_clear = 1u << 5u;
     static constexpr std::size_t cdrom_parameter_capacity = 16u;
     static constexpr std::size_t cdrom_result_capacity = 16u;
+    static constexpr std::size_t cdrom_data_sector_size = 2048u;
     static constexpr std::uint8_t cdrom_command_nop = 0x01u;
     static constexpr std::uint8_t cdrom_command_setloc = 0x02u;
     static constexpr std::uint8_t cdrom_command_readn = 0x06u;
@@ -122,6 +127,13 @@ struct PsxBus {
     std::uint8_t cdrom_location_sector_bcd{};
     std::uint32_t cdrom_location_lba{};
     bool cdrom_reading{};
+    std::array<std::uint8_t, cdrom_data_sector_size> cdrom_sector_buffer{};
+    std::uint16_t cdrom_data_read_index{};
+    std::uint16_t cdrom_data_count{};
+    bool cdrom_sector_buffer_ready{};
+    std::filesystem::path cdrom_image_path{};
+    std::uint64_t cdrom_image_sector_count{};
+    bool cdrom_image_mounted{};
     std::uint8_t cdrom_status{cdrom_status_motor_on};
     std::uint32_t gpu_gp0_write_latch{};
     std::uint32_t gpu_read_latch{};
@@ -242,9 +254,25 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
             return false;
         }
         break;
+    case PsxBus::cdrom_command_readn:
+        if (bus.cdrom_parameter_count != 0u || (bus.cdrom_mode & 0x20u) != 0u) {
+            return false;
+        }
+        bus.cdrom_reading = true;
+        bus.cdrom_sector_buffer_ready = false;
+        bus.cdrom_data_read_index = 0u;
+        bus.cdrom_data_count = 0u;
+        if (!psx_bus_cdrom_raise_interrupt(
+                bus, PsxBus::cdrom_interrupt_acknowledge, {bus.cdrom_status})) {
+            return false;
+        }
+        break;
     case PsxBus::cdrom_command_pause:
         if (bus.cdrom_parameter_count != 0u) return false;
         bus.cdrom_reading = false;
+        bus.cdrom_sector_buffer_ready = false;
+        bus.cdrom_data_read_index = 0u;
+        bus.cdrom_data_count = 0u;
         if (!psx_bus_cdrom_raise_interrupt(
                 bus, PsxBus::cdrom_interrupt_acknowledge, {bus.cdrom_status})) {
             return false;
@@ -351,6 +379,9 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     if (bus.cdrom_result_count != 0u) {
         value = static_cast<std::uint8_t>(value | PsxBus::cdrom_hsts_result_ready);
     }
+    if (bus.cdrom_data_count != 0u) {
+        value = static_cast<std::uint8_t>(value | PsxBus::cdrom_hsts_data_request);
+    }
     return value;
 }
 
@@ -376,6 +407,10 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     if (physical == PsxBus::cdrom_base_address + 1u && bus.cdrom_result_count != 0u) {
         return {PsxBusAccessReason::ok,
                 bus.cdrom_result_fifo[static_cast<std::size_t>(bus.cdrom_result_read_index)]};
+    }
+    if (physical == PsxBus::cdrom_base_address + 2u && bus.cdrom_data_count != 0u) {
+        return {PsxBusAccessReason::ok,
+                bus.cdrom_sector_buffer[static_cast<std::size_t>(bus.cdrom_data_read_index)]};
     }
     if (physical == PsxBus::cdrom_base_address + 3u) {
         if ((bus.cdrom_index & 1u) != 0u) {
@@ -413,6 +448,16 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
             PsxBus::cdrom_result_capacity);
         --bus.cdrom_result_count;
         if (bus.cdrom_result_count == 0u) bus.cdrom_result_read_index = 0u;
+        return {PsxBusAccessReason::ok, value};
+    }
+    if (psx_bus_virtual_to_physical(address, physical) &&
+        physical == PsxBus::cdrom_base_address + 2u &&
+        bus.cdrom_data_count != 0u) {
+        const auto value = bus.cdrom_sector_buffer[
+            static_cast<std::size_t>(bus.cdrom_data_read_index)];
+        ++bus.cdrom_data_read_index;
+        --bus.cdrom_data_count;
+        if (bus.cdrom_data_count == 0u) bus.cdrom_data_read_index = 0u;
         return {PsxBusAccessReason::ok, value};
     }
     return psx_bus_read_u8(static_cast<const PsxBus&>(bus), address);
@@ -539,8 +584,16 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
         return PsxBusAccessReason::ok;
     }
     if (physical == PsxBus::cdrom_base_address + 3u && bus.cdrom_index == 0u) {
-        if (value != 0u) return PsxBusAccessReason::unmapped;
-        bus.cdrom_host_control = 0u;
+        if ((value & 0x7fu) != 0u) return PsxBusAccessReason::unmapped;
+        bus.cdrom_host_control = value;
+        if ((value & 0x80u) != 0u) {
+            if (!bus.cdrom_sector_buffer_ready || bus.cdrom_data_count != 0u) {
+                return PsxBusAccessReason::unmapped;
+            }
+            bus.cdrom_data_read_index = 0u;
+            bus.cdrom_data_count = static_cast<std::uint16_t>(PsxBus::cdrom_data_sector_size);
+            bus.cdrom_sector_buffer_ready = false;
+        }
         return PsxBusAccessReason::ok;
     }
     std::size_t offset = 0;
@@ -683,6 +736,82 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     bus.ram[offset + 2u] = static_cast<std::uint8_t>(value >> 16u);
     bus.ram[offset + 3u] = static_cast<std::uint8_t>(value >> 24u);
     return PsxBusAccessReason::ok;
+}
+
+template <typename RuntimeLike>
+[[nodiscard]] inline Result<void> mount_psx_cdrom_image(
+    RuntimeLike& runtime,
+    const std::filesystem::path& image_path) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(image_path, ec);
+    if (ec || size == 0u || (size % PsxBus::cdrom_data_sector_size) != 0u) {
+        return Result<void>::failure(
+            ErrorCode::invalid_installation,
+            "prepared PS1 disc must be a non-empty 2048-byte-sector image");
+    }
+    auto& bus = runtime.bus;
+    bus.cdrom_image_path = image_path;
+    bus.cdrom_image_sector_count =
+        static_cast<std::uint64_t>(size / PsxBus::cdrom_data_sector_size);
+    bus.cdrom_image_mounted = true;
+    bus.cdrom_reading = false;
+    bus.cdrom_sector_buffer_ready = false;
+    bus.cdrom_data_read_index = 0u;
+    bus.cdrom_data_count = 0u;
+    return Result<void>::success();
+}
+
+template <typename RuntimeLike>
+inline void service_psx_cdrom(RuntimeLike& runtime) noexcept {
+    auto& bus = runtime.bus;
+    if (!bus.cdrom_image_mounted || !bus.cdrom_reading ||
+        (bus.cdrom_interrupt_flags & PsxBus::cdrom_hc05_interrupt_bits) != 0u ||
+        bus.cdrom_result_count != 0u || bus.cdrom_sector_buffer_ready ||
+        bus.cdrom_data_count != 0u) {
+        return;
+    }
+
+    if (bus.cdrom_location_lba >= bus.cdrom_image_sector_count) {
+        bus.cdrom_reading = false;
+        (void)psx_bus_cdrom_raise_interrupt(
+            bus, PsxBus::cdrom_interrupt_data_end, {bus.cdrom_status});
+        return;
+    }
+
+    try {
+        std::ifstream in(bus.cdrom_image_path, std::ios::binary);
+        if (!in) {
+            bus.cdrom_reading = false;
+            (void)psx_bus_cdrom_raise_interrupt(
+                bus, PsxBus::cdrom_interrupt_error,
+                {static_cast<std::uint8_t>(bus.cdrom_status | 0x01u)});
+            return;
+        }
+        const auto offset = static_cast<std::uint64_t>(bus.cdrom_location_lba) *
+                            PsxBus::cdrom_data_sector_size;
+        in.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+        in.read(reinterpret_cast<char*>(bus.cdrom_sector_buffer.data()),
+                static_cast<std::streamsize>(PsxBus::cdrom_data_sector_size));
+        if (!in || in.gcount() !=
+                       static_cast<std::streamsize>(PsxBus::cdrom_data_sector_size)) {
+            bus.cdrom_reading = false;
+            (void)psx_bus_cdrom_raise_interrupt(
+                bus, PsxBus::cdrom_interrupt_error,
+                {static_cast<std::uint8_t>(bus.cdrom_status | 0x01u)});
+            return;
+        }
+    } catch (...) {
+        bus.cdrom_reading = false;
+        (void)psx_bus_cdrom_raise_interrupt(
+            bus, PsxBus::cdrom_interrupt_error,
+            {static_cast<std::uint8_t>(bus.cdrom_status | 0x01u)});
+        return;
+    }
+
+    bus.cdrom_sector_buffer_ready = true;
+    ++bus.cdrom_location_lba;
+    (void)psx_bus_cdrom_raise_interrupt(
+        bus, PsxBus::cdrom_interrupt_data_ready, {bus.cdrom_status});
 }
 
 } // namespace jojo
