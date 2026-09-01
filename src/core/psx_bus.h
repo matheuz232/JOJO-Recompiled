@@ -1,4 +1,5 @@
 #pragma once
+#include "core/psx_sio0.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -33,6 +34,11 @@ struct PsxBus {
     static constexpr std::uint32_t scratchpad_address = 0x1f800000u;
     static constexpr std::size_t scratchpad_size = 1024u;
     static constexpr std::uint32_t common_delay_address = 0x1f801020u;
+    static constexpr std::uint32_t sio0_data_address = 0x1f801040u;
+    static constexpr std::uint32_t sio0_status_address = 0x1f801044u;
+    static constexpr std::uint32_t sio0_mode_address = 0x1f801048u;
+    static constexpr std::uint32_t sio0_control_address = 0x1f80104au;
+    static constexpr std::uint32_t sio0_baud_address = 0x1f80104eu;
     static constexpr std::uint32_t interrupt_status_address = 0x1f801070u;
     static constexpr std::uint32_t interrupt_mask_address = 0x1f801074u;
     static constexpr std::uint16_t cdrom_interrupt_request = 1u << 2u;
@@ -82,6 +88,7 @@ struct PsxBus {
     std::vector<std::uint8_t> ram = std::vector<std::uint8_t>(main_ram_size, 0u);
     std::array<std::uint8_t, scratchpad_size> scratchpad{};
     std::uint16_t common_delay{};
+    PsxSio0State sio0{};
     std::uint16_t interrupt_status{};
     std::uint16_t interrupt_mask{};
     std::uint32_t dma2_channel_control{};
@@ -231,6 +238,12 @@ inline void psx_bus_latch_cdrom_irq_rising_edge(PsxBus& bus,
         return {PsxBusAccessReason::ok, bus.ram[offset]};
     }
 
+    if (physical == PsxBus::sio0_data_address) {
+        const auto value = bus.sio0.rx_count == 0u
+                               ? 0xffu
+                               : bus.sio0.rx_fifo[static_cast<std::size_t>(bus.sio0.rx_read_index)];
+        return {PsxBusAccessReason::ok, static_cast<std::uint8_t>(value)};
+    }
     if (physical == PsxBus::cdrom_base_address) {
         return {PsxBusAccessReason::ok, psx_bus_cdrom_hsts(bus)};
     }
@@ -262,6 +275,10 @@ inline void psx_bus_latch_cdrom_irq_rising_edge(PsxBus& bus,
                                                          std::uint32_t address) noexcept {
     std::uint32_t physical = 0;
     if (psx_bus_virtual_to_physical(address, physical) &&
+        physical == PsxBus::sio0_data_address) {
+        return {PsxBusAccessReason::ok, psx_sio0_read_data(bus.sio0)};
+    }
+    if (psx_bus_virtual_to_physical(address, physical) &&
         physical == PsxBus::cdrom_base_address + 1u &&
         bus.cdrom_result_count != 0u) {
         const auto value = bus.cdrom_result_fifo[
@@ -279,6 +296,15 @@ inline void psx_bus_latch_cdrom_irq_rising_edge(PsxBus& bus,
 [[nodiscard]] inline PsxBusReadU16Result psx_bus_read_u16(const PsxBus& bus,
                                                            std::uint32_t address) noexcept {
     if ((address & 1u) != 0u) return {PsxBusAccessReason::misaligned, 0u};
+    if (address == PsxBus::sio0_mode_address) {
+        return {PsxBusAccessReason::ok, bus.sio0.mode};
+    }
+    if (address == PsxBus::sio0_control_address) {
+        return {PsxBusAccessReason::ok, bus.sio0.control};
+    }
+    if (address == PsxBus::sio0_baud_address) {
+        return {PsxBusAccessReason::ok, bus.sio0.baud};
+    }
     if (address == PsxBus::interrupt_status_address) {
         return {PsxBusAccessReason::ok,
                 static_cast<std::uint16_t>(bus.interrupt_status & PsxBus::interrupt_status_valid_bits)};
@@ -320,6 +346,9 @@ inline void psx_bus_latch_cdrom_irq_rising_edge(PsxBus& bus,
     if ((address & 3u) != 0u) return {PsxBusAccessReason::misaligned, 0u};
     if (address == PsxBus::common_delay_address) {
         return {PsxBusAccessReason::ok, static_cast<std::uint32_t>(bus.common_delay)};
+    }
+    if (address == PsxBus::sio0_status_address) {
+        return {PsxBusAccessReason::ok, psx_sio0_status(bus.sio0)};
     }
     if (address == PsxBus::interrupt_mask_address) {
         return {PsxBusAccessReason::ok,
@@ -379,6 +408,11 @@ inline void psx_bus_latch_cdrom_irq_rising_edge(PsxBus& bus,
         return PsxBusAccessReason::ok;
     }
 
+    if (physical == PsxBus::sio0_data_address) {
+        return psx_sio0_write_data(bus.sio0, value)
+                   ? PsxBusAccessReason::ok
+                   : PsxBusAccessReason::unmapped;
+    }
     if (physical == PsxBus::cdrom_base_address) {
         bus.cdrom_index = static_cast<std::uint8_t>(value & PsxBus::cdrom_bank_mask);
         return PsxBusAccessReason::ok;
@@ -442,6 +476,18 @@ inline void psx_bus_latch_cdrom_irq_rising_edge(PsxBus& bus,
                                                            std::uint32_t address,
                                                            std::uint16_t value) noexcept {
     if ((address & 1u) != 0u) return PsxBusAccessReason::misaligned;
+    if (address == PsxBus::sio0_mode_address) {
+        psx_sio0_write_mode(bus.sio0, value);
+        return PsxBusAccessReason::ok;
+    }
+    if (address == PsxBus::sio0_control_address) {
+        psx_sio0_write_control(bus.sio0, value);
+        return PsxBusAccessReason::ok;
+    }
+    if (address == PsxBus::sio0_baud_address) {
+        psx_sio0_write_baud(bus.sio0, value);
+        return PsxBusAccessReason::ok;
+    }
     if (address == PsxBus::interrupt_status_address) {
         const auto write_bits = static_cast<std::uint16_t>(value & PsxBus::interrupt_status_valid_bits);
         bus.interrupt_status = static_cast<std::uint16_t>(
