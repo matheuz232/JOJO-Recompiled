@@ -219,15 +219,65 @@ inline void psx_gpu_execute_fill_rectangle(PsxBus& bus) noexcept {
 }
 
 inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
+    constexpr std::uint8_t image_payload_state = 0xffu;
     bus.gpu_gp0_write_latch = value;
+
+    if (bus.gpu_gp0_packet_count == image_payload_state) {
+        const auto destination = bus.gpu_gp0_packet[0];
+        const auto dimensions = bus.gpu_gp0_packet[1];
+        auto written = bus.gpu_gp0_packet[2];
+        const auto base_x = destination & 0x3ffu;
+        const auto base_y = (destination >> 16u) & 0x1ffu;
+        const auto width = dimensions & 0xffffu;
+        const auto height = dimensions >> 16u;
+        const auto total = width * height;
+
+        for (std::uint32_t half = 0u; half < 2u && written < total; ++half) {
+            const auto pixel = static_cast<std::uint16_t>(value >> (half * 16u));
+            const auto local_x = written % width;
+            const auto local_y = written / width;
+            const auto x = (base_x + local_x) & 0x3ffu;
+            const auto y = (base_y + local_y) & 0x1ffu;
+            bus.gpu_vram[static_cast<std::size_t>(y) * PsxBus::gpu_vram_width + x] = pixel;
+            ++written;
+        }
+        bus.gpu_gp0_packet[2] = written;
+        if (written >= total) {
+            bus.gpu_gp0_packet = {};
+            bus.gpu_gp0_packet_count = 0u;
+            bus.gpu_gp0_packet_words = 0u;
+        }
+        return;
+    }
+
     if (bus.gpu_gp0_packet_count == 0u) {
         const auto command = static_cast<std::uint8_t>(value >> 24u);
-        if (command != 0x02u) return;
-        bus.gpu_gp0_packet_words = 3u;
+        const bool cpu_to_vram = (value >> 29u) == 5u;
+        if (command == 0x02u || cpu_to_vram) {
+            bus.gpu_gp0_packet_words = 3u;
+        } else {
+            return;
+        }
     }
 
     bus.gpu_gp0_packet[bus.gpu_gp0_packet_count++] = value;
     if (bus.gpu_gp0_packet_count != bus.gpu_gp0_packet_words) return;
+
+    if ((bus.gpu_gp0_packet[0] >> 29u) == 5u) {
+        const auto destination = bus.gpu_gp0_packet[1];
+        const auto raw_size = bus.gpu_gp0_packet[2];
+        const auto raw_width = raw_size & 0xffffu;
+        const auto raw_height = raw_size >> 16u;
+        const auto width = ((raw_width - 1u) & 0x3ffu) + 1u;
+        const auto height = ((raw_height - 1u) & 0x1ffu) + 1u;
+        bus.gpu_gp0_packet[0] = destination;
+        bus.gpu_gp0_packet[1] = width | (height << 16u);
+        bus.gpu_gp0_packet[2] = 0u;
+        bus.gpu_gp0_packet_count = image_payload_state;
+        bus.gpu_gp0_packet_words = 0u;
+        return;
+    }
+
     psx_gpu_execute_fill_rectangle(bus);
     bus.gpu_gp0_packet_count = 0u;
     bus.gpu_gp0_packet_words = 0u;
@@ -1024,7 +1074,6 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
             destination = (destination + 1u) & (PsxBus::main_ram_size - 1u);
         }
 
-        // SyncMode 0 keeps MADR and BCR at their programmed start values.
         bus.dma3_channel_control = value &
             ~(PsxBus::dma_channel_start_busy | (1u << 28u));
         const bool previous_master =
@@ -1170,10 +1219,6 @@ inline void psx_bus_tick(PsxBus& bus, std::uint32_t cpu_cycles) noexcept {
     constexpr std::uint16_t ntsc_vblank_start_line = 240u;
     constexpr std::uint16_t ntsc_scanlines_per_frame = 263u;
 
-    // NTSC PS1 timings: the CPU runs at 33.8688 MHz and one scanline spans
-    // 3413 ticks of the 53.693175 MHz video clock. Keeping the fractional
-    // phase prevents long-running drift that a rounded 2153-cycle period
-    // would introduce.
     constexpr std::uint64_t cpu_clock_hz = 33'868'800u;
     constexpr std::uint64_t video_clock_hz = 53'693'175u;
     constexpr std::uint64_t video_clocks_per_scanline = 3'413u;
