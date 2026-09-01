@@ -72,6 +72,9 @@ Result<PsxRuntime> load_prepared_psx_runtime(const std::filesystem::path& instal
     auto loaded = load_psx_boot_executable(runtime, executable.value, system.value);
     if (!loaded) return Result<PsxRuntime>::failure(loaded.error, loaded.detail);
 
+    auto mounted = mount_psx_cdrom_image(runtime, install_dir / "data" / "DISC.ISO");
+    if (!mounted) return Result<PsxRuntime>::failure(mounted.error, mounted.detail);
+
     return Result<PsxRuntime>::success(std::move(runtime));
 }
 

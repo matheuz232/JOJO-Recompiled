@@ -256,6 +256,15 @@ static void test_psx_conversion_materializes_prepared_runtime() {
     const auto boot = jojo::bootstrap_runtime(install);
     CHECK(boot);
 
+    const auto runtime = jojo::load_prepared_psx_runtime(install);
+    CHECK(runtime);
+    if (runtime) {
+        CHECK(runtime.value.bus.cdrom_image_mounted);
+        CHECK(runtime.value.bus.cdrom_image_path == prepared_disc);
+        CHECK(runtime.value.bus.cdrom_image_sector_count ==
+              fs::file_size(prepared_disc) / jojo::PsxBus::cdrom_data_sector_size);
+    }
+
     const auto prepared_image = jojo::open_iso9660(prepared_disc);
     CHECK(prepared_image);
     if (prepared_image) {
