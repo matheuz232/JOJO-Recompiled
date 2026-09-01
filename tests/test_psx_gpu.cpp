@@ -29,6 +29,11 @@ std::uint32_t gpu_read(const jojo::PsxBus& bus) {
     return read.value;
 }
 
+constexpr std::uint32_t vertex(std::int32_t x, std::int32_t y) {
+    return (static_cast<std::uint32_t>(x) & 0x7ffu) |
+           ((static_cast<std::uint32_t>(y) & 0x7ffu) << 16u);
+}
+
 void test_cpu_to_vram_upload_and_parser_recovery() {
     jojo::PsxBus bus{};
 
@@ -131,12 +136,65 @@ void test_mask_setting_applies_to_cpu_to_vram() {
     REQUIRE(bus.gpu_vram[row * jojo::PsxBus::gpu_vram_width + force_mask_column] == 0x9234u);
 }
 
+void test_untextured_variable_rectangle_applies_offset_clip_and_mask() {
+    jojo::PsxBus bus{};
+
+    // Drawing area is inclusive on PS1. The raw vertex (7,10) plus offset
+    // (+2,-1) starts at (9,9), so a 5x4 rectangle is clipped to x=10..13,
+    // y=10..12 by this drawing area.
+    gp0(bus, 0xe3000000u | 10u | (10u << 10u));
+    gp0(bus, 0xe4000000u | 13u | (12u << 10u));
+    gp0(bus, 0xe5000000u | 2u | ((static_cast<std::uint32_t>(-1) & 0x7ffu) << 11u));
+
+    const auto protected_index = 11u * jojo::PsxBus::gpu_vram_width + 11u;
+    bus.gpu_vram[protected_index] = 0x8001u;
+    gp0(bus, 0xe6000002u); // Respect old mask bit.
+
+    gp0(bus, 0x600000ffu); // opaque, untextured variable rectangle, bright red
+    gp0(bus, vertex(7, 10));
+    gp0(bus, (4u << 16u) | 5u);
+
+    REQUIRE(bus.gpu_vram[9u * jojo::PsxBus::gpu_vram_width + 9u] == 0u);
+    REQUIRE(bus.gpu_vram[10u * jojo::PsxBus::gpu_vram_width + 10u] == 0x001fu);
+    REQUIRE(bus.gpu_vram[10u * jojo::PsxBus::gpu_vram_width + 13u] == 0x001fu);
+    REQUIRE(bus.gpu_vram[11u * jojo::PsxBus::gpu_vram_width + 11u] == 0x8001u);
+    REQUIRE(bus.gpu_vram[12u * jojo::PsxBus::gpu_vram_width + 13u] == 0x001fu);
+    REQUIRE(bus.gpu_vram[13u * jojo::PsxBus::gpu_vram_width + 10u] == 0u);
+}
+
+void test_untextured_fixed_rectangle_sizes_and_force_mask() {
+    jojo::PsxBus bus{};
+    gp0(bus, 0xe3000000u);
+    gp0(bus, 0xe4000000u | 1023u | (511u << 10u));
+    gp0(bus, 0xe5000000u);
+    gp0(bus, 0xe6000001u); // Force bit15 on rendered pixels.
+
+    gp0(bus, 0x6800ff00u); // untextured 1x1, green
+    gp0(bus, vertex(20, 30));
+    REQUIRE(bus.gpu_vram[30u * jojo::PsxBus::gpu_vram_width + 20u] == 0x83e0u);
+    REQUIRE(bus.gpu_vram[30u * jojo::PsxBus::gpu_vram_width + 21u] == 0u);
+
+    gp0(bus, 0x700000ffu); // untextured 8x8, red
+    gp0(bus, vertex(40, 50));
+    REQUIRE(bus.gpu_vram[50u * jojo::PsxBus::gpu_vram_width + 40u] == 0x801fu);
+    REQUIRE(bus.gpu_vram[57u * jojo::PsxBus::gpu_vram_width + 47u] == 0x801fu);
+    REQUIRE(bus.gpu_vram[58u * jojo::PsxBus::gpu_vram_width + 47u] == 0u);
+
+    gp0(bus, 0x78ff0000u); // untextured 16x16, blue
+    gp0(bus, vertex(60, 70));
+    REQUIRE(bus.gpu_vram[70u * jojo::PsxBus::gpu_vram_width + 60u] == 0xfc00u);
+    REQUIRE(bus.gpu_vram[85u * jojo::PsxBus::gpu_vram_width + 75u] == 0xfc00u);
+    REQUIRE(bus.gpu_vram[86u * jojo::PsxBus::gpu_vram_width + 75u] == 0u);
+}
+
 struct GpuContractRunner {
     GpuContractRunner() {
         test_cpu_to_vram_upload_and_parser_recovery();
         test_cpu_to_vram_odd_pixel_count_ignores_padding_halfword();
         test_draw_environment_and_internal_register_reads();
         test_mask_setting_applies_to_cpu_to_vram();
+        test_untextured_variable_rectangle_applies_offset_clip_and_mask();
+        test_untextured_fixed_rectangle_sizes_and_force_mask();
     }
 };
 
