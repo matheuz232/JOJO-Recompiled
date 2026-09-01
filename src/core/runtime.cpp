@@ -75,6 +75,30 @@ Result<PsxRuntime> load_prepared_psx_runtime(const std::filesystem::path& instal
     return Result<PsxRuntime>::success(std::move(runtime));
 }
 
+PsxRuntimeSliceResult run_psx_runtime_slice(PsxRuntime& runtime,
+                                            const ResolvedInputFrame& input,
+                                            std::uint32_t max_steps) noexcept {
+    update_psx_runtime_input(runtime, input);
+
+    PsxRuntimeSliceResult result{};
+    result.last_step = {PsxR3000aStepReason::ok, runtime.cpu.pc, 0u};
+    if (max_steps == 0u) {
+        result.reached_budget = true;
+        return result;
+    }
+
+    while (result.executed_steps < max_steps) {
+        result.last_step = step_psx_runtime(runtime);
+        ++result.executed_steps;
+        if (result.last_step.reason != PsxR3000aStepReason::ok) {
+            return result;
+        }
+    }
+
+    result.reached_budget = true;
+    return result;
+}
+
 Result<void> bootstrap_runtime(const std::filesystem::path& install_dir) {
     auto install = validate_installation(install_dir);
     if (!install) return Result<void>::failure(install.error, install.detail);
