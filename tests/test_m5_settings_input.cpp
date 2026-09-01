@@ -1,4 +1,5 @@
 #include "core/input.h"
+#include "core/psx_pad.h"
 #include "core/settings.h"
 #include "core/settings_menu.h"
 
@@ -134,6 +135,43 @@ static void test_per_player_resolution_handles_buttons_and_axes() {
     CHECK(resolved[1].pressed(jojo::GameAction::attack_heavy));
 }
 
+static void test_ps1_pad_translation_is_per_player_and_matches_game_defaults() {
+    jojo::ResolvedInputFrame input{};
+    input[0].actions[jojo::GameAction::up] = true;
+    input[0].actions[jojo::GameAction::left] = true;
+    input[0].actions[jojo::GameAction::attack_light] = true;
+    input[0].actions[jojo::GameAction::stand] = true;
+    input[0].actions[jojo::GameAction::pause] = true;
+
+    input[1].actions[jojo::GameAction::right] = true;
+    input[1].actions[jojo::GameAction::down] = true;
+    input[1].actions[jojo::GameAction::attack_medium] = true;
+    input[1].actions[jojo::GameAction::attack_heavy] = true;
+    input[1].actions[jojo::GameAction::start] = true;
+
+    const auto pads = jojo::make_psx_digital_pad_frame(input);
+    CHECK((pads[0].buttons & (1u << 3u)) == 0u);  // Start/Pause
+    CHECK((pads[0].buttons & (1u << 4u)) == 0u);  // Up
+    CHECK((pads[0].buttons & (1u << 7u)) == 0u);  // Left
+    CHECK((pads[0].buttons & (1u << 14u)) == 0u); // Cross = Stand
+    CHECK((pads[0].buttons & (1u << 15u)) == 0u); // Square = Light
+    CHECK((pads[0].buttons & (1u << 12u)) != 0u); // P1 Medium not pressed
+
+    CHECK((pads[1].buttons & (1u << 3u)) == 0u);  // Start
+    CHECK((pads[1].buttons & (1u << 5u)) == 0u);  // Right
+    CHECK((pads[1].buttons & (1u << 6u)) == 0u);  // Down
+    CHECK((pads[1].buttons & (1u << 12u)) == 0u); // Triangle = Medium
+    CHECK((pads[1].buttons & (1u << 13u)) == 0u); // Circle = Heavy
+    CHECK((pads[1].buttons & (1u << 15u)) != 0u); // P2 Light not pressed
+
+    const auto response = jojo::psx_digital_pad_poll_response(pads[0]);
+    CHECK(response[0] == 0xffu);
+    CHECK(response[1] == 0x41u);
+    CHECK(response[2] == 0x5au);
+    CHECK(response[3] == static_cast<std::uint8_t>(pads[0].buttons));
+    CHECK(response[4] == static_cast<std::uint8_t>(pads[0].buttons >> 8u));
+}
+
 static void test_binding_capture_detects_new_button_and_axis_direction() {
     jojo::InputFrame before{};
     before.devices.push_back({"xinput:0", jojo::DeviceKind::xinput, {}, {{"LX", 0.0f}}});
@@ -199,6 +237,7 @@ int main() {
     test_legacy_player_one_keys_still_load();
     test_device_registry_reports_hotplug_changes();
     test_per_player_resolution_handles_buttons_and_axes();
+    test_ps1_pad_translation_is_per_player_and_matches_game_defaults();
     test_binding_capture_detects_new_button_and_axis_direction();
     test_settings_menu_uses_draft_commit_and_discard();
 
