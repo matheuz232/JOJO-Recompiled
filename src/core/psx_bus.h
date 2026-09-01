@@ -1143,7 +1143,74 @@ inline void psx_bus_cdrom_clear_parameters(PsxBus& bus) noexcept {
     if (address == PsxBus::dma2_base_address) { bus.dma2_base = value & 0x00ffffffu; return PsxBusAccessReason::ok; }
     if (address == PsxBus::dma2_block_control_address) { bus.dma2_block_control = value; return PsxBusAccessReason::ok; }
     if (address == PsxBus::dma2_channel_control_address) {
+        constexpr std::uint32_t sync1_gpu_to_ram = 0x01000200u;
+        constexpr std::uint32_t sync1_ram_to_gpu = 0x01000201u;
         constexpr std::uint32_t linked_list_ram_to_gpu = 0x01000401u;
+        if (value == sync1_gpu_to_ram || value == sync1_ram_to_gpu) {
+            const bool ram_to_gpu = value == sync1_ram_to_gpu;
+            const auto gpu_dma_direction = (bus.gpu_status >> 29u) & 3u;
+            if ((ram_to_gpu && gpu_dma_direction != 2u) ||
+                (!ram_to_gpu && gpu_dma_direction != 3u)) {
+                return PsxBusAccessReason::unmapped;
+            }
+
+            const auto raw_block_words = bus.dma2_block_control & 0xffffu;
+            const auto raw_block_count = bus.dma2_block_control >> 16u;
+            const auto block_words = raw_block_words == 0u ? 0x10000u : raw_block_words;
+            const auto block_count = raw_block_count == 0u ? 0x10000u : raw_block_count;
+            const auto word_count =
+                static_cast<std::uint64_t>(block_words) * block_count;
+            if (word_count == 0u || word_count > PsxBus::main_ram_size / 4u) {
+                return PsxBusAccessReason::unmapped;
+            }
+
+            if (!ram_to_gpu) {
+                if (!psx_gpu_vram_to_cpu_active(bus)) return PsxBusAccessReason::unmapped;
+                const auto dimensions = bus.gpu_gp0_packet[1];
+                const auto total_pixels =
+                    (dimensions & 0xffffu) * (dimensions >> 16u);
+                const auto pixels_read = bus.gpu_gp0_packet[2];
+                if (pixels_read > total_pixels) return PsxBusAccessReason::unmapped;
+                const auto remaining_words =
+                    (static_cast<std::uint64_t>(total_pixels - pixels_read) + 1u) / 2u;
+                if (word_count > remaining_words) return PsxBusAccessReason::unmapped;
+            }
+
+            auto memory_address = bus.dma2_base & 0x00fffffcu;
+            for (std::uint64_t word = 0u; word < word_count; ++word) {
+                const auto offset = static_cast<std::size_t>(
+                    memory_address & (PsxBus::main_ram_size - 1u));
+                if (ram_to_gpu) {
+                    const auto gp0 = static_cast<std::uint32_t>(bus.ram[offset + 0u]) |
+                                     (static_cast<std::uint32_t>(bus.ram[offset + 1u]) << 8u) |
+                                     (static_cast<std::uint32_t>(bus.ram[offset + 2u]) << 16u) |
+                                     (static_cast<std::uint32_t>(bus.ram[offset + 3u]) << 24u);
+                    psx_gpu_write_gp0(bus, gp0);
+                } else {
+                    const auto gpu_word = psx_bus_read_u32(bus, PsxBus::gpu_gp0_address);
+                    if (gpu_word.reason != PsxBusAccessReason::ok) return gpu_word.reason;
+                    bus.ram[offset + 0u] = static_cast<std::uint8_t>(gpu_word.value);
+                    bus.ram[offset + 1u] = static_cast<std::uint8_t>(gpu_word.value >> 8u);
+                    bus.ram[offset + 2u] = static_cast<std::uint8_t>(gpu_word.value >> 16u);
+                    bus.ram[offset + 3u] = static_cast<std::uint8_t>(gpu_word.value >> 24u);
+                }
+                memory_address = (memory_address + 4u) & 0x00ffffffu;
+            }
+
+            bus.dma2_base = memory_address;
+            bus.dma2_block_control = raw_block_words;
+            bus.dma2_channel_control = value & ~PsxBus::dma_channel_start_busy;
+            const bool previous_master =
+                (psx_bus_dma_interrupt_value(bus) & PsxBus::dma_interrupt_master_flag) != 0u;
+            bus.dma_interrupt |= 1u << 26u;
+            const bool current_master =
+                (psx_bus_dma_interrupt_value(bus) & PsxBus::dma_interrupt_master_flag) != 0u;
+            if (!previous_master && current_master) {
+                bus.interrupt_status = static_cast<std::uint16_t>(
+                    bus.interrupt_status | (1u << 3u));
+            }
+            return PsxBusAccessReason::ok;
+        }
         if (value == linked_list_ram_to_gpu) {
             auto packet_address = bus.dma2_base & 0x00fffffcu;
             constexpr std::size_t maximum_packets = PsxBus::main_ram_size / sizeof(std::uint32_t);
