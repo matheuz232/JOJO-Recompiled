@@ -421,8 +421,13 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
         if (command == 0x02u || cpu_to_vram) {
             bus.gpu_gp0_packet_words = 3u;
         } else if (polygon) {
-            if (textured) return;
-            if (gouraud) {
+            if (textured) {
+                if (gouraud) {
+                    bus.gpu_gp0_packet_words = static_cast<std::uint8_t>(quad ? 12u : 9u);
+                } else {
+                    bus.gpu_gp0_packet_words = static_cast<std::uint8_t>(quad ? 9u : 7u);
+                }
+            } else if (gouraud) {
                 bus.gpu_gp0_packet_words = static_cast<std::uint8_t>(quad ? 8u : 6u);
             } else {
                 bus.gpu_gp0_packet_words = static_cast<std::uint8_t>(quad ? 5u : 4u);
@@ -461,7 +466,9 @@ inline void psx_gpu_write_gp0(PsxBus& bus, std::uint32_t value) noexcept {
 
     const auto primitive_group = bus.gpu_gp0_packet[0] >> 29u;
     if (primitive_group == 1u) {
-        if ((bus.gpu_gp0_packet[0] & (1u << 28u)) != 0u) {
+        if ((bus.gpu_gp0_packet[0] & (1u << 26u)) != 0u) {
+            psx_gpu_execute_textured_polygon(bus);
+        } else if ((bus.gpu_gp0_packet[0] & (1u << 28u)) != 0u) {
             psx_gpu_execute_gouraud_polygon(bus);
         } else {
             psx_gpu_execute_flat_polygon(bus);
