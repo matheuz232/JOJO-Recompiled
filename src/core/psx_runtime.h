@@ -735,6 +735,107 @@ inline void advance_psx_timer1_hblank(PsxRuntime& runtime,
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
 
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x02u) {
+        const auto timer = runtime.cpu.gpr[4];
+        if (timer > 2u) {
+            runtime.cpu.gpr[2] = 0u;
+            return_from_psx_bios_call(runtime);
+            return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+        }
+
+        const auto offset = timer * 0x10u;
+        const auto mode_address = PsxBus::timer0_mode_address + offset;
+        const auto target_address = PsxBus::timer0_target_address + offset;
+        if (psx_bus_write_u16(runtime.bus, mode_address, 0u) != PsxBusAccessReason::ok ||
+            psx_bus_write_u16(runtime.bus, target_address,
+                              static_cast<std::uint16_t>(runtime.cpu.gpr[5])) !=
+                PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
+
+        const auto flags = runtime.cpu.gpr[6];
+        std::uint16_t mode = (flags & 0x10u) == 0u ? 0x0048u : 0x0049u;
+        if ((flags & 0x01u) == 0u) mode = static_cast<std::uint16_t>(mode | 0x0100u);
+        if ((flags & 0x1000u) != 0u) mode = static_cast<std::uint16_t>(mode | 0x0010u);
+        if (psx_bus_write_u16(runtime.bus, mode_address, mode) !=
+            PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
+        runtime.cpu.gpr[2] = 1u;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x03u) {
+        const auto timer = runtime.cpu.gpr[4];
+        if (timer > 2u) {
+            runtime.cpu.gpr[2] = 0u;
+            return_from_psx_bios_call(runtime);
+            return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+        }
+        const auto current_address = PsxBus::timer0_current_address + timer * 0x10u;
+        const auto current = psx_bus_read_u16(runtime.bus, current_address);
+        if (current.reason != PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
+        runtime.cpu.gpr[2] = current.value;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x04u) {
+        const auto timer = runtime.cpu.gpr[4];
+        std::uint16_t bit = 0u;
+        std::uint32_t result = 0u;
+        if (timer <= 2u) {
+            bit = static_cast<std::uint16_t>(1u << (4u + timer));
+            result = 1u;
+        } else if (timer == 3u) {
+            bit = 1u;
+        }
+        if (bit != 0u &&
+            psx_bus_write_u16(runtime.bus, PsxBus::interrupt_mask_address,
+                              static_cast<std::uint16_t>(runtime.bus.interrupt_mask | bit)) !=
+                PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
+        runtime.cpu.gpr[2] = result;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x05u) {
+        const auto timer = runtime.cpu.gpr[4];
+        std::uint16_t bit = 0u;
+        if (timer <= 2u) bit = static_cast<std::uint16_t>(1u << (4u + timer));
+        else if (timer == 3u) bit = 1u;
+        if (bit != 0u &&
+            psx_bus_write_u16(runtime.bus, PsxBus::interrupt_mask_address,
+                              static_cast<std::uint16_t>(runtime.bus.interrupt_mask & ~bit)) !=
+                PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
+        runtime.cpu.gpr[2] = 1u;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x06u) {
+        const auto timer = runtime.cpu.gpr[4];
+        if (timer > 2u) {
+            runtime.cpu.gpr[2] = 0u;
+            return_from_psx_bios_call(runtime);
+            return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+        }
+        const auto current_address = PsxBus::timer0_current_address + timer * 0x10u;
+        if (psx_bus_write_u16(runtime.bus, current_address, 0u) !=
+            PsxBusAccessReason::ok) {
+            return {PsxR3000aStepReason::memory_fault, instruction_pc, 0u};
+        }
+        runtime.cpu.gpr[2] = 1u;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
     if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x08u) {
         runtime.cpu.gpr[2] = open_psx_bios_event(runtime);
         return_from_psx_bios_call(runtime);
