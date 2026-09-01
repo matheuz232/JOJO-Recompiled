@@ -1,0 +1,107 @@
+name: agent-line-patch
+
+on:
+  push:
+    branches:
+      - feature/offline-product-rebuild
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message != 'feat: integrate PS1 GPU lines' && github.event.head_commit.message != 'chore: remove temporary line patch workflow'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply narrow parser patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/core/psx_bus.h')
+          text = path.read_text()
+
+          def replace_once(old, new):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one match, found {count}: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+
+          replace_once('#include <cstdint>\n', '#include <cstdint>\n#include <cstdlib>\n')
+          replace_once(
+              '    std::uint8_t gpu_gp0_packet_words{};\n    std::array<std::uint16_t, spu_register_count> spu_registers{};\n',
+              '    std::uint8_t gpu_gp0_packet_words{};\n'
+              '    bool gpu_polyline_active{};\n'
+              '    bool gpu_polyline_gouraud{};\n'
+              '    bool gpu_polyline_expect_color{};\n'
+              '    std::array<std::uint16_t, spu_register_count> spu_registers{};\n')
+          replace_once(
+              '#include "core/psx_gpu_polygon.inl"\n',
+              '#include "core/psx_gpu_polygon.inl"\n#include "core/psx_gpu_line.inl"\n')
+          replace_once(
+              '    bus.gpu_gp0_write_latch = value;\n\n    if (bus.gpu_gp0_packet_count == image_payload_state) {\n',
+              '    bus.gpu_gp0_write_latch = value;\n\n'
+              '    if (psx_gpu_consume_polyline_word(bus, value)) return;\n\n'
+              '    if (bus.gpu_gp0_packet_count == image_payload_state) {\n')
+          replace_once(
+              '        const bool polygon = (value >> 29u) == 1u;\n'
+              '        const bool rectangle = (value >> 29u) == 3u;\n',
+              '        const bool polygon = (value >> 29u) == 1u;\n'
+              '        const bool line = (value >> 29u) == 2u;\n'
+              '        const bool rectangle = (value >> 29u) == 3u;\n')
+          replace_once(
+              '        } else if (rectangle) {\n',
+              '        } else if (line) {\n'
+              '            bus.gpu_gp0_packet_words = static_cast<std::uint8_t>(gouraud ? 4u : 3u);\n'
+              '        } else if (rectangle) {\n')
+          replace_once(
+              '    } else if (primitive_group == 3u) {\n',
+              '    } else if (primitive_group == 2u) {\n'
+              '        psx_gpu_execute_line(bus);\n'
+              '        if ((bus.gpu_gp0_packet[0] & (1u << 27u)) != 0u) {\n'
+              '            const bool gouraud = (bus.gpu_gp0_packet[0] & (1u << 28u)) != 0u;\n'
+              '            bus.gpu_polyline_active = true;\n'
+              '            bus.gpu_polyline_gouraud = gouraud;\n'
+              '            bus.gpu_polyline_expect_color = gouraud;\n'
+              '            if (gouraud) {\n'
+              '                bus.gpu_gp0_packet[1] = bus.gpu_gp0_packet[3];\n'
+              '            } else {\n'
+              '                bus.gpu_gp0_packet[1] = bus.gpu_gp0_packet[2];\n'
+              '            }\n'
+              '            bus.gpu_gp0_packet_count = 0u;\n'
+              '            bus.gpu_gp0_packet_words = 0u;\n'
+              '            return;\n'
+              '        }\n'
+              '    } else if (primitive_group == 3u) {\n')
+          replace_once(
+              '            bus.gpu_gp0_packet = {};\n'
+              '            bus.gpu_gp0_packet_count = 0u;\n'
+              '            bus.gpu_gp0_packet_words = 0u;\n'
+              '            return PsxBusAccessReason::ok;\n'
+              '        }\n        if (command == 0x10u) {\n',
+              '            bus.gpu_gp0_packet = {};\n'
+              '            bus.gpu_gp0_packet_count = 0u;\n'
+              '            bus.gpu_gp0_packet_words = 0u;\n'
+              '            bus.gpu_polyline_active = false;\n'
+              '            bus.gpu_polyline_gouraud = false;\n'
+              '            bus.gpu_polyline_expect_color = false;\n'
+              '            return PsxBusAccessReason::ok;\n'
+              '        }\n        if (command == 0x10u) {\n')
+
+          path.write_text(text)
+          PY
+          git diff --check
+          git diff -- src/core/psx_bus.h
+      - name: Commit parser integration
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/core/psx_bus.h
+          git commit -m 'feat: integrate PS1 GPU lines'
+          git push origin HEAD:feature/offline-product-rebuild
