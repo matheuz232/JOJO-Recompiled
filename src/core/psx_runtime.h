@@ -23,6 +23,11 @@ struct PsxBiosEvent {
     std::uint32_t callback{};
 };
 
+struct PsxBiosThread {
+    bool allocated{};
+    PsxR3000aState cpu{};
+};
+
 struct PsxBiosState {
     bool heap_initialized{};
     std::uint32_t heap_base{};
@@ -44,6 +49,10 @@ struct PsxBiosState {
     std::array<PsxBiosEvent, max_events> events{};
     std::uint32_t event_capacity{0x10u};
     bool event_table_initialized{};
+    static constexpr std::size_t max_threads = 16u;
+    std::array<PsxBiosThread, max_threads> threads{PsxBiosThread{true}};
+    std::uint32_t thread_capacity{4u};
+    std::uint32_t current_thread{};
 };
 
 struct PsxRuntime {
@@ -105,6 +114,11 @@ struct PsxRuntime {
         return Result<void>::failure(ErrorCode::invalid_installation,
                                      "SYSTEM.CNF requests more PS1 events than this runtime supports");
     }
+    const auto requested_threads = system.tcb == 0u ? 4u : system.tcb;
+    if (requested_threads > PsxBiosState::max_threads) {
+        return Result<void>::failure(ErrorCode::invalid_installation,
+                                     "SYSTEM.CNF requests more PS1 threads than this runtime supports");
+    }
 
     std::fill(runtime.bus.ram.begin(), runtime.bus.ram.end(), std::uint8_t{0});
     for (std::size_t i = 0; i < payload_size; ++i) {
@@ -119,6 +133,10 @@ struct PsxRuntime {
     runtime.bios.events.fill(PsxBiosEvent{});
     runtime.bios.event_capacity = requested_events;
     runtime.bios.event_table_initialized = false;
+    runtime.bios.threads.fill(PsxBiosThread{});
+    runtime.bios.threads[0].allocated = true;
+    runtime.bios.thread_capacity = requested_threads;
+    runtime.bios.current_thread = 0u;
 
     reset_psx_r3000a(runtime.cpu, exe.initial_pc);
     runtime.cpu.gpr[28] = exe.initial_gp;
@@ -136,6 +154,7 @@ struct PsxRuntime {
     runtime.cpu.gpr[29] = stack;
     runtime.cpu.gpr[30] = stack;
     runtime.cpu.gpr[0] = 0u;
+    runtime.bios.threads[0].cpu = runtime.cpu;
 
     return Result<void>::success();
 }
@@ -294,6 +313,83 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
 
     event.status = enabled_busy;
     return 1u;
+}
+
+struct PsxBiosEventDelivery {
+    std::uint32_t delivered{};
+    std::uint32_t callback{};
+};
+
+[[nodiscard]] inline std::uint32_t open_psx_bios_thread(
+    PsxRuntime& runtime, std::uint32_t pc, std::uint32_t sp,
+    std::uint32_t gp) noexcept {
+    constexpr std::uint32_t handle_base = 0xff000000u;
+    for (std::uint32_t i = 0u; i < runtime.bios.thread_capacity; ++i) {
+        auto& thread = runtime.bios.threads[i];
+        if (thread.allocated) continue;
+        thread = PsxBiosThread{};
+        thread.allocated = true;
+        reset_psx_r3000a(thread.cpu, pc);
+        thread.cpu.gpr[28] = gp;
+        thread.cpu.gpr[29] = sp;
+        thread.cpu.gpr[30] = sp;
+        return handle_base | i;
+    }
+    return 0xffffffffu;
+}
+
+[[nodiscard]] inline bool change_psx_bios_thread(
+    PsxRuntime& runtime, std::uint32_t handle) noexcept {
+    constexpr std::uint32_t handle_mask = 0xff000000u;
+    constexpr std::uint32_t handle_base = 0xff000000u;
+    if ((handle & handle_mask) != handle_base) return false;
+    const auto index = handle & 0x00ffffffu;
+    if (index >= runtime.bios.thread_capacity ||
+        !runtime.bios.threads[index].allocated) {
+        return false;
+    }
+
+    auto saved = runtime.cpu;
+    saved.gpr[2] = 1u;
+    saved.pc = saved.gpr[31];
+    saved.next_pc = saved.pc + 4u;
+    saved.pending_load_valid = false;
+    saved.current_instruction_is_branch_delay_slot = false;
+    saved.branch_pc = 0u;
+    saved.gpr[0] = 0u;
+    runtime.bios.threads[runtime.bios.current_thread].cpu = saved;
+
+    runtime.cpu = runtime.bios.threads[index].cpu;
+    runtime.cpu.gpr[0] = 0u;
+    runtime.bios.current_thread = index;
+    return true;
+}
+
+[[nodiscard]] inline PsxBiosEventDelivery deliver_psx_bios_event(
+    PsxRuntime& runtime, std::uint32_t event_class, std::uint32_t spec) noexcept {
+    constexpr std::uint32_t enabled_busy = 0x2000u;
+    constexpr std::uint32_t enabled_ready = 0x4000u;
+    constexpr std::uint32_t callback_mode = 0x1000u;
+    constexpr std::uint32_t polling_mode = 0x2000u;
+
+    initialize_scph1001_event_slots(runtime);
+    PsxBiosEventDelivery result{};
+    for (std::uint32_t i = 0u; i < runtime.bios.event_capacity; ++i) {
+        auto& event = runtime.bios.events[i];
+        if (!event.allocated || event.event_class != event_class ||
+            event.spec != spec || event.status != enabled_busy) {
+            continue;
+        }
+        if (event.mode == polling_mode) {
+            event.status = enabled_ready;
+            result.delivered = 1u;
+        } else if (event.mode == callback_mode && event.callback != 0u &&
+                   result.callback == 0u) {
+            result.callback = event.callback;
+            result.delivered = 1u;
+        }
+    }
+    return result;
 }
 
 [[nodiscard]] inline PsxBusAccessReason dequeue_scph1001_interrupt_handler(
@@ -535,6 +631,36 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
 
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x07u) {
+        const auto delivery = deliver_psx_bios_event(
+            runtime, runtime.cpu.gpr[4], runtime.cpu.gpr[5]);
+        runtime.cpu.gpr[2] = delivery.delivered;
+        if (delivery.callback != 0u) {
+            runtime.cpu.pc = delivery.callback;
+            runtime.cpu.next_pc = delivery.callback + 4u;
+            runtime.cpu.pending_load_valid = false;
+            runtime.cpu.current_instruction_is_branch_delay_slot = false;
+            runtime.cpu.branch_pc = 0u;
+            runtime.cpu.gpr[0] = 0u;
+        } else {
+            return_from_psx_bios_call(runtime);
+        }
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x0au) {
+        const auto ready = test_psx_bios_event(runtime, runtime.cpu.gpr[4]);
+        if (ready == 0u) {
+            // A real WaitEvent sleeps until delivery. This single-threaded
+            // runtime only completes the call when the event is already ready.
+            return {PsxR3000aStepReason::unsupported_instruction,
+                    instruction_pc, 0u};
+        }
+        runtime.cpu.gpr[2] = 1u;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
     if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x0bu) {
         runtime.cpu.gpr[2] = test_psx_bios_event(runtime, runtime.cpu.gpr[4]);
         return_from_psx_bios_call(runtime);
@@ -545,6 +671,21 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
         enable_psx_bios_event(runtime, runtime.cpu.gpr[4]);
         runtime.cpu.gpr[2] = 1u;
         return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x0eu) {
+        runtime.cpu.gpr[2] = open_psx_bios_thread(
+            runtime, runtime.cpu.gpr[4], runtime.cpu.gpr[5], runtime.cpu.gpr[6]);
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x10u) {
+        if (!change_psx_bios_thread(runtime, runtime.cpu.gpr[4])) {
+            return {PsxR3000aStepReason::unsupported_instruction,
+                    instruction_pc, 0u};
+        }
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
 

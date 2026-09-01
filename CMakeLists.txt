@@ -244,3 +244,6 @@ add_test(NAME jojo_psx_r3000a_boot_slice_tests COMMAND jojo_psx_r3000a_boot_slic
 add_executable(jojo_psx_runtime_tests tests/test_psx_runtime.cpp)
 target_link_libraries(jojo_psx_runtime_tests PRIVATE jojo_core)
 add_test(NAME jojo_psx_runtime_tests COMMAND jojo_psx_runtime_tests)
+
+add_executable(jojo_r1_media_probe tools/r1_media_probe.cpp)
+target_link_libraries(jojo_r1_media_probe PRIVATE jojo_core)

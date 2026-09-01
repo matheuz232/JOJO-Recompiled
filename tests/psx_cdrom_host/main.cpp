@@ -18,6 +18,19 @@ static std::uint32_t encode_i(std::uint8_t op, std::uint8_t rs, std::uint8_t rt,
 int main() {
     jojo::PsxBus bus{};
 
+    // Exact JoJo SLUS_010.60 frontier at 0x800432D4:
+    //   lw $v0,0($a0)   ; $a0=1F801014h SPU_DELAY
+    // Retail reset exposes the BIOS-programmed SPU bus delay value. The
+    // register is writable and must retain all documented control fields.
+    const auto spu_delay_reset = jojo::psx_bus_read_u32(bus, 0x1f801014u);
+    CHECK(spu_delay_reset.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(spu_delay_reset.value == 0x200931e1u);
+    CHECK(jojo::psx_bus_write_u32(bus, 0x1f801014u, 0x00070777u) ==
+          jojo::PsxBusAccessReason::ok);
+    const auto spu_delay_programmed = jojo::psx_bus_read_u32(bus, 0x1f801014u);
+    CHECK(spu_delay_programmed.reason == jojo::PsxBusAccessReason::ok);
+    CHECK(spu_delay_programmed.value == 0x00070777u);
+
     // Exact JoJo SLUS_010.60 frontier at 0x8004C55C:
     //   sb $v0,0($v1)   ; $v0=1, $v1=1F801800h
     // The CD host ADDRESS register must select bank 1 rather than fault.
@@ -165,6 +178,67 @@ int main() {
     const auto cd_irq_still_latched = jojo::psx_bus_read_u16(
         runtime.bus, jojo::PsxBus::interrupt_status_address);
     CHECK((cd_irq_still_latched.value & (1u << 2u)) != 0u);
+
+    // Next real SLUS_010.60 frontier: CD command 0Ah Init. It first returns
+    // INT3(stat), then completes asynchronously with INT2(stat).
+    jojo::PsxBus init_bus{};
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801800u, 1u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801802u, 0x07u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801800u, 0u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_cdrom_push_result(init_bus, 0x02u));
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801801u, 0x0au) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_read_u8(init_bus, 0x1f801801u).value == 0x02u);
+    CHECK(jojo::psx_bus_read_u8(init_bus, 0x1f801801u).value == 0x02u);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801800u, 1u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK((jojo::psx_bus_read_u8(init_bus, 0x1f801803u).value & 7u) == 3u);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801803u, 0x07u) ==
+          jojo::PsxBusAccessReason::ok);
+    jojo::psx_bus_tick(init_bus, 33'868u);
+    CHECK((jojo::psx_bus_read_u8(init_bus, 0x1f801803u).value & 7u) == 0u);
+    jojo::psx_bus_tick(init_bus, 1u);
+    CHECK((jojo::psx_bus_read_u8(init_bus, 0x1f801803u).value & 7u) == 2u);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801800u, 0u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_read_u8(init_bus, 0x1f801801u).value == 0x02u);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801800u, 1u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801803u, 0x07u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801800u, 0u) ==
+          jojo::PsxBusAccessReason::ok);
+
+    init_bus.cdrom_muted = true;
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801801u, 0x0cu) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(!init_bus.cdrom_muted);
+    CHECK(jojo::psx_bus_read_u8(init_bus, 0x1f801801u).value == 0x02u);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801800u, 1u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK((jojo::psx_bus_read_u8(init_bus, 0x1f801803u).value & 7u) == 3u);
+
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801800u, 2u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801802u, 0x80u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801803u, 0x00u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801800u, 3u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801801u, 0x80u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801802u, 0x00u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(jojo::psx_bus_write_u8(init_bus, 0x1f801803u, 0x20u) ==
+          jojo::PsxBusAccessReason::ok);
+    CHECK(init_bus.cdrom_volume_left_to_left == 0x80u);
+    CHECK(init_bus.cdrom_volume_left_to_right == 0x00u);
+    CHECK(init_bus.cdrom_volume_right_to_right == 0x80u);
+    CHECK(init_bus.cdrom_volume_right_to_left == 0x00u);
 
     // Do not silently widen this frontier into arbitrary CD commands.
     CHECK(jojo::psx_bus_write_u8(runtime.bus, 0x1f801800u, 0u) ==

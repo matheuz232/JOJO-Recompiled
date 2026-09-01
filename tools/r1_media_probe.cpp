@@ -4,6 +4,7 @@
 #include "core/psx_revision.h"
 #include "core/psx_runtime.h"
 #include "core/revision.h"
+#include <algorithm>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
@@ -12,7 +13,7 @@
 
 namespace {
 
-constexpr std::uint64_t execution_limit = 100000000u;
+constexpr std::uint64_t execution_limit = 400000000u;
 
 const char* step_reason_name(jojo::PsxR3000aStepReason reason) noexcept {
     switch (reason) {
@@ -161,6 +162,15 @@ int main(int argc, char** argv) {
             std::cout << std::dec << std::noshowbase;
             print_exception_context(runtime, result);
             print_instruction_context(runtime, instruction_pc);
+            std::cout << "cdrom_index=" << static_cast<unsigned>(runtime.bus.cdrom_index) << '\n';
+            std::cout << "cdrom_interrupt_flags="
+                      << static_cast<unsigned>(runtime.bus.cdrom_interrupt_flags) << '\n';
+            std::cout << "cdrom_result_count="
+                      << static_cast<unsigned>(runtime.bus.cdrom_result_count) << '\n';
+            std::cout << "cdrom_parameter_count="
+                      << static_cast<unsigned>(runtime.bus.cdrom_parameter_count) << '\n';
+            std::cout << "dma6_madr=0x" << std::hex << runtime.bus.dma6_base << '\n';
+            std::cout << "dma6_bcr=0x" << runtime.bus.dma6_block_control << '\n';
             return 0;
         }
     }
@@ -170,9 +180,65 @@ int main(int argc, char** argv) {
     std::cout << std::hex << std::showbase;
     std::cout << "timer1_mode=" << runtime.bus.timer1_mode << '\n';
     std::cout << "timer1_current=" << runtime.bus.timer1_current << '\n';
+    const auto nonzero_vram_pixels = std::count_if(
+        runtime.bus.gpu_vram.begin(), runtime.bus.gpu_vram.end(),
+        [](std::uint16_t pixel) { return pixel != 0u; });
+    std::cout << "nonzero_vram_pixels=" << nonzero_vram_pixels << '\n';
     std::cout << std::dec << std::noshowbase;
     std::cout << std::hex << std::showbase << "stop_pc=" << runtime.cpu.pc << '\n';
     std::cout << std::dec << std::noshowbase;
     print_instruction_context(runtime, runtime.cpu.pc);
+    std::cout << "a0=0x" << std::hex << runtime.cpu.gpr[4] << '\n';
+    const auto wait_counter = jojo::psx_bus_read_u32(runtime.bus, 0x80062780u);
+    if (wait_counter.reason == jojo::PsxBusAccessReason::ok) {
+        std::cout << "wait_counter_80062780=0x" << wait_counter.value << '\n';
+    }
+    std::cout << "vblank_callback_80062784=0x"
+              << jojo::psx_bus_read_u32(runtime.bus, 0x80062784u).value << '\n';
+    const auto excb = jojo::psx_bus_read_u32(runtime.bus, 0x100u);
+    std::cout << "irq_hook=0x" << runtime.bios.entry_interrupt_hook_address << '\n';
+    std::cout << "irq_hook_ra=0x"
+              << jojo::psx_bus_read_u32(
+                     runtime.bus, runtime.bios.entry_interrupt_hook_address).value
+              << '\n';
+    if (excb.reason == jojo::PsxBusAccessReason::ok) {
+        for (std::uint32_t priority = 0u; priority < 4u; ++priority) {
+            auto node = jojo::psx_bus_read_u32(
+                runtime.bus, excb.value + priority * 8u).value;
+            for (std::uint32_t index = 0u; node != 0u && index < 8u; ++index) {
+                std::cout << "irq_node_p" << priority << '_' << index
+                          << "=0x" << node << '\n';
+                std::cout << "irq_node_first=0x"
+                          << jojo::psx_bus_read_u32(runtime.bus, node + 8u).value << '\n';
+                std::cout << "irq_node_second=0x"
+                          << jojo::psx_bus_read_u32(runtime.bus, node + 4u).value << '\n';
+                node = jojo::psx_bus_read_u32(runtime.bus, node).value;
+            }
+        }
+    }
+    for (std::int32_t delta = -24; delta <= 8; ++delta) {
+        const auto address = runtime.cpu.pc +
+            static_cast<std::uint32_t>(delta * 4);
+        const auto word = jojo::psx_bus_read_u32(runtime.bus, address);
+        if (word.reason == jojo::PsxBusAccessReason::ok) {
+            std::cout << "code_0x" << std::hex << address << "=0x"
+                      << word.value << '\n';
+        }
+    }
+    for (std::uint32_t address = 0x8003c660u; address <= 0x8003c740u;
+         address += 4u) {
+        std::cout << "hook_code_0x" << std::hex << address << "=0x"
+                  << jojo::psx_bus_read_u32(runtime.bus, address).value << '\n';
+    }
+    for (std::uint32_t address = 0x8003cc20u; address <= 0x8003cca0u;
+         address += 4u) {
+        std::cout << "irq_code_0x" << std::hex << address << "=0x"
+                  << jojo::psx_bus_read_u32(runtime.bus, address).value << '\n';
+    }
+    for (std::uint32_t address = 0x8003c4d0u; address <= 0x8003c550u;
+         address += 4u) {
+        std::cout << "callback_code_0x" << std::hex << address << "=0x"
+                  << jojo::psx_bus_read_u32(runtime.bus, address).value << '\n';
+    }
     return 0;
 }

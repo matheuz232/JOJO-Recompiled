@@ -158,6 +158,77 @@ int main() {
         CHECK(runtime.bios.events[5u + i].status == 0x00002000u);
     }
 
+    // Exact DMA4 completion frontier: B0(07h) DeliverEvent identifies the
+    // hardware-DMA class and channel-4 spec. With no listener it reports zero.
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
+    runtime.cpu.gpr[4] = 0xf0000009u;
+    runtime.cpu.gpr[5] = 0x20u;
+    runtime.cpu.gpr[9] = 0x07u;
+    runtime.cpu.gpr[31] = 0x80042d2cu;
+    const auto undelivered = jojo::step_psx_runtime(runtime);
+    CHECK(undelivered.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 0u);
+    CHECK(runtime.cpu.pc == 0x80042d2cu);
+
+    // Polling-mode events become ready; TestEvent consumes that state once.
+    auto& dma_event = runtime.bios.events[13u];
+    dma_event = jojo::PsxBiosEvent{true, 0xf0000009u, 0x2000u,
+                                   0x20u, 0x2000u, 0u};
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
+    runtime.cpu.gpr[4] = 0xf0000009u;
+    runtime.cpu.gpr[5] = 0x20u;
+    runtime.cpu.gpr[9] = 0x07u;
+    runtime.cpu.gpr[31] = 0x80042d2cu;
+    const auto delivered = jojo::step_psx_runtime(runtime);
+    CHECK(delivered.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 1u);
+    CHECK(dma_event.status == 0x4000u);
+
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
+    runtime.cpu.gpr[4] = 0xf100000du;
+    runtime.cpu.gpr[9] = 0x0au;
+    runtime.cpu.gpr[31] = 0x80043d68u;
+    const auto waited = jojo::step_psx_runtime(runtime);
+    CHECK(waited.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 1u);
+    CHECK(runtime.cpu.pc == 0x80043d68u);
+    CHECK(dma_event.status == 0x2000u);
+
+    // Exact boot frontier B0(0Eh): the initial program owns TCB0, so OpenTh
+    // allocates TCB1 and stores PC, SP/FP, and GP for the dormant thread.
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
+    runtime.cpu.gpr[4] = 0x80010a90u;
+    runtime.cpu.gpr[5] = 0x801fec00u;
+    runtime.cpu.gpr[6] = 0u;
+    runtime.cpu.gpr[9] = 0x0eu;
+    runtime.cpu.gpr[31] = 0x800108f8u;
+    const auto opened_thread = jojo::step_psx_runtime(runtime);
+    CHECK(opened_thread.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.cpu.gpr[2] == 0xff000001u);
+    CHECK(runtime.cpu.pc == 0x800108f8u);
+    CHECK(runtime.bios.threads[1].allocated);
+    CHECK(runtime.bios.threads[1].cpu.pc == 0x80010a90u);
+    CHECK(runtime.bios.threads[1].cpu.next_pc == 0x80010a94u);
+    CHECK(runtime.bios.threads[1].cpu.gpr[28] == 0u);
+    CHECK(runtime.bios.threads[1].cpu.gpr[29] == 0x801fec00u);
+    CHECK(runtime.bios.threads[1].cpu.gpr[30] == 0x801fec00u);
+
+    jojo::reset_psx_r3000a(runtime.cpu, 0x000000b0u);
+    runtime.cpu.gpr[4] = 0xff000001u;
+    runtime.cpu.gpr[9] = 0x10u;
+    runtime.cpu.gpr[16] = 0x12345678u;
+    runtime.cpu.gpr[31] = 0x80010828u;
+    const auto changed_thread = jojo::step_psx_runtime(runtime);
+    CHECK(changed_thread.reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(runtime.bios.current_thread == 1u);
+    CHECK(runtime.bios.threads[0].cpu.pc == 0x80010828u);
+    CHECK(runtime.bios.threads[0].cpu.gpr[2] == 1u);
+    CHECK(runtime.bios.threads[0].cpu.gpr[16] == 0x12345678u);
+    CHECK(runtime.cpu.pc == 0x80010a90u);
+    CHECK(runtime.cpu.gpr[28] == 0u);
+    CHECK(runtime.cpu.gpr[29] == 0x801fec00u);
+    CHECK(runtime.cpu.gpr[30] == 0x801fec00u);
+
     if (failures) return 1;
     std::cout << "PSX card and kernel-event/TestEvent frontier assertions passed\n";
     return 0;
