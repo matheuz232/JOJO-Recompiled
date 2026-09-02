@@ -1,0 +1,20 @@
+name: agent-timer-delay-red
+
+on:
+  push:
+    branches:
+      - feature/offline-product-rebuild
+    paths:
+      - .github/workflows/agent-timer-delay-red.yml
+
+jobs:
+  red:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure timer contract
+        run: cmake -S tests/psx_timer1_mode -B build/psx_timer1_mode -DCMAKE_BUILD_TYPE=Release
+      - name: Build timer contract
+        run: cmake --build build/psx_timer1_mode --parallel 2
+      - name: Run timer contract
+        run: ./build/psx_timer1_mode/jojo_psx_timer1_mode_tests
