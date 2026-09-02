@@ -20,71 +20,14 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           path = Path('src/core/psx_bus.h')
           text = path.read_text()
-
-          old_constants = '''    constexpr std::uint16_t irq_at_ffff = 1u << 5u;
-              constexpr std::uint16_t repeat_irq = 1u << 6u;
-          '''
-          new_constants = '''    constexpr std::uint16_t irq_at_ffff = 1u << 5u;
-              constexpr std::uint16_t repeat_irq = 1u << 6u;
-              constexpr std::uint16_t toggle_irq = 1u << 7u;
-          '''
-          if old_constants not in text:
-              old_constants = '''    constexpr std::uint16_t irq_at_ffff = 1u << 5u;
-    constexpr std::uint16_t repeat_irq = 1u << 6u;
-'''
-              new_constants = '''    constexpr std::uint16_t irq_at_ffff = 1u << 5u;
-    constexpr std::uint16_t repeat_irq = 1u << 6u;
-    constexpr std::uint16_t toggle_irq = 1u << 7u;
-'''
+          old_constants = "    constexpr std::uint16_t irq_at_ffff = 1u << 5u;\n    constexpr std::uint16_t repeat_irq = 1u << 6u;\n"
+          new_constants = "    constexpr std::uint16_t irq_at_ffff = 1u << 5u;\n    constexpr std::uint16_t repeat_irq = 1u << 6u;\n    constexpr std::uint16_t toggle_irq = 1u << 7u;\n"
           assert text.count(old_constants) == 1, 'timer IRQ constants anchor changed'
           text = text.replace(old_constants, new_constants, 1)
-
-          old_irq = '''        if (irq_enabled && (((mode & repeat_irq) != 0u) || !irq_fired)) {
-              bus.interrupt_status = static_cast<std::uint16_t>(
-                  bus.interrupt_status | irq_bit);
-              if ((mode & repeat_irq) == 0u) irq_fired = true;
-          }
-          '''
-          new_irq = '''        if (irq_enabled && (((mode & repeat_irq) != 0u) || !irq_fired)) {
-              bool assert_irq = true;
-              if ((mode & toggle_irq) != 0u) {
-                  mode = static_cast<std::uint16_t>(
-                      mode ^ PsxBus::timer_mode_interrupt_request);
-                  assert_irq =
-                      (mode & PsxBus::timer_mode_interrupt_request) == 0u;
-              }
-              if (assert_irq) {
-                  bus.interrupt_status = static_cast<std::uint16_t>(
-                      bus.interrupt_status | irq_bit);
-              }
-              if ((mode & repeat_irq) == 0u) irq_fired = true;
-          }
-          '''
-          if old_irq not in text:
-              old_irq = '''        if (irq_enabled && (((mode & repeat_irq) != 0u) || !irq_fired)) {
-            bus.interrupt_status = static_cast<std::uint16_t>(
-                bus.interrupt_status | irq_bit);
-            if ((mode & repeat_irq) == 0u) irq_fired = true;
-        }
-'''
-              new_irq = '''        if (irq_enabled && (((mode & repeat_irq) != 0u) || !irq_fired)) {
-            bool assert_irq = true;
-            if ((mode & toggle_irq) != 0u) {
-                mode = static_cast<std::uint16_t>(
-                    mode ^ PsxBus::timer_mode_interrupt_request);
-                assert_irq =
-                    (mode & PsxBus::timer_mode_interrupt_request) == 0u;
-            }
-            if (assert_irq) {
-                bus.interrupt_status = static_cast<std::uint16_t>(
-                    bus.interrupt_status | irq_bit);
-            }
-            if ((mode & repeat_irq) == 0u) irq_fired = true;
-        }
-'''
+          old_irq = "        if (irq_enabled && (((mode & repeat_irq) != 0u) || !irq_fired)) {\n            bus.interrupt_status = static_cast<std::uint16_t>(\n                bus.interrupt_status | irq_bit);\n            if ((mode & repeat_irq) == 0u) irq_fired = true;\n        }\n"
+          new_irq = "        if (irq_enabled && (((mode & repeat_irq) != 0u) || !irq_fired)) {\n            bool assert_irq = true;\n            if ((mode & toggle_irq) != 0u) {\n                mode = static_cast<std::uint16_t>(\n                    mode ^ PsxBus::timer_mode_interrupt_request);\n                assert_irq =\n                    (mode & PsxBus::timer_mode_interrupt_request) == 0u;\n            }\n            if (assert_irq) {\n                bus.interrupt_status = static_cast<std::uint16_t>(\n                    bus.interrupt_status | irq_bit);\n            }\n            if ((mode & repeat_irq) == 0u) irq_fired = true;\n        }\n"
           assert text.count(old_irq) == 1, 'timer IRQ block anchor changed'
           text = text.replace(old_irq, new_irq, 1)
           path.write_text(text)
