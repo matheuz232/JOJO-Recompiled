@@ -1,7 +1,7 @@
 # workstream	status	evidence	blocker
 R2.1	verified	github-actions:run-33601535622	none
 R2.2	blocked-external-evidence	none	legally-supplied-supported-commercial-image
-R2.3	not-started	none	none
+R2.3	implemented-unverified	github-actions:run-33655893058	none
 R2.4	not-started	none	none
 R2.5	not-started	none	none
 R2.6	not-started	none	none
