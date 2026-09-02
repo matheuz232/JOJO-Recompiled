@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(jojo_psx_card_init_tests LANGUAGES CXX)
 
-add_executable(jojo_psx_card_init_tests main.cpp)
+add_executable(jojo_psx_card_init_tests
+  main.cpp
+  kernel_lifecycle_contract.cpp
+)
 target_compile_features(jojo_psx_card_init_tests PRIVATE cxx_std_20)
 target_include_directories(jojo_psx_card_init_tests PRIVATE ../../src)
 
