@@ -29,18 +29,12 @@ jobs:
           assert text.count(old_fields) == 1, 'dotclock field anchor changed'
           text = text.replace(old_fields, new_fields)
 
-          old_block = '''    const bool timer0_system_clock_allowed =
-              !timer0_sync || timer0_sync_mode == 1u ||
-              (timer0_sync_mode == 3u && bus.timer0_sync_started);
-          if (timer0_system_clock_allowed) {
-              const auto source = static_cast<std::uint16_t>((bus.timer0_mode >> 8u) & 3u);
-              if (source == 0u || source == 2u) {
-                  psx_bus_tick_root_counter(bus, bus.timer0_current, bus.timer0_mode,
-                                            bus.timer0_target, bus.timer0_reset_pending,
-                                            bus.timer0_irq_fired, timer0_interrupt, cpu_cycles);
-              }
-          }
-          '''
+          start_marker = "    const bool timer0_system_clock_allowed ="
+          end_marker = "    const bool timer1_sync ="
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          assert end > start, 'Timer0 clock block ordering changed'
+
           new_block = '''    const bool timer0_clock_allowed =
               !timer0_sync || timer0_sync_mode == 1u ||
               (timer0_sync_mode == 3u && bus.timer0_sync_started);
@@ -81,9 +75,9 @@ jobs:
                                             dotclock_ticks);
               }
           }
+
           '''
-          assert text.count(old_block) == 1, 'Timer0 clock block anchor changed'
-          text = text.replace(old_block, new_block)
+          text = text[:start] + new_block + text[end:]
           path.write_text(text)
           PY
       - name: Configure timer contract
