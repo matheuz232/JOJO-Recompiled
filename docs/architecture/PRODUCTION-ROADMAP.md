@@ -4,7 +4,7 @@
 
 The end user receives and launches a single executable: `JOJO-Recompiled.exe`.
 
-On first launch the executable asks for a legally obtained image of the user's own game copy, validates it, converts/recompiles the required content into `%LOCALAPPDATA%/JOJO Recompiled/game`, and reports real stage progress. On subsequent launches it goes directly into the game.
+On first launch the executable asks for a legally obtained image of the user's own game copy, validates it, converts/recompiles the required content into `%LOCALAPPDATA%/JOJO Recompiled/game`, and reports real stage progress. On subsequent launches it goes directly into the game only when the production-readiness requirements are satisfied.
 
 Graphics, controls, audio, mods, training tools and online options belong to the in-game UI. The first-run conversion UI is not a launcher/settings application.
 
@@ -165,6 +165,14 @@ In-game Online menu:
 - network settings and telemetry.
 
 Every player connection exposes a compact signal icon plus text state. Quality is computed from RTT, jitter, packet loss and rollback behavior, not ping alone. Disconnect, reconnecting and voluntary leave are distinct states.
+
+### Production completion program (R2)
+
+M1–M8 completion means their reusable contracts are complete; it does not establish commercial-game playability. The evidence-based production-completion program is defined by [`../superpowers/specs/2026-09-01-production-completion-design.md`](../superpowers/specs/2026-09-01-production-completion-design.md) and tracked by [`PRODUCTION-READINESS.tsv`](PRODUCTION-READINESS.tsv).
+
+Ordered workstreams: R2.1 repository truth/release gates; R2.2 commercial revision enablement; R2.3 game-specific execution/device integration; R2.4 real gameplay integration; R2.5 online product modes/M9; R2.6 production validation/release.
+
+A workstream is not complete because code exists. Its canonical status must use the evidence model and vocabulary in the production-completion design. `blocked-external-evidence` never counts as verified.
 
 ## Architectural rules
 
