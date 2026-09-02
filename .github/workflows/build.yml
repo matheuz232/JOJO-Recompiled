@@ -18,6 +18,8 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --parallel 2
+      - name: Production readiness gate
+        run: cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadiness.cmake
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
@@ -30,6 +32,8 @@ jobs:
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
       - name: Build Release
         run: cmake --build build --config Release --parallel 2
+      - name: Production readiness gate
+        run: cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadiness.cmake
       - name: Test Release
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Upload single executable
