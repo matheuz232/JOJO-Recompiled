@@ -122,7 +122,44 @@ static void test_boot_harness_routes_maple_enable_register() {
     CHECK(run.value.operations_executed == 2u);
 }
 
-static void test_boot_harness_keeps_unimplemented_maple_dma_start_diagnostic() {
+static void test_boot_harness_executes_single_entry_maple_dma() {
+    jojo::DreamcastBootProgram program{};
+    append_word(program, 0x2122u); // MOV.L R2,@R1: final descriptor control
+    append_word(program, 0x7104u); // ADD #4,R1
+    append_word(program, 0x2132u); // MOV.L R3,@R1: receive address
+    append_word(program, 0x7104u); // ADD #4,R1
+    append_word(program, 0x2142u); // MOV.L R4,@R1: Maple frame header
+    append_word(program, 0x2562u); // MOV.L R6,@R5: SB_MDSTAR
+    append_word(program, 0x2782u); // MOV.L R8,@R7: SB_MDEN=1
+    append_word(program, 0x2982u); // MOV.L R8,@R9: SB_MDST=1
+    append_word(program, 0x6BA2u); // MOV.L @R10,R11: read DMA response
+
+    constexpr std::uint32_t table = 0x0C000100u;
+    constexpr std::uint32_t receive = 0x0C000200u;
+
+    jojo::Sh4ReferenceState initial{};
+    initial.r[1] = table;
+    initial.r[2] = 0x80000000u; // final entry, port 0, zero payload words
+    initial.r[3] = receive;
+    initial.r[4] = 0x01200000u; // Device Request: destination 0x20, source 0x00
+    initial.r[5] = 0xA05F6C04u; // SB_MDSTAR
+    initial.r[6] = table;
+    initial.r[7] = 0xA05F6C14u; // SB_MDEN
+    initial.r[8] = 1u;
+    initial.r[9] = 0xA05F6C18u; // SB_MDST
+    initial.r[10] = receive;
+
+    const auto run = jojo::run_dreamcast_boot_reference(program, initial, 32u);
+    CHECK(run);
+    if (!run) return;
+
+    CHECK(run.value.stop_reason == jojo::DreamcastBootStopReason::end_of_program);
+    CHECK(!run.value.bus_fault.has_value());
+    CHECK(run.value.state.r[11] == 0xFFFFFFFFu);
+    CHECK(run.value.operations_executed == 9u);
+}
+
+static void test_boot_harness_rejects_disabled_maple_dma_start() {
     jojo::DreamcastBootProgram program{};
     append_word(program, 0x2122u); // MOV.L R2,@R1
 
@@ -179,7 +216,8 @@ int main() {
     test_boot_harness_routes_system_asic_interrupt_mask_access();
     test_boot_harness_routes_pvr2_spg_timing_access();
     test_boot_harness_routes_maple_enable_register();
-    test_boot_harness_keeps_unimplemented_maple_dma_start_diagnostic();
+    test_boot_harness_executes_single_entry_maple_dma();
+    test_boot_harness_rejects_disabled_maple_dma_start();
     test_block_limit_is_reported_without_claiming_successful_boot();
     test_privileged_sleep_does_not_claim_end_of_program();
     if (failures) {
