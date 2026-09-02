@@ -57,18 +57,18 @@ jobs:
               text = text.replace(old_mode, new_mode, 1)
 
           text, count = re.subn(
-              r'bool& reset_hold_cycles,\n\s+bool& irq_fired,',
+              r'bool& reset_pending,\n\s+bool& irq_fired,',
               'std::uint8_t& reset_hold_cycles,\n                                              std::uint8_t& write_hold_cycles,\n                                              bool& irq_fired,',
               text,
               count=1)
           assert count == 1, 'root-counter signature anchor changed'
 
-          old_start = "        if (reset_hold_cycles) {\n            current = 0u;\n            reset_hold_cycles = false;\n            continue;\n        }\n"
+          old_start = "        if (reset_pending) {\n            current = 0u;\n            reset_pending = false;\n            continue;\n        }\n"
           new_start = "        if (write_hold_cycles != 0u) {\n            --write_hold_cycles;\n            continue;\n        }\n        if (reset_hold_cycles != 0u) {\n            current = 0u;\n            --reset_hold_cycles;\n            continue;\n        }\n"
           assert text.count(old_start) == 1, 'root-counter hold block anchor changed'
           text = text.replace(old_start, new_start, 1)
 
-          old_end = "        if (((mode & reset_at_target) != 0u && hit_target) ||\n            ((mode & reset_at_target) == 0u && hit_ffff)) {\n            reset_hold_cycles = true;\n        }\n"
+          old_end = "        if (((mode & reset_at_target) != 0u && hit_target) ||\n            ((mode & reset_at_target) == 0u && hit_ffff)) {\n            reset_pending = true;\n        }\n"
           new_end = "        if ((mode & reset_at_target) != 0u && hit_target) {\n            reset_hold_cycles = 2u;\n        } else if ((mode & reset_at_target) == 0u && hit_ffff) {\n            reset_hold_cycles = 1u;\n        }\n"
           assert text.count(old_end) == 1, 'root-counter reset block anchor changed'
           text = text.replace(old_end, new_end, 1)
