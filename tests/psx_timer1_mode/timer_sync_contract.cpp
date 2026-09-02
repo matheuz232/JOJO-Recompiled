@@ -37,13 +37,16 @@ void test_timer2_sync_stop_and_free_run_modes() {
     SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer2_current_address) == 0u);
 
     write16(bus, jojo::PsxBus::timer2_mode_address, 0x0003u); // sync mode 1: free-run
+    jojo::psx_bus_tick(bus, 1u); // MODE-write hold
     jojo::psx_bus_tick(bus, 9u);
     SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer2_current_address) == 9u);
 
     write16(bus, jojo::PsxBus::timer2_mode_address, 0x0205u); // sync mode 2 + sys/8
     jojo::psx_bus_tick(bus, 7u);
     SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer2_current_address) == 0u);
-    jojo::psx_bus_tick(bus, 1u);
+    jojo::psx_bus_tick(bus, 1u); // first /8 pulse is MODE-write hold
+    SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer2_current_address) == 0u);
+    jojo::psx_bus_tick(bus, 8u);
     SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer2_current_address) == 1u);
 }
 
@@ -51,12 +54,13 @@ void test_timer0_sync1_resets_on_hblank() {
     jojo::PsxBus bus{};
     write16(bus, jojo::PsxBus::timer0_mode_address, 0x0003u); // sync mode 1, sysclk
 
+    jojo::psx_bus_tick(bus, 1u); // MODE-write hold
     jojo::psx_bus_tick(bus, 100u);
     SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer0_current_address) == 100u);
 
-    // NTSC HBlank arrives after roughly 2153 CPU cycles. The 100 cycles above
-    // are already part of the physical GPU phase, so another 2053 crosses it.
-    jojo::psx_bus_tick(bus, 2053u);
+    // 101 physical CPU cycles have elapsed; another 2052 crosses the first
+    // NTSC HBlank near cycle 2153 and resets Timer0 in sync mode 1.
+    jojo::psx_bus_tick(bus, 2052u);
     SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer0_current_address) == 0u);
 }
 
@@ -68,6 +72,8 @@ void test_timer0_sync3_unlocks_after_first_hblank() {
     SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer0_current_address) == 0u);
     jojo::psx_bus_tick(bus, 1u); // first HBlank unlocks free-run
     SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer0_current_address) == 0u);
+    jojo::psx_bus_tick(bus, 1u); // deferred MODE-write hold on first active clock
+    SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer0_current_address) == 0u);
     jojo::psx_bus_tick(bus, 10u);
     SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer0_current_address) == 10u);
 }
@@ -78,7 +84,7 @@ void test_timer1_sync1_resets_on_vblank() {
     write16(bus, jojo::PsxBus::timer1_current_address, 50u);
 
     // Put the physical GPU one scanline before NTSC VBlank. The next HBlank
-    // enters line 240 and must reset Timer1.
+    // enters line 240 and must reset Timer1 regardless of its write hold.
     bus.gpu_scanline = 239u;
     jojo::psx_bus_tick(bus, 2153u);
     SYNC_REQUIRE(bus.gpu_scanline == 240u);
@@ -95,6 +101,8 @@ void test_timer1_sync3_unlocks_after_first_vblank() {
     bus.gpu_scanline = 239u;
     jojo::psx_bus_tick(bus, 2153u); // first VBlank unlocks free-run
     SYNC_REQUIRE(bus.gpu_scanline == 240u);
+    SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer1_current_address) == 0u);
+    jojo::psx_bus_tick(bus, 1u); // deferred MODE-write hold
     SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer1_current_address) == 0u);
     jojo::psx_bus_tick(bus, 10u);
     SYNC_REQUIRE(read16(bus, jojo::PsxBus::timer1_current_address) == 10u);
