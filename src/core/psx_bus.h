@@ -178,6 +178,8 @@ struct PsxBus {
     bool timer0_sync_started{};
     bool timer1_sync_started{};
     std::uint8_t timer2_clock_phase{};
+    std::uint64_t timer0_dotclock_cpu_phase{};
+    std::uint16_t timer0_video_clock_phase{};
     std::uint64_t video_clock_phase{};
     std::uint16_t gpu_scanline{};
     std::uint8_t cdrom_index{};
@@ -1600,17 +1602,46 @@ inline void psx_bus_tick(PsxBus& bus, std::uint32_t cpu_cycles) noexcept {
     };
     const bool timer0_sync = (bus.timer0_mode & synchronization_enable) != 0u;
     const auto timer0_sync_mode = sync_mode(bus.timer0_mode);
-    const bool timer0_system_clock_allowed =
-        !timer0_sync || timer0_sync_mode == 1u ||
-        (timer0_sync_mode == 3u && bus.timer0_sync_started);
-    if (timer0_system_clock_allowed) {
-        const auto source = static_cast<std::uint16_t>((bus.timer0_mode >> 8u) & 3u);
-        if (source == 0u || source == 2u) {
-            psx_bus_tick_root_counter(bus, bus.timer0_current, bus.timer0_mode,
-                                      bus.timer0_target, bus.timer0_reset_pending,
-                                      bus.timer0_irq_fired, timer0_interrupt, cpu_cycles);
-        }
+    const bool timer0_clock_allowed =
+    !timer0_sync || timer0_sync_mode == 1u ||
+    (timer0_sync_mode == 3u && bus.timer0_sync_started);
+constexpr std::uint64_t timer0_cpu_clock_hz = 33'868'800u;
+constexpr std::uint64_t timer0_video_clock_hz = 53'693'175u;
+constexpr std::uint16_t dotclock_phase_period = 280u;
+const auto dotclock_numerator =
+    bus.timer0_dotclock_cpu_phase +
+    static_cast<std::uint64_t>(cpu_cycles) * timer0_video_clock_hz;
+const auto elapsed_video_clocks = dotclock_numerator / timer0_cpu_clock_hz;
+bus.timer0_dotclock_cpu_phase = dotclock_numerator % timer0_cpu_clock_hz;
+const auto video_phase_before = bus.timer0_video_clock_phase;
+bus.timer0_video_clock_phase = static_cast<std::uint16_t>(
+    (static_cast<std::uint64_t>(video_phase_before) + elapsed_video_clocks) %
+    dotclock_phase_period);
+
+if (timer0_clock_allowed) {
+    const auto source = static_cast<std::uint16_t>((bus.timer0_mode >> 8u) & 3u);
+    if (source == 0u || source == 2u) {
+        psx_bus_tick_root_counter(bus, bus.timer0_current, bus.timer0_mode,
+                                  bus.timer0_target, bus.timer0_reset_pending,
+                                  bus.timer0_irq_fired, timer0_interrupt, cpu_cycles);
+    } else {
+        const auto horizontal_mode = static_cast<std::uint8_t>(bus.gpu_display_mode);
+        const std::uint32_t divider =
+            (horizontal_mode & 0x40u) != 0u ? 7u :
+            (horizontal_mode & 0x03u) == 0u ? 10u :
+            (horizontal_mode & 0x03u) == 1u ? 8u :
+            (horizontal_mode & 0x03u) == 2u ? 5u : 4u;
+        const auto phase_in_divider =
+            static_cast<std::uint32_t>(video_phase_before % divider);
+        const auto dotclock_ticks = static_cast<std::uint32_t>(
+            (static_cast<std::uint64_t>(phase_in_divider) + elapsed_video_clocks) /
+            divider);
+        psx_bus_tick_root_counter(bus, bus.timer0_current, bus.timer0_mode,
+                                  bus.timer0_target, bus.timer0_reset_pending,
+                                  bus.timer0_irq_fired, timer0_interrupt,
+                                  dotclock_ticks);
     }
+}
 
     const bool timer1_sync = (bus.timer1_mode & synchronization_enable) != 0u;
     const auto timer1_sync_mode = sync_mode(bus.timer1_mode);
