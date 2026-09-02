@@ -116,6 +116,18 @@ static void test_block_limit_is_reported_without_claiming_successful_boot() {
     CHECK(run.value.blocks_executed == 3u);
 }
 
+static void test_sleep_does_not_claim_end_of_program() {
+    jojo::DreamcastBootProgram program{};
+    append_word(program, 0x001Bu); // SLEEP
+
+    const auto run = jojo::run_dreamcast_boot_reference(program, {}, 32u);
+    CHECK(run);
+    if (!run) return;
+
+    CHECK(run.value.stop_reason != jojo::DreamcastBootStopReason::end_of_program);
+    CHECK(run.value.operations_executed == 1u);
+}
+
 int main() {
     test_executes_loaded_boot_program_from_main_ram();
     test_reports_first_reachable_unsupported_opcode();
@@ -123,6 +135,7 @@ int main() {
     test_boot_harness_routes_system_asic_interrupt_mask_access();
     test_boot_harness_routes_pvr2_spg_timing_access();
     test_block_limit_is_reported_without_claiming_successful_boot();
+    test_sleep_does_not_claim_end_of_program();
     if (failures) {
         std::cerr << failures << " Dreamcast boot-runner assertion(s) failed\n";
         return 1;
