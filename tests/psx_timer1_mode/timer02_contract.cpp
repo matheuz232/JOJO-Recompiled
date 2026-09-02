@@ -192,6 +192,57 @@ void test_one_shot_irq_rearms_only_on_mode_write() {
     TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
 }
 
+void test_toggle_irq_request_line_behavior() {
+    constexpr std::uint16_t reset_at_target = 1u << 3u;
+    constexpr std::uint16_t irq_at_target = 1u << 4u;
+    constexpr std::uint16_t repeat_irq = 1u << 6u;
+    constexpr std::uint16_t toggle_irq = 1u << 7u;
+    constexpr std::uint16_t irq_request_idle = 1u << 10u;
+    constexpr std::uint16_t repeat_toggle_mode =
+        reset_at_target | irq_at_target | repeat_irq | toggle_irq;
+
+    for (const auto& timer : timers) {
+        jojo::PsxBus bus{};
+        require_write16(bus, timer.target, 1u);
+        require_write16(bus, timer.mode, repeat_toggle_mode);
+        TIMER_REQUIRE((read16(bus, timer.mode) & irq_request_idle) != 0u);
+
+        jojo::psx_bus_tick(bus, 1u); // first target: request 1 -> 0, IRQ edge
+        TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
+        TIMER_REQUIRE((read16(bus, timer.mode) & irq_request_idle) == 0u);
+        acknowledge_irq(bus, timer.irq_bit);
+
+        jojo::psx_bus_tick(bus, 1u); // reset cycle
+        jojo::psx_bus_tick(bus, 1u); // second target: request 0 -> 1, no IRQ edge
+        TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) == 0u);
+        TIMER_REQUIRE((read16(bus, timer.mode) & irq_request_idle) != 0u);
+
+        jojo::psx_bus_tick(bus, 1u); // reset cycle
+        jojo::psx_bus_tick(bus, 1u); // third target: request 1 -> 0, IRQ edge
+        TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
+        TIMER_REQUIRE((read16(bus, timer.mode) & irq_request_idle) == 0u);
+    }
+
+    jojo::PsxBus one_shot{};
+    const auto& timer = timers[0];
+    constexpr std::uint16_t one_shot_toggle_mode =
+        reset_at_target | irq_at_target | toggle_irq;
+    require_write16(one_shot, timer.target, 1u);
+    require_write16(one_shot, timer.mode, one_shot_toggle_mode);
+    jojo::psx_bus_tick(one_shot, 1u);
+    TIMER_REQUIRE((one_shot.interrupt_status & timer.irq_bit) != 0u);
+    TIMER_REQUIRE((read16(one_shot, timer.mode) & irq_request_idle) == 0u);
+    acknowledge_irq(one_shot, timer.irq_bit);
+
+    jojo::psx_bus_tick(one_shot, 1u); // reset cycle
+    jojo::psx_bus_tick(one_shot, 1u); // later target is suppressed in one-shot mode
+    TIMER_REQUIRE((one_shot.interrupt_status & timer.irq_bit) == 0u);
+    TIMER_REQUIRE((read16(one_shot, timer.mode) & irq_request_idle) == 0u);
+
+    require_write16(one_shot, timer.mode, one_shot_toggle_mode);
+    TIMER_REQUIRE((read16(one_shot, timer.mode) & irq_request_idle) != 0u);
+}
+
 void test_mode_status_bits_and_clear_on_read() {
     constexpr std::uint16_t irq_request_idle = 1u << 10u;
     constexpr std::uint16_t reached_target = 1u << 11u;
@@ -231,6 +282,7 @@ struct TimerFoundationRunner {
         test_target_reset_and_repeated_irq_for_all_root_counters();
         test_ffff_wrap_and_irq();
         test_one_shot_irq_rearms_only_on_mode_write();
+        test_toggle_irq_request_line_behavior();
         test_mode_status_bits_and_clear_on_read();
     }
 };
