@@ -120,8 +120,15 @@ private:
 
         const auto port = static_cast<std::uint8_t>((control.value >> 16u) & 0x3u);
         const auto payload_words = static_cast<std::uint8_t>(control.value & 0xFFu);
+        const auto frame_payload_words =
+            static_cast<std::uint8_t>(frame_header.value & 0xFFu);
         (void)port;
-        (void)frame_header;
+
+        if (frame_payload_words != payload_words) {
+            return dma_failure(
+                ErrorCode::invalid_argument,
+                "frame length does not match descriptor payload count");
+        }
 
         for (std::uint32_t i = 0u; i < payload_words; ++i) {
             const auto payload_address = mdstar_ + 12u + i * 4u;
