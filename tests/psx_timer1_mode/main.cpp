@@ -56,9 +56,9 @@ int main() {
 
     // JoJo configures Timer 1 mode=0100h, selecting HBlank as its clock.
     // On an NTSC PS1, 3413 video clocks per scanline at 53.693175 MHz are
-    // approximately 2152.866 CPU clocks at 33.8688 MHz. Runtime execution must
-    // therefore leave the counter at zero through 2152 one-cycle instructions
-    // and increment it on the next cycle instead of freezing forever.
+    // approximately 2152.866 CPU clocks at 33.8688 MHz. The MODE write holds
+    // zero through the first selected-clock pulse; the second HBlank is the
+    // first one allowed to increment the counter.
     jojo::PsxRuntime runtime{};
     jojo::reset_psx_r3000a(runtime.cpu, 0x80010000u);
     CHECK(jojo::psx_bus_write_u32(runtime.bus, 0x1f801114u, 0x00000100u) ==
@@ -68,12 +68,16 @@ int main() {
     }
     CHECK(jojo::psx_bus_read_u16(runtime.bus, 0x1f801110u).value == 0u);
     CHECK(jojo::step_psx_runtime(runtime).reason == jojo::PsxR3000aStepReason::ok);
+    CHECK(jojo::psx_bus_read_u16(runtime.bus, 0x1f801110u).value == 0u);
+    for (std::uint32_t i = 0; i < 2153u; ++i) {
+        CHECK(jojo::step_psx_runtime(runtime).reason == jojo::PsxR3000aStepReason::ok);
+    }
     CHECK(jojo::psx_bus_read_u16(runtime.bus, 0x1f801110u).value == 1u);
 
     // The same scanline timing must raise the GPU VBlank interrupt on entry
     // to NTSC line 240. JoJo's frame wait cannot progress if Timer 1 advances
     // while the GPU/VBlank source remains silent.
-    for (std::uint32_t line = 1u; line < 240u; ++line) {
+    for (std::uint32_t line = 2u; line < 240u; ++line) {
         for (std::uint32_t cycle = 0u; cycle < 2153u; ++cycle) {
             CHECK(jojo::step_psx_runtime(runtime).reason ==
                   jojo::PsxR3000aStepReason::ok);
@@ -124,9 +128,9 @@ int main() {
     CHECK(interrupt_runtime.cpu.cop0.status == ((1u << 10u) | 1u));
 
     // Timer 1 counts the GPU's physical HBlank signal. Writing MODE resets the
-    // counter, but it must not reset or phase-shift the GPU scanline generator.
-    // If MODE is rewritten just before the next HBlank, that already-scheduled
-    // HBlank can therefore increment the newly reset counter on the next cycle.
+    // counter but must not reset or phase-shift the GPU scanline generator.
+    // Rewriting MODE immediately before an already-scheduled HBlank therefore
+    // consumes that HBlank as the MODE-write hold; the next HBlank increments.
     jojo::PsxRuntime rewrite_runtime{};
     jojo::reset_psx_r3000a(rewrite_runtime.cpu, 0x80012000u);
     CHECK(jojo::psx_bus_write_u32(rewrite_runtime.bus, 0x1f801114u, 0x00000100u) ==
@@ -142,15 +146,15 @@ int main() {
     CHECK(jojo::psx_bus_read_u16(rewrite_runtime.bus, 0x1f801110u).value == 0u);
     CHECK(jojo::step_psx_runtime(rewrite_runtime).reason ==
           jojo::PsxR3000aStepReason::ok);
-    CHECK(jojo::psx_bus_read_u16(rewrite_runtime.bus, 0x1f801110u).value == 1u);
+    CHECK(jojo::psx_bus_read_u16(rewrite_runtime.bus, 0x1f801110u).value == 0u);
     for (std::uint32_t i = 0; i < 2152u; ++i) {
         CHECK(jojo::step_psx_runtime(rewrite_runtime).reason ==
               jojo::PsxR3000aStepReason::ok);
     }
-    CHECK(jojo::psx_bus_read_u16(rewrite_runtime.bus, 0x1f801110u).value == 1u);
+    CHECK(jojo::psx_bus_read_u16(rewrite_runtime.bus, 0x1f801110u).value == 0u);
     CHECK(jojo::step_psx_runtime(rewrite_runtime).reason ==
           jojo::PsxR3000aStepReason::ok);
-    CHECK(jojo::psx_bus_read_u16(rewrite_runtime.bus, 0x1f801110u).value == 2u);
+    CHECK(jojo::psx_bus_read_u16(rewrite_runtime.bus, 0x1f801110u).value == 1u);
 
     if (failures) return 1;
     std::cout << "PSX Timer 1 mode MMIO assertions passed\n";
