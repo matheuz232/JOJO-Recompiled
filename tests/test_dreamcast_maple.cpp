@@ -41,10 +41,11 @@ static jojo::Result<std::uint32_t> read_mmio32(jojo::DreamcastMmioDevice& device
 static void prepare_single_entry(jojo::DreamcastExecutableMemory& memory,
                                  std::uint32_t table,
                                  std::uint32_t receive,
-                                 std::uint32_t control = 0x80000000u) {
+                                 std::uint32_t control = 0x80000000u,
+                                 std::uint32_t frame_header = 0x01200000u) {
     CHECK(jojo::write_dreamcast_u32(memory, table + 0u, control));
     CHECK(jojo::write_dreamcast_u32(memory, table + 4u, receive));
-    CHECK(jojo::write_dreamcast_u32(memory, table + 8u, 0x01200000u));
+    CHECK(jojo::write_dreamcast_u32(memory, table + 8u, frame_header));
 }
 
 static std::uint32_t read_normal_status(jojo::DreamcastSystemAsic& asic) {
@@ -151,6 +152,34 @@ static void test_nonfinal_descriptor_is_rejected_and_stays_idle() {
     CHECK((read_normal_status(asic) & (1u << 12u)) == 0u);
 }
 
+static void test_frame_length_mismatch_is_rejected() {
+    auto memory = make_memory();
+    jojo::DreamcastSystemAsic asic;
+    jojo::DreamcastMaple maple(memory, asic);
+
+    constexpr std::uint32_t table = 0x0C000100u;
+    constexpr std::uint32_t receive = 0x0C000200u;
+    prepare_single_entry(memory,
+                         table,
+                         receive,
+                         0x80000000u,
+                         0x01200001u); // header claims one payload word, descriptor claims zero
+    CHECK(jojo::write_dreamcast_u32(memory, receive, 0x13579BDFu));
+
+    CHECK(write_mmio32(maple, 0xA05F6C04u, table));
+    CHECK(write_mmio32(maple, 0xA05F6C14u, 1u));
+    const auto start = write_mmio32(maple, 0xA05F6C18u, 1u);
+    CHECK(!start);
+
+    const auto response = jojo::read_dreamcast_u32(memory, receive);
+    CHECK(response);
+    if (response) CHECK(response.value == 0x13579BDFu);
+    const auto mdst = read_mmio32(maple, 0xA05F6C18u);
+    CHECK(mdst);
+    if (mdst) CHECK(mdst.value == 0u);
+    CHECK((read_normal_status(asic) & (1u << 12u)) == 0u);
+}
+
 static void test_misaligned_receive_address_is_rejected() {
     auto memory = make_memory();
     jojo::DreamcastSystemAsic asic;
@@ -196,6 +225,7 @@ int main() {
     test_disabled_dma_rejects_start_and_stays_idle();
     test_hardware_trigger_mode_is_rejected();
     test_nonfinal_descriptor_is_rejected_and_stays_idle();
+    test_frame_length_mismatch_is_rejected();
     test_misaligned_receive_address_is_rejected();
     test_successful_dma_raises_maple_completion_interrupt();
 
