@@ -55,7 +55,7 @@ Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
 
     DreamcastReferenceBus bus(result.memory);
     DreamcastSystemAsic system_asic;
-    DreamcastMaple maple;
+    DreamcastMaple maple(result.memory, system_asic);
     DreamcastPvr2 pvr2(system_asic);
     bus.attach_device(DreamcastBusRegion::system_asic, system_asic);
     bus.attach_device(DreamcastBusRegion::maple, maple);
