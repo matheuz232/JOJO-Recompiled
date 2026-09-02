@@ -6,6 +6,7 @@ on:
       - feature/offline-product-rebuild
     paths:
       - .github/workflows/agent-timer-delay-red.yml
+      - tests/psx_timer1_mode/timer02_contract.cpp
 
 permissions:
   contents: write
