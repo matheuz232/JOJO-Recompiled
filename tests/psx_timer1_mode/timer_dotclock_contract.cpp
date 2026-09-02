@@ -34,7 +34,7 @@ std::uint16_t timer0(jojo::PsxBus& bus) {
 void test_timer0_dotclock_tracks_horizontal_resolution() {
     struct Case {
         std::uint8_t display_mode;
-        std::uint16_t expected_dots;
+        std::uint16_t raw_dots;
     };
     constexpr std::array<Case, 5> cases{{
         {0x00u, 341u}, // 256px: 3413 / 10
@@ -49,7 +49,9 @@ void test_timer0_dotclock_tracks_horizontal_resolution() {
         write_gp1(bus, 0x08000000u | c.display_mode);
         write_timer0_mode(bus, 0x0100u); // clock source 1 = dotclock, free-run
         jojo::psx_bus_tick(bus, 2153u);
-        DOTCLOCK_REQUIRE(timer0(bus) == c.expected_dots);
+        // The MODE write consumes the first selected-clock pulse as its hold
+        // cycle, so one of the physical dotclock pulses does not increment.
+        DOTCLOCK_REQUIRE(timer0(bus) == static_cast<std::uint16_t>(c.raw_dots - 1u));
     }
 }
 
@@ -58,7 +60,7 @@ void test_timer0_clock_source_three_is_dotclock_too() {
     write_gp1(bus, 0x08000001u); // 320px
     write_timer0_mode(bus, 0x0300u); // clock source 3 = dotclock, free-run
     jojo::psx_bus_tick(bus, 2153u);
-    DOTCLOCK_REQUIRE(timer0(bus) == 426u);
+    DOTCLOCK_REQUIRE(timer0(bus) == 425u);
 }
 
 struct TimerDotclockRunner {
