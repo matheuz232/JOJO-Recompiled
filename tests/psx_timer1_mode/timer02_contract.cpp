@@ -90,6 +90,11 @@ void test_system_clock_free_run_advances_timer0_and_timer1() {
     require_write16(bus, timer0_mode, 0x0000u); // system clock
     require_write16(bus, timer1_mode, 0x0000u); // system clock
 
+    // MODE writes hold the reset value for the next selected-clock cycle.
+    jojo::psx_bus_tick(bus, 1u);
+    TIMER_REQUIRE(read16(bus, timer0_current) == 0u);
+    TIMER_REQUIRE(read16(bus, timer1_current) == 0u);
+
     jojo::psx_bus_tick(bus, 5u);
     TIMER_REQUIRE(read16(bus, timer0_current) == 5u);
     TIMER_REQUIRE(read16(bus, timer1_current) == 5u);
@@ -103,10 +108,15 @@ void test_timer2_system_clock_and_div8_preserve_phase() {
     jojo::PsxBus bus{};
 
     require_write16(bus, timer2_mode, 0x0000u); // system clock
+    jojo::psx_bus_tick(bus, 1u); // MODE-write hold
     jojo::psx_bus_tick(bus, 3u);
     TIMER_REQUIRE(read16(bus, timer2_current) == 3u);
 
     require_write16(bus, timer2_mode, 0x0200u); // system clock / 8
+    TIMER_REQUIRE(read16(bus, timer2_current) == 0u);
+    jojo::psx_bus_tick(bus, 7u);
+    TIMER_REQUIRE(read16(bus, timer2_current) == 0u);
+    jojo::psx_bus_tick(bus, 1u); // first /8 pulse is MODE-write hold
     TIMER_REQUIRE(read16(bus, timer2_current) == 0u);
     jojo::psx_bus_tick(bus, 7u);
     TIMER_REQUIRE(read16(bus, timer2_current) == 0u);
@@ -129,6 +139,7 @@ void test_target_reset_and_repeated_irq_for_all_root_counters() {
         require_write16(bus, timer.target, 3u);
         require_write16(bus, timer.mode, mode);
 
+        jojo::psx_bus_tick(bus, 1u); // MODE-write hold
         jojo::psx_bus_tick(bus, 2u);
         TIMER_REQUIRE(read16(bus, timer.current) == 2u);
         TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) == 0u);
@@ -138,7 +149,7 @@ void test_target_reset_and_repeated_irq_for_all_root_counters() {
         TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
 
         acknowledge_irq(bus, timer.irq_bit);
-        jojo::psx_bus_tick(bus, 1u);
+        jojo::psx_bus_tick(bus, 2u); // two target-reset hold cycles
         TIMER_REQUIRE(read16(bus, timer.current) == 0u);
         TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) == 0u);
 
@@ -157,14 +168,19 @@ void test_ffff_wrap_and_irq() {
         require_write16(bus, timer.mode, irq_at_ffff | repeat_irq);
         require_write16(bus, timer.current, 0xfffeu);
 
+        jojo::psx_bus_tick(bus, 1u); // CURRENT-write hold
+        TIMER_REQUIRE(read16(bus, timer.current) == 0xfffeu);
+        TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) == 0u);
         jojo::psx_bus_tick(bus, 1u);
         TIMER_REQUIRE(read16(bus, timer.current) == 0xffffu);
         TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
 
         acknowledge_irq(bus, timer.irq_bit);
-        jojo::psx_bus_tick(bus, 1u);
+        jojo::psx_bus_tick(bus, 1u); // one wrapped-zero cycle
         TIMER_REQUIRE(read16(bus, timer.current) == 0u);
         TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) == 0u);
+        jojo::psx_bus_tick(bus, 1u);
+        TIMER_REQUIRE(read16(bus, timer.current) == 1u);
     }
 }
 
@@ -178,16 +194,18 @@ void test_one_shot_irq_rearms_only_on_mode_write() {
     require_write16(bus, timer.target, 2u);
     require_write16(bus, timer.mode, one_shot_mode);
 
+    jojo::psx_bus_tick(bus, 1u); // MODE-write hold
     jojo::psx_bus_tick(bus, 2u);
     TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
     acknowledge_irq(bus, timer.irq_bit);
 
-    jojo::psx_bus_tick(bus, 1u); // target reset -> zero
+    jojo::psx_bus_tick(bus, 2u); // target-reset hold
     jojo::psx_bus_tick(bus, 2u); // reaches target again
     TIMER_REQUIRE(read16(bus, timer.current) == 2u);
     TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) == 0u);
 
     require_write16(bus, timer.mode, one_shot_mode);
+    jojo::psx_bus_tick(bus, 1u); // MODE-write hold
     jojo::psx_bus_tick(bus, 2u);
     TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
 }
@@ -207,17 +225,18 @@ void test_toggle_irq_request_line_behavior() {
         require_write16(bus, timer.mode, repeat_toggle_mode);
         TIMER_REQUIRE((read16(bus, timer.mode) & irq_request_idle) != 0u);
 
+        jojo::psx_bus_tick(bus, 1u); // MODE-write hold
         jojo::psx_bus_tick(bus, 1u); // first target: request 1 -> 0, IRQ edge
         TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
         TIMER_REQUIRE((read16(bus, timer.mode) & irq_request_idle) == 0u);
         acknowledge_irq(bus, timer.irq_bit);
 
-        jojo::psx_bus_tick(bus, 1u); // reset cycle
+        jojo::psx_bus_tick(bus, 2u); // target-reset hold
         jojo::psx_bus_tick(bus, 1u); // second target: request 0 -> 1, no IRQ edge
         TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) == 0u);
         TIMER_REQUIRE((read16(bus, timer.mode) & irq_request_idle) != 0u);
 
-        jojo::psx_bus_tick(bus, 1u); // reset cycle
+        jojo::psx_bus_tick(bus, 2u); // target-reset hold
         jojo::psx_bus_tick(bus, 1u); // third target: request 1 -> 0, IRQ edge
         TIMER_REQUIRE((bus.interrupt_status & timer.irq_bit) != 0u);
         TIMER_REQUIRE((read16(bus, timer.mode) & irq_request_idle) == 0u);
@@ -229,12 +248,13 @@ void test_toggle_irq_request_line_behavior() {
         reset_at_target | irq_at_target | toggle_irq;
     require_write16(one_shot, timer.target, 1u);
     require_write16(one_shot, timer.mode, one_shot_toggle_mode);
+    jojo::psx_bus_tick(one_shot, 1u); // MODE-write hold
     jojo::psx_bus_tick(one_shot, 1u);
     TIMER_REQUIRE((one_shot.interrupt_status & timer.irq_bit) != 0u);
     TIMER_REQUIRE((read16(one_shot, timer.mode) & irq_request_idle) == 0u);
     acknowledge_irq(one_shot, timer.irq_bit);
 
-    jojo::psx_bus_tick(one_shot, 1u); // reset cycle
+    jojo::psx_bus_tick(one_shot, 2u); // target-reset hold
     jojo::psx_bus_tick(one_shot, 1u); // later target is suppressed in one-shot mode
     TIMER_REQUIRE((one_shot.interrupt_status & timer.irq_bit) == 0u);
     TIMER_REQUIRE((read16(one_shot, timer.mode) & irq_request_idle) == 0u);
@@ -256,6 +276,7 @@ void test_mode_status_bits_and_clear_on_read() {
         TIMER_REQUIRE((after_write & (reached_target | reached_ffff)) == 0u);
 
         require_write16(bus, timer.target, 2u);
+        jojo::psx_bus_tick(bus, 1u); // MODE-write hold
         jojo::psx_bus_tick(bus, 2u);
         const auto target_first = read16(bus, timer.mode);
         TIMER_REQUIRE((target_first & reached_target) != 0u);
@@ -265,6 +286,7 @@ void test_mode_status_bits_and_clear_on_read() {
         TIMER_REQUIRE((target_second & reached_target) == 0u);
 
         require_write16(bus, timer.current, 0xfffeu);
+        jojo::psx_bus_tick(bus, 1u); // CURRENT-write hold
         jojo::psx_bus_tick(bus, 1u);
         const auto ffff_first = read32(bus, timer.mode);
         TIMER_REQUIRE((ffff_first & reached_ffff) != 0u);
