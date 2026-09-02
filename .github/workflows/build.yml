@@ -19,7 +19,9 @@ jobs:
       - name: Build
         run: cmake --build build --parallel 2
       - name: Production readiness gate
-        run: cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadiness.cmake
+        run: |
+          cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadiness.cmake
+          cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadinessNegative.cmake
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
@@ -33,7 +35,9 @@ jobs:
       - name: Build Release
         run: cmake --build build --config Release --parallel 2
       - name: Production readiness gate
-        run: cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadiness.cmake
+        run: |
+          cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadiness.cmake
+          cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadinessNegative.cmake
       - name: Test Release
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Upload single executable
