@@ -85,6 +85,9 @@ Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
         case Sh4ReferenceStopReason::block_limit:
             result.stop_reason = DreamcastBootStopReason::block_limit;
             break;
+        case Sh4ReferenceStopReason::sleep:
+            result.stop_reason = DreamcastBootStopReason::sleep;
+            break;
     }
     return Result<DreamcastBootRunResult>::success(std::move(result));
 }
