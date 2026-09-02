@@ -298,6 +298,24 @@ inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noe
     event.status = enabled_busy;
 }
 
+inline void disable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noexcept {
+    constexpr std::uint32_t handle_mask = 0xffff0000u, handle_base = 0xf1000000u;
+    initialize_scph1001_event_slots(runtime);
+    if ((handle & handle_mask) != handle_base) return;
+    const auto index = handle & 0xffffu;
+    if (index >= runtime.bios.event_capacity || !runtime.bios.events[index].allocated) return;
+    runtime.bios.events[index].status = 0x1000u;
+}
+
+inline void close_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noexcept {
+    constexpr std::uint32_t handle_mask = 0xffff0000u, handle_base = 0xf1000000u;
+    initialize_scph1001_event_slots(runtime);
+    if ((handle & handle_mask) != handle_base) return;
+    const auto index = handle & 0xffffu;
+    if (index >= runtime.bios.event_capacity || !runtime.bios.events[index].allocated) return;
+    runtime.bios.events[index] = PsxBiosEvent{};
+}
+
 [[nodiscard]] inline std::uint32_t test_psx_bios_event(
     PsxRuntime& runtime, std::uint32_t handle) noexcept {
     constexpr std::uint32_t handle_mask = 0xffff0000u;
@@ -338,6 +356,13 @@ struct PsxBiosEventDelivery {
         return handle_base | i;
     }
     return 0xffffffffu;
+}
+
+inline void close_psx_bios_thread(PsxRuntime& runtime, std::uint32_t handle) noexcept {
+    if ((handle & 0xff000000u) != 0xff000000u) return;
+    const auto index = handle & 0x00ffffffu;
+    if (index >= runtime.bios.thread_capacity) return;
+    runtime.bios.threads[index].allocated = false;
 }
 
 [[nodiscard]] inline bool change_psx_bios_thread(
@@ -859,6 +884,13 @@ inline void advance_psx_timer1_hblank(PsxRuntime& runtime,
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
 
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x09u) {
+        close_psx_bios_event(runtime, runtime.cpu.gpr[4]);
+        runtime.cpu.gpr[2] = 1u;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
     if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x0au) {
         const auto ready = test_psx_bios_event(runtime, runtime.cpu.gpr[4]);
         if (ready == 0u) {
@@ -885,9 +917,23 @@ inline void advance_psx_timer1_hblank(PsxRuntime& runtime,
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
 
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x0du) {
+        disable_psx_bios_event(runtime, runtime.cpu.gpr[4]);
+        runtime.cpu.gpr[2] = 1u;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
     if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x0eu) {
         runtime.cpu.gpr[2] = open_psx_bios_thread(
             runtime, runtime.cpu.gpr[4], runtime.cpu.gpr[5], runtime.cpu.gpr[6]);
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x0fu) {
+        close_psx_bios_thread(runtime, runtime.cpu.gpr[4]);
+        runtime.cpu.gpr[2] = 1u;
         return_from_psx_bios_call(runtime);
         return {PsxR3000aStepReason::ok, instruction_pc, 0u};
     }
