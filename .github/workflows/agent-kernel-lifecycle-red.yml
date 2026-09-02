@@ -1,4 +1,4 @@
-name: agent-kernel-lifecycle-red
+name: agent-kernel-lifecycle-patch
 
 on:
   push:
@@ -7,14 +7,142 @@ on:
     paths:
       - .github/workflows/agent-kernel-lifecycle-red.yml
 
+permissions:
+  contents: write
+
 jobs:
-  red:
+  patch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Apply BIOS lifecycle implementation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/core/psx_runtime.h')
+          text = path.read_text()
+
+          enable_anchor = '''inline void enable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noexcept {
+    constexpr std::uint32_t handle_mask = 0xffff0000u;
+    constexpr std::uint32_t handle_base = 0xf1000000u;
+    constexpr std::uint32_t enabled_busy = 0x2000u;
+
+    initialize_scph1001_event_slots(runtime);
+    if ((handle & handle_mask) != handle_base) return;
+    const auto index = handle & 0xffffu;
+    if (index >= runtime.bios.event_capacity) return;
+    auto& event = runtime.bios.events[index];
+    if (!event.allocated) return;
+    event.status = enabled_busy;
+}
+'''
+          event_helpers = enable_anchor + '''
+inline void disable_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noexcept {
+    constexpr std::uint32_t handle_mask = 0xffff0000u;
+    constexpr std::uint32_t handle_base = 0xf1000000u;
+    constexpr std::uint32_t disabled = 0x1000u;
+
+    initialize_scph1001_event_slots(runtime);
+    if ((handle & handle_mask) != handle_base) return;
+    const auto index = handle & 0xffffu;
+    if (index >= runtime.bios.event_capacity) return;
+    auto& event = runtime.bios.events[index];
+    if (!event.allocated) return;
+    event.status = disabled;
+}
+
+inline void close_psx_bios_event(PsxRuntime& runtime, std::uint32_t handle) noexcept {
+    constexpr std::uint32_t handle_mask = 0xffff0000u;
+    constexpr std::uint32_t handle_base = 0xf1000000u;
+
+    initialize_scph1001_event_slots(runtime);
+    if ((handle & handle_mask) != handle_base) return;
+    const auto index = handle & 0xffffu;
+    if (index >= runtime.bios.event_capacity) return;
+    auto& event = runtime.bios.events[index];
+    if (!event.allocated) return;
+    event = PsxBiosEvent{};
+}
+'''
+          assert text.count(enable_anchor) == 1, 'event helper anchor changed'
+          text = text.replace(enable_anchor, event_helpers, 1)
+
+          thread_anchor = '''    return 0xffffffffu;
+}
+
+[[nodiscard]] inline bool change_psx_bios_thread(
+'''
+          thread_insert = '''    return 0xffffffffu;
+}
+
+inline void close_psx_bios_thread(PsxRuntime& runtime,
+                                  std::uint32_t handle) noexcept {
+    constexpr std::uint32_t handle_mask = 0xff000000u;
+    constexpr std::uint32_t handle_base = 0xff000000u;
+    if ((handle & handle_mask) != handle_base) return;
+    const auto index = handle & 0x00ffffffu;
+    if (index >= runtime.bios.thread_capacity) return;
+    runtime.bios.threads[index].allocated = false;
+}
+
+[[nodiscard]] inline bool change_psx_bios_thread(
+'''
+          assert text.count(thread_anchor) == 1, 'thread helper anchor changed'
+          text = text.replace(thread_anchor, thread_insert, 1)
+
+          event_call_anchor = '''    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x0au) {
+'''
+          event_calls = '''    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x09u) {
+        close_psx_bios_event(runtime, runtime.cpu.gpr[4]);
+        runtime.cpu.gpr[2] = 1u;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+''' + event_call_anchor
+          assert text.count(event_call_anchor) == 1, 'CloseEvent call anchor changed'
+          text = text.replace(event_call_anchor, event_calls, 1)
+
+          disable_anchor = '''    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x0eu) {
+'''
+          disable_call = '''    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x0du) {
+        disable_psx_bios_event(runtime, runtime.cpu.gpr[4]);
+        runtime.cpu.gpr[2] = 1u;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+''' + disable_anchor
+          assert text.count(disable_anchor) == 1, 'DisableEvent call anchor changed'
+          text = text.replace(disable_anchor, disable_call, 1)
+
+          close_th_anchor = '''    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x10u) {
+'''
+          close_th_call = '''    if (instruction_pc == 0x000000b0u && runtime.cpu.gpr[9] == 0x0fu) {
+        close_psx_bios_thread(runtime, runtime.cpu.gpr[4]);
+        runtime.cpu.gpr[2] = 1u;
+        return_from_psx_bios_call(runtime);
+        return {PsxR3000aStepReason::ok, instruction_pc, 0u};
+    }
+
+''' + close_th_anchor
+          assert text.count(close_th_anchor) == 1, 'CloseTh call anchor changed'
+          text = text.replace(close_th_anchor, close_th_call, 1)
+
+          path.write_text(text)
+          PY
       - name: Configure lifecycle contract
         run: cmake -S tests/psx_card_init -B build/psx_card_init -DCMAKE_BUILD_TYPE=Release
       - name: Build lifecycle contract
         run: cmake --build build/psx_card_init --parallel 2
       - name: Run lifecycle contract
         run: ./build/psx_card_init/jojo_psx_card_init_tests
+      - name: Commit BIOS lifecycle implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/core/psx_runtime.h
+          git commit -m "feat: implement PS1 BIOS resource lifecycle"
+          git push origin HEAD:feature/offline-product-rebuild
