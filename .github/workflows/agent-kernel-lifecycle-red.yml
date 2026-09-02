@@ -1,0 +1,20 @@
+name: agent-kernel-lifecycle-red
+
+on:
+  push:
+    branches:
+      - feature/offline-product-rebuild
+    paths:
+      - .github/workflows/agent-kernel-lifecycle-red.yml
+
+jobs:
+  red:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure lifecycle contract
+        run: cmake -S tests/psx_card_init -B build/psx_card_init -DCMAKE_BUILD_TYPE=Release
+      - name: Build lifecycle contract
+        run: cmake --build build/psx_card_init --parallel 2
+      - name: Run lifecycle contract
+        run: ./build/psx_card_init/jojo_psx_card_init_tests
