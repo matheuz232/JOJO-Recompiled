@@ -38,14 +38,14 @@ jobs:
           new_block = '''    const bool timer0_clock_allowed =
               !timer0_sync || timer0_sync_mode == 1u ||
               (timer0_sync_mode == 3u && bus.timer0_sync_started);
-          constexpr std::uint64_t cpu_clock_hz = 33'868'800u;
-          constexpr std::uint64_t video_clock_hz = 53'693'175u;
+          constexpr std::uint64_t timer0_cpu_clock_hz = 33'868'800u;
+          constexpr std::uint64_t timer0_video_clock_hz = 53'693'175u;
           constexpr std::uint16_t dotclock_phase_period = 280u;
           const auto dotclock_numerator =
               bus.timer0_dotclock_cpu_phase +
-              static_cast<std::uint64_t>(cpu_cycles) * video_clock_hz;
-          const auto elapsed_video_clocks = dotclock_numerator / cpu_clock_hz;
-          bus.timer0_dotclock_cpu_phase = dotclock_numerator % cpu_clock_hz;
+              static_cast<std::uint64_t>(cpu_cycles) * timer0_video_clock_hz;
+          const auto elapsed_video_clocks = dotclock_numerator / timer0_cpu_clock_hz;
+          bus.timer0_dotclock_cpu_phase = dotclock_numerator % timer0_cpu_clock_hz;
           const auto video_phase_before = bus.timer0_video_clock_phase;
           bus.timer0_video_clock_phase = static_cast<std::uint16_t>(
               (static_cast<std::uint64_t>(video_phase_before) + elapsed_video_clocks) %
