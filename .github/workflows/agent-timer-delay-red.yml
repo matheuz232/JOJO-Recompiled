@@ -41,22 +41,31 @@ jobs:
               assert text.count(old) == 1, f'{current} write anchor changed'
               text = text.replace(old, new, 1)
 
-              old_mode_reset = f'        bus.{reset} = false;\n'
-              new_mode_reset = f'        bus.{reset} = 0u;\n        bus.{write} = 1u;\n'
-              assert text.count(old_mode_reset) == 1, f'timer{timer} mode reset anchor changed'
-              text = text.replace(old_mode_reset, new_mode_reset, 1)
+              old_mode = (
+                  f'        bus.{current} = 0u;\n'
+                  f'        bus.{reset} = false;\n'
+                  f'        bus.timer{timer}_irq_fired = false;\n'
+              )
+              new_mode = (
+                  f'        bus.{current} = 0u;\n'
+                  f'        bus.{reset} = 0u;\n'
+                  f'        bus.{write} = 1u;\n'
+                  f'        bus.timer{timer}_irq_fired = false;\n'
+              )
+              assert text.count(old_mode) == 1, f'timer{timer} mode reset anchor changed'
+              text = text.replace(old_mode, new_mode, 1)
 
-          old_sig = "                                              bool& reset_pending,\n                                              bool& irq_fired,\n"
+          old_sig = "                                              bool& reset_hold_cycles,\n                                              bool& irq_fired,\n"
           new_sig = "                                              std::uint8_t& reset_hold_cycles,\n                                              std::uint8_t& write_hold_cycles,\n                                              bool& irq_fired,\n"
           assert text.count(old_sig) == 1, 'root-counter signature anchor changed'
           text = text.replace(old_sig, new_sig, 1)
 
-          old_start = "        if (reset_pending) {\n            current = 0u;\n            reset_pending = false;\n            continue;\n        }\n"
+          old_start = "        if (reset_hold_cycles) {\n            current = 0u;\n            reset_hold_cycles = false;\n            continue;\n        }\n"
           new_start = "        if (write_hold_cycles != 0u) {\n            --write_hold_cycles;\n            continue;\n        }\n        if (reset_hold_cycles != 0u) {\n            current = 0u;\n            --reset_hold_cycles;\n            continue;\n        }\n"
           assert text.count(old_start) == 1, 'root-counter hold block anchor changed'
           text = text.replace(old_start, new_start, 1)
 
-          old_end = "        if (((mode & reset_at_target) != 0u && hit_target) ||\n            ((mode & reset_at_target) == 0u && hit_ffff)) {\n            reset_pending = true;\n        }\n"
+          old_end = "        if (((mode & reset_at_target) != 0u && hit_target) ||\n            ((mode & reset_at_target) == 0u && hit_ffff)) {\n            reset_hold_cycles = true;\n        }\n"
           new_end = "        if ((mode & reset_at_target) != 0u && hit_target) {\n            reset_hold_cycles = 2u;\n        } else if ((mode & reset_at_target) == 0u && hit_ffff) {\n            reset_hold_cycles = 1u;\n        }\n"
           assert text.count(old_end) == 1, 'root-counter reset block anchor changed'
           text = text.replace(old_end, new_end, 1)
