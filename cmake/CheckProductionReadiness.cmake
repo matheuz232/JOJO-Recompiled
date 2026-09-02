@@ -1,3 +1,5 @@
+cmake_policy(SET CMP0057 NEW)
+
 if(NOT DEFINED JOJO_SOURCE_DIR)
   message(FATAL_ERROR "JOJO_SOURCE_DIR is required")
 endif()
