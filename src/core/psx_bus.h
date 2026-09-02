@@ -1566,6 +1566,7 @@ inline void psx_bus_tick_root_counter(PsxBus& bus,
     constexpr std::uint16_t irq_at_target = 1u << 4u;
     constexpr std::uint16_t irq_at_ffff = 1u << 5u;
     constexpr std::uint16_t repeat_irq = 1u << 6u;
+    constexpr std::uint16_t toggle_irq = 1u << 7u;
     for (std::uint32_t tick = 0u; tick < ticks; ++tick) {
         if (reset_pending) {
             current = 0u;
@@ -1581,8 +1582,17 @@ inline void psx_bus_tick_root_counter(PsxBus& bus,
             (hit_target && (mode & irq_at_target) != 0u) ||
             (hit_ffff && (mode & irq_at_ffff) != 0u);
         if (irq_enabled && (((mode & repeat_irq) != 0u) || !irq_fired)) {
-            bus.interrupt_status = static_cast<std::uint16_t>(
-                bus.interrupt_status | irq_bit);
+            bool assert_irq = true;
+            if ((mode & toggle_irq) != 0u) {
+                mode = static_cast<std::uint16_t>(
+                    mode ^ PsxBus::timer_mode_interrupt_request);
+                assert_irq =
+                    (mode & PsxBus::timer_mode_interrupt_request) == 0u;
+            }
+            if (assert_irq) {
+                bus.interrupt_status = static_cast<std::uint16_t>(
+                    bus.interrupt_status | irq_bit);
+            }
             if ((mode & repeat_irq) == 0u) irq_fired = true;
         }
         if (((mode & reset_at_target) != 0u && hit_target) ||
