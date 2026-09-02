@@ -15,6 +15,7 @@ enum class DreamcastBootStopReason {
     end_of_program,
     left_program,
     block_limit,
+    sleep,
     unsupported_opcode,
     unmapped_bus_access,
 };
