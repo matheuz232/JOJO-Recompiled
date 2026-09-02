@@ -103,6 +103,46 @@ static void test_boot_harness_routes_pvr2_spg_timing_access() {
     CHECK(run.value.operations_executed == 1u);
 }
 
+static void test_boot_harness_routes_maple_enable_register() {
+    jojo::DreamcastBootProgram program{};
+    append_word(program, 0x2122u); // MOV.L R2,@R1
+    append_word(program, 0x6312u); // MOV.L @R1,R3
+
+    jojo::Sh4ReferenceState initial{};
+    initial.r[1] = 0xA05F6C14u; // cached alias of SB_MDEN
+    initial.r[2] = 0x00000001u;
+
+    const auto run = jojo::run_dreamcast_boot_reference(program, initial, 32u);
+    CHECK(run);
+    if (!run) return;
+
+    CHECK(run.value.stop_reason == jojo::DreamcastBootStopReason::end_of_program);
+    CHECK(!run.value.bus_fault.has_value());
+    CHECK(run.value.state.r[3] == 1u);
+    CHECK(run.value.operations_executed == 2u);
+}
+
+static void test_boot_harness_keeps_unimplemented_maple_dma_start_diagnostic() {
+    jojo::DreamcastBootProgram program{};
+    append_word(program, 0x2122u); // MOV.L R2,@R1
+
+    jojo::Sh4ReferenceState initial{};
+    initial.r[1] = 0xA05F6C18u; // cached alias of SB_MDST
+    initial.r[2] = 0x00000001u;
+
+    const auto run = jojo::run_dreamcast_boot_reference(program, initial, 32u);
+    CHECK(run);
+    if (!run) return;
+
+    CHECK(run.value.stop_reason == jojo::DreamcastBootStopReason::unmapped_bus_access);
+    CHECK(run.value.bus_fault.has_value());
+    if (run.value.bus_fault) {
+        CHECK(run.value.bus_fault->address == 0xA05F6C18u);
+        CHECK(run.value.bus_fault->region == jojo::DreamcastBusRegion::maple);
+        CHECK(run.value.bus_fault->access == jojo::DreamcastBusAccess::write);
+    }
+}
+
 static void test_block_limit_is_reported_without_claiming_successful_boot() {
     jojo::DreamcastBootProgram program{};
     append_word(program, 0xAFFEu); // BRA -4 -> branches to itself
@@ -138,6 +178,8 @@ int main() {
     test_preserves_initial_cpu_state_and_ram_side_effects();
     test_boot_harness_routes_system_asic_interrupt_mask_access();
     test_boot_harness_routes_pvr2_spg_timing_access();
+    test_boot_harness_routes_maple_enable_register();
+    test_boot_harness_keeps_unimplemented_maple_dma_start_diagnostic();
     test_block_limit_is_reported_without_claiming_successful_boot();
     test_privileged_sleep_does_not_claim_end_of_program();
     if (failures) {
