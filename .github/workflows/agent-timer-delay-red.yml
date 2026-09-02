@@ -20,6 +20,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
           path = Path('src/core/psx_bus.h')
           text = path.read_text()
 
@@ -55,10 +56,12 @@ jobs:
               assert text.count(old_mode) == 1, f'timer{timer} mode reset anchor changed'
               text = text.replace(old_mode, new_mode, 1)
 
-          old_sig = "                                              bool& reset_hold_cycles,\n                                              bool& irq_fired,\n"
-          new_sig = "                                              std::uint8_t& reset_hold_cycles,\n                                              std::uint8_t& write_hold_cycles,\n                                              bool& irq_fired,\n"
-          assert text.count(old_sig) == 1, 'root-counter signature anchor changed'
-          text = text.replace(old_sig, new_sig, 1)
+          text, count = re.subn(
+              r'bool& reset_hold_cycles,\n\s+bool& irq_fired,',
+              'std::uint8_t& reset_hold_cycles,\n                                              std::uint8_t& write_hold_cycles,\n                                              bool& irq_fired,',
+              text,
+              count=1)
+          assert count == 1, 'root-counter signature anchor changed'
 
           old_start = "        if (reset_hold_cycles) {\n            current = 0u;\n            reset_hold_cycles = false;\n            continue;\n        }\n"
           new_start = "        if (write_hold_cycles != 0u) {\n            --write_hold_cycles;\n            continue;\n        }\n        if (reset_hold_cycles != 0u) {\n            current = 0u;\n            --reset_hold_cycles;\n            continue;\n        }\n"
@@ -71,11 +74,10 @@ jobs:
           text = text.replace(old_end, new_end, 1)
 
           for timer in range(3):
-              old = f'bus.timer{timer}_reset_hold_cycles,\n'
-              new = f'bus.timer{timer}_reset_hold_cycles, bus.timer{timer}_write_hold_cycles,\n'
-              count = text.count(old)
+              pattern = rf'bus\.timer{timer}_reset_hold_cycles,(\s*)bus\.timer{timer}_irq_fired'
+              repl = rf'bus.timer{timer}_reset_hold_cycles, bus.timer{timer}_write_hold_cycles,\1bus.timer{timer}_irq_fired'
+              text, count = re.subn(pattern, repl, text)
               assert count >= 1, f'timer{timer} root-counter call anchors changed'
-              text = text.replace(old, new)
 
           path.write_text(text)
           PY
