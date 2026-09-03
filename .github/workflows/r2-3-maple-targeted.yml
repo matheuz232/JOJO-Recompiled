@@ -1,0 +1,21 @@
+name: r2-3-maple-targeted
+
+on:
+  push:
+    branches: [feature/r2-3-sleep-boundary]
+
+permissions:
+  contents: read
+
+jobs:
+  maple-targeted:
+    if: startsWith(github.event.head_commit.message, '[r2.3-targeted]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure targeted Maple package
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build Maple and boot-runner targets
+        run: cmake --build build --parallel 2 --target jojo_dreamcast_maple_tests jojo_dreamcast_boot_runner_tests
+      - name: Run targeted R2.3 contracts
+        run: ctest --test-dir build --output-on-failure -R "jojo_dreamcast_(maple|boot_runner)_tests"
