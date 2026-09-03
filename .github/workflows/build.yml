@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   portable-core:
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, '[r2.5-targeted]')
     name: Portable core / Linux
     runs-on: ubuntu-latest
     steps:
@@ -25,9 +24,12 @@ jobs:
           cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadinessNegative.cmake
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: R2.5 direct UDP transport contract
+        run: |
+          c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc tests/test_network_transport.cpp src/core/network_protocol.cpp -o network_transport_tests
+          ./network_transport_tests
 
   windows-x64:
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, '[r2.5-targeted]')
     name: Windows x64 / MSVC 2022
     runs-on: windows-2022
     steps:
@@ -42,6 +44,11 @@ jobs:
           cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadinessNegative.cmake
       - name: Test Release
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: R2.5 direct UDP transport contract
+        shell: cmd
+        run: |
+          cl /nologo /std:c++20 /EHsc /W4 /permissive- /utf-8 /Isrc tests\test_network_transport.cpp src\core\network_protocol.cpp /Fe:network_transport_tests.exe
+          network_transport_tests.exe
       - name: Upload single executable
         uses: actions/upload-artifact@v4
         with:
