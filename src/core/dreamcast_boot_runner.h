@@ -2,6 +2,7 @@
 
 #include "core/dreamcast_bus.h"
 #include "core/dreamcast_memory.h"
+#include "core/input.h"
 #include "core/result.h"
 #include "core/sh4_reference_executor.h"
 
@@ -34,6 +35,7 @@ struct DreamcastBootRunResult {
 [[nodiscard]] Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
     const DreamcastBootProgram& program,
     Sh4ReferenceState initial_state = {},
-    std::size_t max_blocks = 100000u);
+    std::size_t max_blocks = 100000u,
+    const ResolvedInputFrame& input = {});
 
 }

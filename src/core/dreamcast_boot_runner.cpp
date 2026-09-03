@@ -13,7 +13,8 @@ namespace jojo {
 Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
     const DreamcastBootProgram& program,
     Sh4ReferenceState initial_state,
-    std::size_t max_blocks) {
+    std::size_t max_blocks,
+    const ResolvedInputFrame& input) {
     if (max_blocks == 0u) {
         return Result<DreamcastBootRunResult>::failure(
             ErrorCode::invalid_argument, "Dreamcast boot block limit must be non-zero");
@@ -55,7 +56,7 @@ Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
 
     DreamcastReferenceBus bus(result.memory);
     DreamcastSystemAsic system_asic;
-    DreamcastMaple maple(result.memory, system_asic);
+    DreamcastMaple maple(result.memory, system_asic, input);
     DreamcastPvr2 pvr2(system_asic);
     bus.attach_device(DreamcastBusRegion::system_asic, system_asic);
     bus.attach_device(DreamcastBusRegion::maple, maple);
