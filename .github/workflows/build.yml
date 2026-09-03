@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   portable-core:
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, '[r2.3-targeted]')
     name: Portable core / Linux
     runs-on: ubuntu-latest
     steps:
@@ -27,7 +26,6 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   windows-x64:
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, '[r2.3-targeted]')
     name: Windows x64 / MSVC 2022
     runs-on: windows-2022
     steps:
