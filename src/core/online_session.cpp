@@ -161,6 +161,46 @@ Result<std::vector<NetworkPacket>> OnlineSessionController::poll(
     return Result<std::vector<NetworkPacket>>::success(std::move(result.value));
 }
 
+Result<void> OnlineSessionController::send(const NetworkPacket& packet,
+                                           std::uint64_t now_ms) {
+    if (view_.state != OnlineSessionState::connected || !session_) {
+        return Result<void>::failure(ErrorCode::invalid_argument,
+                                     "online gameplay send requires connection");
+    }
+
+    const auto result = session_->send(packet, now_ms);
+    if (!result) {
+        if (result.error == ErrorCode::invalid_argument) return result;
+        set_fault(result.error, result.detail);
+        return result;
+    }
+
+    refresh_view();
+    return Result<void>::success();
+}
+
+Result<void> OnlineSessionController::disconnect(std::uint64_t now_ms) {
+    if (view_.state != OnlineSessionState::connected || !session_) {
+        return Result<void>::failure(ErrorCode::invalid_argument,
+                                     "online disconnect requires connection");
+    }
+
+    const auto result = session_->disconnect(now_ms);
+    if (!result) {
+        if (result.error == ErrorCode::invalid_argument) return result;
+        set_fault(result.error, result.detail);
+        return result;
+    }
+
+    refresh_view();
+    return Result<void>::success();
+}
+
+void OnlineSessionController::reset() noexcept {
+    session_.reset();
+    view_ = OnlineSessionViewState{};
+}
+
 void OnlineSessionController::refresh_view() noexcept {
     if (!session_) return;
 
