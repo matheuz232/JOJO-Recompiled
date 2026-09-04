@@ -29,7 +29,8 @@ The package must provide:
 - RTT, jitter, packet loss and packet counters through a view snapshot;
 - deterministic caller-supplied time for connect, poll, reconnect and disconnect behavior;
 - gameplay send/delivery only while product state is connected;
-- reset/retry after terminal disconnect or user-input failure;
+- validation retries that do not poison a healthy lifecycle state;
+- reset/retry after terminal or operationally faulted sessions;
 - clear errors suitable for future UI presentation.
 
 ## 4. Non-goals
@@ -184,10 +185,12 @@ The controller does not synthesize gameplay packets and does not own rollback st
 
 `reset()`:
 
-- destroys the owned `DirectUdpSession`;
+- is valid from every product state;
+- destroys the owned `DirectUdpSession` when one exists;
 - clears endpoints, role, telemetry snapshot and last error;
 - returns the controller to `inactive`;
-- allows a new host or join operation.
+- allows a new host or join operation;
+- may be used as a local cancel for `waiting_for_peer`, `connecting` or `reconnecting`.
 
 Reset is local only; it must not pretend to notify a peer. A connected user must call `disconnect` first when graceful peer notification is desired.
 
@@ -205,7 +208,7 @@ Examples:
 - send while not connected;
 - disconnect while not connected.
 
-These return a failure but do not turn an otherwise healthy controller into `faulted`.
+These return a failure but do not turn an otherwise healthy controller into `faulted`. If the controller is still `inactive`, corrected input may be retried directly without calling `reset()`.
 
 ### 8.2 Operational errors
 
@@ -244,7 +247,7 @@ Required coverage:
 9. explicit disconnect propagates to the peer and both sides become disconnected after polling;
 10. send/disconnect misuse returns validation errors without incorrectly faulting the controller;
 11. operational failures that can be deterministically induced enter `faulted` and preserve the error;
-12. `reset()` clears terminal/faulted state and permits a fresh session;
+12. `reset()` clears terminal/faulted state, cancels non-terminal attempts locally, and permits a fresh session;
 13. packets from an unpinned third endpoint do not change the product peer or liveness-derived state.
 
 The existing `test_network_transport.cpp` remains the transport contract; controller tests must not duplicate low-level protocol assertions unnecessarily.
