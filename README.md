@@ -12,37 +12,21 @@ The end-user product is intentionally one executable:
 JOJO-Recompiled.exe
 ```
 
-On first launch it asks for the user's own supported game image and prepares local converted data under `%LOCALAPPDATA%\JOJO Recompiled\game`. Once the native backend is complete, later launches go directly into the game. Graphics, controls, audio, mods, training tools and Online belong to the in-game menus rather than an external launcher.
+On first launch it asks for the user's own supported game image and prepares local converted data under `%LOCALAPPDATA%\JOJO Recompiled\game`. Later launches should go directly into the game only after the production-readiness gates are actually satisfied. Graphics, controls, audio, mods, training tools and Online belong to the in-game menus rather than an external launcher.
 
-## Current production milestone
+## Current production program
 
-Implemented in the portable core:
+The reusable architecture milestones M1–M8 are complete within their scoped contracts. The active program is **R2 — Production completion**, which requires evidence for real commercial-game integration before any global playability claim.
 
-- C++20 + CMake/CTest foundation.
-- `.iso`, `.bin`, `.cue`, `.gdi` source validation/fingerprinting.
-- Source-independent conversion manifest.
-- Event-driven conversion progress API (no fake timer progress).
-- Persistent graphics model prepared for the in-game renderer:
-  - 640×480 through 7680×4320 (8K)
-  - 4:3 / 16:9 / 16:10 / 21:9 / 32:9
-  - texture filtering Off / 2× / 4× / 8× / 16×
-  - MSAA Off / 2× / 4× / 8×
-  - windowed / fullscreen / borderless fullscreen
-  - V-Sync
-  - automatic or explicit UI scale (75–150%)
-  - 16:9-safe or expanded HUD area
-- Per-action input binding model.
+Canonical machine-checkable status: [`docs/architecture/PRODUCTION-READINESS.tsv`](docs/architecture/PRODUCTION-READINESS.tsv).
 
-Implemented for Windows:
+Commercial-game integration is not yet verified. In particular, a supported commercial revision still requires independently verified fingerprints from a legally supplied user image, and real game boot/render/audio/input/gameplay evidence remains outside the completed reusable contracts.
 
-- one shipping target, `JOJO-Recompiled.exe`;
-- JoJo-inspired dark/magenta/purple/gold first-run preparation screen;
-- user image picker;
-- real conversion progress percentage + stage log;
-- converted data stored in `%LOCALAPPDATA%\JOJO Recompiled`;
-- UTF-8 source compilation under MSVC.
+Implemented in the portable core includes the C++20/CMake/CTest foundation, disc-media parsing and revision infrastructure, deterministic SH-4/runtime contracts, presentation/settings/input contracts, mod runtime, training laboratory and rollback/networking core.
 
-The game-specific native recompiler is **not finished yet**. A converted foundation manifest therefore still reports `pending-game-specific-recompiler`; the application does not pretend the commercial game is already playable.
+Implemented for Windows includes the single shipping target `JOJO-Recompiled.exe`, first-run image selection/conversion UI, `%LOCALAPPDATA%\JOJO Recompiled` storage, platform presentation/input adapters and Windows/MSVC CI coverage.
+
+The generic native backend architecture is implemented, but that is not equivalent to verified commercial-game execution. Conversion/runtime readiness must remain truthful until R2.2–R2.6 evidence exists.
 
 ## Build on Windows
 
@@ -50,8 +34,8 @@ See [`docs/BUILD-WINDOWS.md`](docs/BUILD-WINDOWS.md).
 
 ## Architecture / roadmap
 
-See [`docs/architecture/PRODUCTION-ROADMAP.md`](docs/architecture/PRODUCTION-ROADMAP.md) for the planned disc parser, native recompiler, widescreen/HiDPI renderer, in-game settings, mod API, training frame meter, deterministic rollback core and Online modes.
+See [`docs/architecture/PRODUCTION-ROADMAP.md`](docs/architecture/PRODUCTION-ROADMAP.md) for the reusable architecture milestones and [`docs/superpowers/specs/2026-09-01-production-completion-design.md`](docs/superpowers/specs/2026-09-01-production-completion-design.md) for the evidence-based R2 production-completion program.
 
 ## CI
 
-GitHub Actions builds/tests the portable core on Linux and the complete x64 application on `windows-latest`. The Windows job uploads only `JOJO-Recompiled.exe` as its application artifact.
+GitHub Actions builds/tests the portable core on Linux and the complete x64 application on `windows-2022`. Both jobs run the production-readiness gate, and the Windows job uploads only `JOJO-Recompiled.exe` as its application artifact.

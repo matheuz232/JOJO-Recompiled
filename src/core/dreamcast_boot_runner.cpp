@@ -2,6 +2,7 @@
 
 #include "core/dreamcast_bus.h"
 #include "core/dreamcast_interrupts.h"
+#include "core/dreamcast_maple.h"
 #include "core/dreamcast_pvr2.h"
 #include "core/dreamcast_system_asic.h"
 #include "core/sh4_cfg.h"
@@ -12,7 +13,8 @@ namespace jojo {
 Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
     const DreamcastBootProgram& program,
     Sh4ReferenceState initial_state,
-    std::size_t max_blocks) {
+    std::size_t max_blocks,
+    const ResolvedInputFrame& input) {
     if (max_blocks == 0u) {
         return Result<DreamcastBootRunResult>::failure(
             ErrorCode::invalid_argument, "Dreamcast boot block limit must be non-zero");
@@ -54,8 +56,10 @@ Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
 
     DreamcastReferenceBus bus(result.memory);
     DreamcastSystemAsic system_asic;
+    DreamcastMaple maple(result.memory, system_asic, input);
     DreamcastPvr2 pvr2(system_asic);
     bus.attach_device(DreamcastBusRegion::system_asic, system_asic);
+    bus.attach_device(DreamcastBusRegion::maple, maple);
     bus.attach_device(DreamcastBusRegion::pvr_registers, pvr2);
     const auto irq_boundary_hook = make_dreamcast_system_irq_boundary_hook(system_asic);
 
@@ -84,6 +88,9 @@ Result<DreamcastBootRunResult> run_dreamcast_boot_reference(
             break;
         case Sh4ReferenceStopReason::block_limit:
             result.stop_reason = DreamcastBootStopReason::block_limit;
+            break;
+        case Sh4ReferenceStopReason::sleep:
+            result.stop_reason = DreamcastBootStopReason::sleep;
             break;
     }
     return Result<DreamcastBootRunResult>::success(std::move(result));
