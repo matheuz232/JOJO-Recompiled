@@ -84,7 +84,7 @@ struct OnlineSessionViewState {
 
 Add `src/core/online_session.cpp` to `add_library(jojo_core STATIC ...)` immediately after `src/core/network_protocol.cpp`.
 
-Add the test target near the existing rollback/network-related tests:
+Add:
 
 ```cmake
 add_executable(jojo_online_session_tests tests/test_online_session.cpp)
@@ -94,7 +94,7 @@ add_test(NAME jojo_online_session_tests COMMAND jojo_online_session_tests)
 
 - [ ] **Step 2: Write the initial RED parser contract**
 
-Create `tests/test_online_session.cpp` with a tiny assertion harness and parser-only cases. The tests must include these exact accepted/rejected forms:
+Create `tests/test_online_session.cpp`:
 
 ```cpp
 #include "core/online_session.h"
@@ -128,7 +128,8 @@ void test_endpoint_parser() {
              "127.0.0.1.2:1234", "host:1234", "127.0.0.1 :1234",
              "127.0.0.1: 1234", "::1:1234"}) {
         const auto result = jojo::parse_direct_endpoint(bad);
-        expect(!result, ("reject endpoint: " + bad).c_str());
+        const auto message = "reject endpoint: " + bad;
+        expect(!result, message.c_str());
         if (!result) {
             expect(result.error == jojo::ErrorCode::invalid_argument,
                    "malformed endpoint uses invalid_argument");
@@ -146,18 +147,16 @@ int main() {
 
 - [ ] **Step 3: Run the new target and verify RED**
 
-Run:
-
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --target jojo_online_session_tests --parallel 2
 ```
 
-Expected: build fails because `core/online_session.h` and the parser API do not yet exist.
+Expected: FAIL because `core/online_session.h` does not exist.
 
 - [ ] **Step 4: Add the minimal public header**
 
-Create `src/core/online_session.h` with these declarations:
+Create `src/core/online_session.h`:
 
 ```cpp
 #pragma once
@@ -208,29 +207,99 @@ class OnlineSessionController;
 
 - [ ] **Step 5: Implement the pure parser/formatter minimally**
 
-Create `src/core/online_session.cpp`. Use manual decimal parsing rather than locale-sensitive streams or hostname APIs. The parser must:
-
-1. require exactly one `:` separator;
-2. reject an empty address or port;
-3. reject any whitespace;
-4. split the address into exactly four non-empty decimal octets;
-5. reject non-digits and values above 255;
-6. parse a decimal port and reject 0 or values above 65535;
-7. return `ErrorCode::invalid_argument` for all user-input failures.
-
-Use stable details from this set:
+Create `src/core/online_session.cpp` with a manual decimal parser so no hostname/DNS or locale behavior can enter the contract:
 
 ```cpp
-"direct endpoint must use A.B.C.D:PORT"
-"direct endpoint IPv4 octet is invalid"
-"direct endpoint port is invalid"
+#include "core/online_session.h"
+
+#include <array>
+#include <cctype>
+#include <limits>
+
+namespace jojo {
+namespace {
+Result<unsigned> parse_decimal(std::string_view text, unsigned maximum,
+                               const char* detail) {
+    if (text.empty()) {
+        return Result<unsigned>::failure(ErrorCode::invalid_argument, detail);
+    }
+    unsigned value = 0;
+    for (const char ch : text) {
+        if (ch < '0' || ch > '9') {
+            return Result<unsigned>::failure(ErrorCode::invalid_argument, detail);
+        }
+        const unsigned digit = static_cast<unsigned>(ch - '0');
+        if (value > (maximum - digit) / 10u) {
+            return Result<unsigned>::failure(ErrorCode::invalid_argument, detail);
+        }
+        value = value * 10u + digit;
+    }
+    return Result<unsigned>::success(value);
+}
+} // namespace
+
+Result<NetworkEndpoint> parse_direct_endpoint(std::string_view text) {
+    for (const unsigned char ch : text) {
+        if (std::isspace(ch) != 0) {
+            return Result<NetworkEndpoint>::failure(
+                ErrorCode::invalid_argument,
+                "direct endpoint must use A.B.C.D:PORT");
+        }
+    }
+
+    const auto colon = text.find(':');
+    if (colon == std::string_view::npos || colon == 0u ||
+        colon + 1u >= text.size() || text.find(':', colon + 1u) != std::string_view::npos) {
+        return Result<NetworkEndpoint>::failure(
+            ErrorCode::invalid_argument,
+            "direct endpoint must use A.B.C.D:PORT");
+    }
+
+    std::array<std::uint8_t, 4> octets{};
+    std::string_view address = text.substr(0, colon);
+    std::size_t begin = 0;
+    for (std::size_t index = 0; index < octets.size(); ++index) {
+        const auto dot = address.find('.', begin);
+        const bool last = index + 1u == octets.size();
+        if ((last && dot != std::string_view::npos) ||
+            (!last && dot == std::string_view::npos)) {
+            return Result<NetworkEndpoint>::failure(
+                ErrorCode::invalid_argument,
+                "direct endpoint must use A.B.C.D:PORT");
+        }
+        const auto end = last ? address.size() : dot;
+        const auto value = parse_decimal(address.substr(begin, end - begin), 255u,
+                                         "direct endpoint IPv4 octet is invalid");
+        if (!value) {
+            return Result<NetworkEndpoint>::failure(value.error, value.detail);
+        }
+        octets[index] = static_cast<std::uint8_t>(value.value);
+        begin = end + 1u;
+    }
+
+    const auto port = parse_decimal(text.substr(colon + 1u), 65535u,
+                                    "direct endpoint port is invalid");
+    if (!port || port.value == 0u) {
+        return Result<NetworkEndpoint>::failure(
+            ErrorCode::invalid_argument,
+            "direct endpoint port is invalid");
+    }
+    return Result<NetworkEndpoint>::success(
+        NetworkEndpoint{octets, static_cast<std::uint16_t>(port.value)});
+}
+
+std::string format_direct_endpoint(NetworkEndpoint endpoint) {
+    return std::to_string(endpoint.ipv4[0]) + "." +
+           std::to_string(endpoint.ipv4[1]) + "." +
+           std::to_string(endpoint.ipv4[2]) + "." +
+           std::to_string(endpoint.ipv4[3]) + ":" +
+           std::to_string(endpoint.port);
+}
+
+} // namespace jojo
 ```
 
-`format_direct_endpoint()` must emit decimal octets and the decimal port with no extra whitespace.
-
 - [ ] **Step 6: Run parser target GREEN**
-
-Run:
 
 ```bash
 cmake --build build --target jojo_online_session_tests --parallel 2
@@ -256,26 +325,20 @@ git commit -m "feat: add direct online endpoint contract"
 - Modify: `tests/test_online_session.cpp`
 
 **Interfaces:**
-- Consumes: Task 1 product types/parser; `DirectUdpSession::bind`, `DirectUdpSession::connect`, `DirectUdpSession::poll`, `DirectUdpSession::local_endpoint`, `DirectUdpSession::remote_endpoint`, `DirectUdpSession::telemetry`, `DirectUdpSession::state`.
+- Consumes: Task 1 types/parser and the existing `DirectUdpSession` API.
 - Produces:
 
 ```cpp
 class OnlineSessionController {
 public:
     [[nodiscard]] const OnlineSessionViewState& view() const noexcept;
-
-    [[nodiscard]] Result<void> host(
-        NetworkEndpoint local,
-        DirectSessionTiming timing = {});
-
-    [[nodiscard]] Result<void> join(
-        NetworkEndpoint local,
-        NetworkEndpoint remote,
-        DirectSessionTiming timing,
-        std::uint64_t now_ms);
-
+    [[nodiscard]] Result<void> host(NetworkEndpoint local,
+                                    DirectSessionTiming timing = {});
+    [[nodiscard]] Result<void> join(NetworkEndpoint local,
+                                    NetworkEndpoint remote,
+                                    DirectSessionTiming timing,
+                                    std::uint64_t now_ms);
     [[nodiscard]] Result<std::vector<NetworkPacket>> poll(std::uint64_t now_ms);
-
     [[nodiscard]] Result<void> send(const NetworkPacket& packet,
                                     std::uint64_t now_ms);
     [[nodiscard]] Result<void> disconnect(std::uint64_t now_ms);
@@ -290,9 +353,9 @@ private:
 };
 ```
 
-- [ ] **Step 1: Add RED tests for host/join and view state**
+- [ ] **Step 1: Add RED tests for host/join, inactive poll, and view state**
 
-Extend `tests/test_online_session.cpp` with helpers:
+Add:
 
 ```cpp
 jojo::DirectSessionTiming fast_timing() {
@@ -319,97 +382,140 @@ bool drive_connected(jojo::OnlineSessionController& host,
 }
 ```
 
-Add tests that:
+Before starting a session:
 
 ```cpp
-void test_host_join_view() {
-    jojo::OnlineSessionController host;
-    const auto host_started = host.host(jojo::NetworkEndpoint::loopback(0), fast_timing());
-    expect(static_cast<bool>(host_started), "host binds");
-    expect(host.view().state == jojo::OnlineSessionState::waiting_for_peer,
-           "host waits for peer");
-    expect(host.view().role == jojo::DirectSessionRole::host, "host role exposed");
-    expect(host.view().local_endpoint.has_value(), "host local endpoint exposed");
-    expect(host.view().local_endpoint && host.view().local_endpoint->port != 0,
-           "ephemeral host port resolved");
-    expect(!host.view().remote_endpoint, "host has no peer before hello");
-    expect(!host.view().can_send_gameplay, "host cannot send while waiting");
-
-    jojo::OnlineSessionController client;
-    const auto joined = client.join(
-        jojo::NetworkEndpoint::loopback(0),
-        *host.view().local_endpoint,
-        fast_timing(), 0);
-    expect(static_cast<bool>(joined), "client join starts");
-    expect(client.view().state == jojo::OnlineSessionState::connecting,
-           "client exposes connecting");
-    expect(client.view().role == jojo::DirectSessionRole::client,
-           "client role exposed");
-    expect(client.view().remote_endpoint == host.view().local_endpoint,
-           "client target exposed immediately");
-
-    expect(drive_connected(host, client), "controllers connect through polling");
-    expect(host.view().state == jojo::OnlineSessionState::connected,
-           "host reaches connected");
-    expect(client.view().state == jojo::OnlineSessionState::connected,
-           "client reaches connected");
-    expect(host.view().remote_endpoint == client.view().local_endpoint,
-           "host exposes pinned client endpoint");
-    expect(host.view().can_send_gameplay && client.view().can_send_gameplay,
-           "gameplay gate opens only when connected");
-}
+jojo::OnlineSessionController idle;
+const auto idle_poll = idle.poll(0);
+expect(!idle_poll && idle_poll.error == jojo::ErrorCode::invalid_argument,
+       "poll without active session is validation failure");
+expect(idle.view().state == jojo::OnlineSessionState::inactive,
+       "inactive poll does not fault controller");
 ```
 
-Also add a lifecycle validation case that `host()` or `join()` called twice returns `invalid_argument` without changing the existing state.
+Host/join contract:
+
+```cpp
+jojo::OnlineSessionController host;
+const auto host_started = host.host(jojo::NetworkEndpoint::loopback(0), fast_timing());
+expect(static_cast<bool>(host_started), "host binds");
+expect(host.view().state == jojo::OnlineSessionState::waiting_for_peer,
+       "host waits for peer");
+expect(host.view().role == jojo::DirectSessionRole::host, "host role exposed");
+expect(host.view().local_endpoint && host.view().local_endpoint->port != 0,
+       "ephemeral host port resolved");
+expect(!host.view().remote_endpoint, "host has no peer before hello");
+expect(!host.view().can_send_gameplay, "host cannot send while waiting");
+
+jojo::OnlineSessionController client;
+const auto joined = client.join(jojo::NetworkEndpoint::loopback(0),
+                                *host.view().local_endpoint,
+                                fast_timing(), 0);
+expect(static_cast<bool>(joined), "client join starts");
+expect(client.view().state == jojo::OnlineSessionState::connecting,
+       "client exposes connecting");
+expect(client.view().role == jojo::DirectSessionRole::client,
+       "client role exposed");
+expect(client.view().remote_endpoint == host.view().local_endpoint,
+       "client target exposed immediately");
+
+expect(drive_connected(host, client), "controllers connect through polling");
+expect(host.view().remote_endpoint == client.view().local_endpoint,
+       "host exposes pinned client endpoint");
+expect(host.view().can_send_gameplay && client.view().can_send_gameplay,
+       "gameplay gate opens when connected");
+```
+
+Also call `host()`/`join()` a second time on an active controller and assert `invalid_argument` with no lifecycle change.
 
 - [ ] **Step 2: Run and verify RED**
-
-Run:
 
 ```bash
 cmake --build build --target jojo_online_session_tests --parallel 2
 ```
 
-Expected: build fails because `OnlineSessionController` methods are not defined.
+Expected: FAIL because `OnlineSessionController` methods do not exist.
 
-- [ ] **Step 3: Implement host/join and view derivation**
+- [ ] **Step 3: Implement host/join/poll and view derivation**
 
-Implement `OnlineSessionController` with these rules:
+Add the class declaration from the Interfaces block to `online_session.h`.
+
+Implement these preconditions:
 
 ```cpp
 const OnlineSessionViewState& OnlineSessionController::view() const noexcept {
     return view_;
 }
+
+Result<std::vector<NetworkPacket>> OnlineSessionController::poll(std::uint64_t now_ms) {
+    if (!session_) {
+        return Result<std::vector<NetworkPacket>>::failure(
+            ErrorCode::invalid_argument, "online poll requires active session");
+    }
+    const auto result = session_->poll(now_ms);
+    if (!result) {
+        set_fault(result.error, result.detail);
+        return Result<std::vector<NetworkPacket>>::failure(result.error, result.detail);
+    }
+    refresh_view();
+    return Result<std::vector<NetworkPacket>>::success(result.value);
+}
 ```
 
-`host()`:
+Implement `host()`:
 
 ```cpp
-if (view_.state != OnlineSessionState::inactive) {
-    return Result<void>::failure(ErrorCode::invalid_argument,
-                                 "online session is already active");
+Result<void> OnlineSessionController::host(NetworkEndpoint local,
+                                           DirectSessionTiming timing) {
+    if (view_.state != OnlineSessionState::inactive) {
+        return Result<void>::failure(ErrorCode::invalid_argument,
+                                     "online session is already active");
+    }
+    auto bound = DirectUdpSession::bind(DirectSessionRole::host, local, timing);
+    if (!bound) {
+        set_fault(bound.error, bound.detail);
+        return Result<void>::failure(bound.error, bound.detail);
+    }
+    session_.emplace(std::move(bound.value));
+    view_.role = DirectSessionRole::host;
+    refresh_view();
+    return Result<void>::success();
 }
-auto bound = DirectUdpSession::bind(DirectSessionRole::host, local, timing);
-if (!bound) {
-    set_fault(bound.error, bound.detail);
-    return Result<void>::failure(bound.error, bound.detail);
-}
-session_.emplace(std::move(bound.value));
-view_.role = DirectSessionRole::host;
-refresh_view();
-return Result<void>::success();
 ```
 
-`join()` must reject `remote.port == 0` before binding with:
+Implement `join()`:
 
 ```cpp
-return Result<void>::failure(ErrorCode::invalid_argument,
-                             "online join remote port must be non-zero");
+Result<void> OnlineSessionController::join(NetworkEndpoint local,
+                                           NetworkEndpoint remote,
+                                           DirectSessionTiming timing,
+                                           std::uint64_t now_ms) {
+    if (view_.state != OnlineSessionState::inactive) {
+        return Result<void>::failure(ErrorCode::invalid_argument,
+                                     "online session is already active");
+    }
+    if (remote.port == 0u) {
+        return Result<void>::failure(ErrorCode::invalid_argument,
+                                     "online join remote port must be non-zero");
+    }
+    auto bound = DirectUdpSession::bind(DirectSessionRole::client, local, timing);
+    if (!bound) {
+        set_fault(bound.error, bound.detail);
+        return Result<void>::failure(bound.error, bound.detail);
+    }
+    session_.emplace(std::move(bound.value));
+    view_.role = DirectSessionRole::client;
+    const auto connected = session_->connect(remote, now_ms);
+    if (!connected) {
+        set_fault(connected.error, connected.detail);
+        return connected;
+    }
+    refresh_view();
+    return Result<void>::success();
+}
 ```
 
-Then bind client, call `connect(remote, now_ms)`, fault on operational failure, and call `refresh_view()` on success.
-
-`refresh_view()` must copy the transport endpoints/telemetry and map states exactly:
+Implement `refresh_view()` so it maps transport state exactly:
 
 ```cpp
 switch (session_->state()) {
@@ -431,11 +537,6 @@ case DirectSessionState::disconnected:
     view_.state = OnlineSessionState::disconnected;
     break;
 }
-```
-
-Then set:
-
-```cpp
 view_.local_endpoint = session_->local_endpoint();
 view_.remote_endpoint = session_->remote_endpoint();
 const auto& telemetry = session_->telemetry();
@@ -448,13 +549,9 @@ view_.packets_lost = telemetry.packets_lost;
 view_.can_send_gameplay = view_.state == OnlineSessionState::connected;
 ```
 
-Do not clear `last_error` inside `refresh_view()`; successful `host`, `join`, and `reset` are responsible for starting with a clean error snapshot.
-
-`poll()` delegates to `session_->poll(now_ms)`, faults on operational failure, otherwise refreshes and returns delivered packets.
+Do not clear `last_error` in `refresh_view()`.
 
 - [ ] **Step 4: Run Task 2 GREEN**
-
-Run:
 
 ```bash
 cmake --build build --target jojo_online_session_tests --parallel 2
@@ -472,19 +569,19 @@ git commit -m "feat: add online host join lifecycle"
 
 ---
 
-### Task 3: Gameplay roundtrip, reconnect mapping, disconnect, reset, and spoof resistance
+### Task 3: Gameplay, reconnect mapping, disconnect, reset, and spoof resistance
 
 **Files:**
 - Modify: `src/core/online_session.cpp`
 - Modify: `tests/test_online_session.cpp`
 
 **Interfaces:**
-- Consumes: Task 2 controller API and real `DirectUdpSession` behavior.
-- Produces: fully working `send`, `disconnect`, `reset`, telemetry refresh, reconnect/disconnected mapping, and product-layer peer stability.
+- Consumes: Task 2 controller API and existing `DirectUdpSession` behavior.
+- Produces: working `send`, `disconnect`, `reset`, telemetry refresh, reconnect/disconnected mapping, and stable peer presentation.
 
-- [ ] **Step 1: Add RED gameplay and lifecycle tests**
+- [ ] **Step 1: Add RED gameplay and misuse tests**
 
-Add a gameplay roundtrip after `drive_connected()`:
+After `drive_connected()`:
 
 ```cpp
 jojo::NetworkPacket packet{};
@@ -504,9 +601,10 @@ if (delivered && delivered.value.size() == 1) {
 }
 ```
 
-Add misuse checks before connection and during reconnect:
+Before connection:
 
 ```cpp
+jojo::OnlineSessionController idle_controller;
 const auto bad_send = idle_controller.send(packet, 0);
 expect(!bad_send && bad_send.error == jojo::ErrorCode::invalid_argument,
        "send while inactive is validation failure");
@@ -514,33 +612,36 @@ expect(idle_controller.view().state == jojo::OnlineSessionState::inactive,
        "send misuse does not fault inactive controller");
 ```
 
-Add reconnect mapping with `fast_timing()` using monotonic times. After connecting and draining normal traffic, stop polling the peer and advance one side beyond the 30 ms liveness timeout. Assert that side maps to `reconnecting`, `can_send_gameplay == false`, and its pinned remote endpoint remains unchanged. Then advance/poll the client until it also times out and emits a pinned reconnect hello; poll the host and client until both return to `connected`.
+- [ ] **Step 2: Add RED reconnect/recovery and reconnect-timeout tests**
 
-Use this explicit sequence as the starting point, adjusting only if queued heartbeat traffic requires one extra drain poll:
+Use `fast_timing()` and monotonic caller times. After connection, stop polling the peer and advance one side beyond the 30 ms liveness timeout. Assert `reconnecting`, unchanged pinned endpoint, and closed gameplay gate.
+
+Use this sequence; if a queued heartbeat is consumed at `60`, perform one drain poll there and then use `100` for the liveness transition. Do not change timing constants:
 
 ```cpp
 const auto pinned = host.view().remote_endpoint;
 expect(static_cast<bool>(host.poll(60)), "host liveness poll succeeds");
+if (host.view().state != jojo::OnlineSessionState::reconnecting) {
+    expect(static_cast<bool>(host.poll(100)), "host second liveness poll succeeds");
+}
 expect(host.view().state == jojo::OnlineSessionState::reconnecting,
        "host maps silence to reconnecting");
 expect(host.view().remote_endpoint == pinned, "host keeps pinned peer");
 expect(!host.view().can_send_gameplay, "reconnect suppresses gameplay");
 
-expect(static_cast<bool>(client.poll(60)), "client processes queued traffic");
-expect(static_cast<bool>(client.poll(100)), "client reaches reconnect attempt");
-expect(static_cast<bool>(host.poll(101)), "host accepts pinned reconnect hello");
-expect(static_cast<bool>(client.poll(102)), "client accepts reconnect response");
+expect(static_cast<bool>(client.poll(100)), "client advances toward reconnect");
+expect(static_cast<bool>(client.poll(140)), "client starts pinned reconnect");
+expect(static_cast<bool>(host.poll(141)), "host accepts pinned reconnect hello");
+expect(static_cast<bool>(client.poll(142)), "client accepts reconnect response");
 expect(host.view().state == jojo::OnlineSessionState::connected,
        "host recovers connected");
 expect(client.view().state == jojo::OnlineSessionState::connected,
        "client recovers connected");
 ```
 
-Add reconnect-timeout coverage by creating a fresh pair, driving connected, silencing the peer, entering reconnecting, then advancing the reconnecting controller by more than `reconnect_timeout_ms` without a valid pinned-peer handshake. Assert normal `disconnected`, not `faulted`.
+For timeout, use a fresh connected pair, enter reconnecting, then advance the reconnecting side by more than `fast_timing().reconnect_timeout_ms` without a valid pinned-peer hello/accept. Assert `disconnected` and `last_error == ErrorCode::none`.
 
-- [ ] **Step 2: Add RED explicit disconnect and reset tests**
-
-After connecting a fresh pair:
+- [ ] **Step 3: Add RED explicit disconnect and reset tests**
 
 ```cpp
 const auto disconnected = client.disconnect(30);
@@ -555,7 +656,7 @@ expect(host.view().state == jojo::OnlineSessionState::disconnected,
        "remote disconnect maps normally");
 ```
 
-Test `reset()` from `waiting_for_peer`, `connecting`, `reconnecting`, `disconnected`, and `faulted` as states become available. Every reset must restore this exact baseline:
+Test `reset()` from `waiting_for_peer`, `connecting`, `reconnecting`, and `disconnected`. Task 4 separately adds the `faulted` reset case. Every reset must restore:
 
 ```cpp
 expect(controller.view().state == jojo::OnlineSessionState::inactive,
@@ -572,21 +673,21 @@ expect(controller.view().last_error == jojo::ErrorCode::none &&
        "reset clears error");
 ```
 
-Then start a fresh host on the same controller to prove retry after reset.
+Then start a fresh host on the reset controller.
 
-- [ ] **Step 3: Add RED product-layer spoof test**
+- [ ] **Step 4: Add RED product-layer spoof test**
 
-Use a third raw `UdpNetworkTransport` bound to loopback ephemeral port. After the host/client pair is connected, capture the host's pinned remote endpoint and send a syntactically valid ping from the attacker to the host local endpoint:
+Bind a third raw `UdpNetworkTransport`, send a valid ping to the host, and assert the product peer is unchanged and silence still drives liveness into reconnecting:
 
 ```cpp
-auto attacker_result = jojo::UdpNetworkTransport::bind(jojo::NetworkEndpoint::loopback(0));
-expect(static_cast<bool>(attacker_result), "attacker transport binds");
-if (attacker_result) {
+auto attacker = jojo::UdpNetworkTransport::bind(jojo::NetworkEndpoint::loopback(0));
+expect(static_cast<bool>(attacker), "attacker transport binds");
+if (attacker) {
     jojo::NetworkPacket spoof{};
     spoof.kind = jojo::NetworkPacketKind::ping;
     spoof.sequence = 900;
     spoof.timestamp_ms = 40;
-    expect(static_cast<bool>(attacker_result.value.send_packet(
+    expect(static_cast<bool>(attacker.value.send_packet(
         *host.view().local_endpoint, spoof)), "attacker sends spoof ping");
     expect(static_cast<bool>(host.poll(40)), "host ignores spoof without error");
     expect(host.view().remote_endpoint == pinned,
@@ -594,69 +695,69 @@ if (attacker_result) {
 }
 ```
 
-Continue silence past liveness timeout and assert the spoof did not prevent `reconnecting`.
+Advance beyond liveness timeout without valid peer traffic and assert `reconnecting`.
 
-- [ ] **Step 4: Run tests and verify RED where behavior is still missing**
-
-Run:
+- [ ] **Step 5: Run tests and verify RED**
 
 ```bash
 cmake --build build --target jojo_online_session_tests --parallel 2
 ctest --test-dir build -R jojo_online_session_tests --output-on-failure
 ```
 
-Expected: failures for unimplemented `send`, `disconnect`, `reset`, and/or lifecycle refresh semantics.
+Expected: FAIL for missing `send`, `disconnect`, `reset`, or lifecycle refresh behavior.
 
-- [ ] **Step 5: Implement gameplay, disconnect, and reset delegation**
-
-`send()`:
+- [ ] **Step 6: Implement gameplay, disconnect, and reset delegation**
 
 ```cpp
-if (view_.state != OnlineSessionState::connected || !session_) {
-    return Result<void>::failure(ErrorCode::invalid_argument,
-                                 "online gameplay send requires connection");
+Result<void> OnlineSessionController::send(const NetworkPacket& packet,
+                                           std::uint64_t now_ms) {
+    if (view_.state != OnlineSessionState::connected || !session_) {
+        return Result<void>::failure(ErrorCode::invalid_argument,
+                                     "online gameplay send requires connection");
+    }
+    const auto result = session_->send(packet, now_ms);
+    if (!result) {
+        if (result.error == ErrorCode::invalid_argument) return result;
+        set_fault(result.error, result.detail);
+        return result;
+    }
+    refresh_view();
+    return Result<void>::success();
 }
-const auto result = session_->send(packet, now_ms);
-if (!result) {
-    if (result.error == ErrorCode::invalid_argument) return result;
-    set_fault(result.error, result.detail);
-    return result;
+
+Result<void> OnlineSessionController::disconnect(std::uint64_t now_ms) {
+    if (view_.state != OnlineSessionState::connected || !session_) {
+        return Result<void>::failure(ErrorCode::invalid_argument,
+                                     "online disconnect requires connection");
+    }
+    const auto result = session_->disconnect(now_ms);
+    if (!result) {
+        if (result.error == ErrorCode::invalid_argument) return result;
+        set_fault(result.error, result.detail);
+        return result;
+    }
+    refresh_view();
+    return Result<void>::success();
 }
-refresh_view();
-return Result<void>::success();
-```
 
-`disconnect()` follows the same pattern but uses detail:
-
-```cpp
-"online disconnect requires connection"
-```
-
-On success, call `refresh_view()` so the product state immediately becomes `disconnected`.
-
-`reset()`:
-
-```cpp
 void OnlineSessionController::reset() noexcept {
     session_.reset();
     view_ = OnlineSessionViewState{};
 }
 ```
 
-`poll()` must always call `refresh_view()` after a successful transport poll, even when zero gameplay packets were delivered, so heartbeat/reconnect/disconnect transitions and telemetry are visible to the product layer.
+`poll()` from Task 2 already refreshes view after every successful transport poll, including zero gameplay delivery; keep that behavior unchanged.
 
-- [ ] **Step 6: Run Task 3 GREEN**
-
-Run:
+- [ ] **Step 7: Run Task 3 GREEN**
 
 ```bash
 cmake --build build --target jojo_online_session_tests --parallel 2
 ctest --test-dir build -R jojo_online_session_tests --output-on-failure
 ```
 
-Expected: PASS for gameplay, reconnect/recovery, timeout, disconnect, reset, and spoof cases.
+Expected: PASS.
 
-- [ ] **Step 7: Commit Task 3**
+- [ ] **Step 8: Commit Task 3**
 
 ```bash
 git add src/core/online_session.cpp tests/test_online_session.cpp
@@ -676,11 +777,11 @@ git commit -m "feat: complete direct online session lifecycle"
 
 **Interfaces:**
 - Consumes: completed controller from Tasks 1–3 and current GitHub Actions workflow.
-- Produces: deterministic `faulted` behavior for operational failures, full Linux/Windows evidence, and documentation that points to the new evidence without changing truth status.
+- Produces: deterministic `faulted` behavior, full Linux/Windows evidence, and truth documents pointing at that evidence without changing R2.5 status.
 
-- [ ] **Step 1: Add RED operational-fault test using deterministic bind collision**
+- [ ] **Step 1: Add RED operational-fault and faulted-reset tests**
 
-Bind one host to loopback ephemeral port, capture its actual local port, then start a second controller on that same explicit endpoint:
+Use a deterministic bind collision:
 
 ```cpp
 jojo::OnlineSessionController first;
@@ -704,27 +805,30 @@ expect(second.view().last_error_detail == collision.detail &&
 const auto retry_without_reset = second.host(jojo::NetworkEndpoint::loopback(0), fast_timing());
 expect(!retry_without_reset && retry_without_reset.error == jojo::ErrorCode::invalid_argument,
        "faulted controller requires reset before restart");
+expect(second.view().last_error == collision.error,
+       "lifecycle misuse does not overwrite preserved fault");
+
 second.reset();
+expect(second.view().state == jojo::OnlineSessionState::inactive,
+       "reset clears faulted state");
+expect(second.view().last_error == jojo::ErrorCode::none,
+       "reset clears fault code");
 expect(static_cast<bool>(second.host(jojo::NetworkEndpoint::loopback(0), fast_timing())),
        "reset permits host after operational fault");
 ```
 
-Also assert malformed endpoint parsing and join target port 0 remain validation errors and leave an inactive controller `inactive` so corrected input can be retried directly.
+Also assert `join(... remote.port = 0 ...)` leaves an inactive controller `inactive` with no stored last error, so corrected input can be retried without reset.
 
-- [ ] **Step 2: Run and verify RED if fault persistence/restart gating is incomplete**
-
-Run:
+- [ ] **Step 2: Run and verify RED if fault persistence is incomplete**
 
 ```bash
 cmake --build build --target jojo_online_session_tests --parallel 2
 ctest --test-dir build -R jojo_online_session_tests --output-on-failure
 ```
 
-Expected: FAIL until `set_fault` and faulted restart gating exactly match the contract.
+Expected: FAIL until fault persistence/restart gating matches the contract.
 
 - [ ] **Step 3: Implement the fault helper and preserve validation semantics**
-
-Implement:
 
 ```cpp
 void OnlineSessionController::set_fault(ErrorCode error, std::string detail) {
@@ -735,22 +839,18 @@ void OnlineSessionController::set_fault(ErrorCode error, std::string detail) {
 }
 ```
 
-`host()` and `join()` must treat every non-`inactive` state, including `faulted`, as lifecycle misuse and return:
+Keep the existing `host()`/`join()` non-`inactive` precondition. In `faulted`, it must return:
 
 ```cpp
 Result<void>::failure(ErrorCode::invalid_argument,
                       "online session is already active")
 ```
 
-without overwriting the preserved operational error snapshot.
+without changing the preserved fault snapshot.
 
-Before `DirectUdpSession::bind`, clear no state except through the initial `inactive` precondition. A user validation rejection such as remote port 0 must leave the view at the untouched inactive baseline.
-
-Operational failures from bind/connect/poll/gameplay send/disconnect must call `set_fault()` and return the original error/detail.
+Operational failures from bind/connect/poll/gameplay send/disconnect call `set_fault()` and return the original error/detail. Validation failures do not call `set_fault()`.
 
 - [ ] **Step 4: Run focused controller GREEN**
-
-Run:
 
 ```bash
 cmake --build build --target jojo_online_session_tests --parallel 2
@@ -761,8 +861,6 @@ Expected: PASS.
 
 - [ ] **Step 5: Run the existing transport contract locally**
 
-Linux/macOS-style command:
-
 ```bash
 c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc \
   tests/test_network_transport.cpp src/core/network_protocol.cpp \
@@ -770,11 +868,9 @@ c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc \
 ./network_transport_tests
 ```
 
-Expected: PASS. No changes to `tests/test_network_transport.cpp` or the standalone workflow command are required.
+Expected: PASS. Do not alter the standalone R2.5 transport test or workflow command.
 
-- [ ] **Step 6: Run the full local regression and readiness gates**
-
-Run:
+- [ ] **Step 6: Run full local regression and readiness gates**
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -784,7 +880,7 @@ cmake -DJOJO_SOURCE_DIR="$PWD" -P cmake/CheckProductionReadiness.cmake
 cmake -DJOJO_SOURCE_DIR="$PWD" -P cmake/CheckProductionReadinessNegative.cmake
 ```
 
-Expected: all CTest targets, including `jojo_online_session_tests`, pass; both readiness scripts pass.
+Expected: all CTests, including `jojo_online_session_tests`, plus both readiness scripts pass.
 
 - [ ] **Step 7: Commit the completed implementation before CI**
 
@@ -793,60 +889,49 @@ git add CMakeLists.txt src/core/online_session.h src/core/online_session.cpp tes
 git commit -m "feat: add R2.5 online session controller"
 ```
 
-- [ ] **Step 8: Push the feature branch and require full GitHub Actions GREEN**
+- [ ] **Step 8: Push and require full GitHub Actions GREEN**
 
-Push `feature/r2-5-online-controller`. The existing `.github/workflows/build.yml` must run unchanged because it already triggers on `feature/**`.
+Push `feature/r2-5-online-controller`. Existing `.github/workflows/build.yml` already triggers on `feature/**`; do not modify it for this package.
 
-Require all of these on the same implementation HEAD:
+Require on the same implementation HEAD:
 
-- Portable core / Linux — Configure, Build, Production readiness gate, Test, R2.5 direct UDP transport contract: success.
-- Windows x64 / MSVC 2022 — Configure, Build Release, Production readiness gate, Test Release, R2.5 direct UDP transport contract, Upload single executable: success.
-- `jojo_online_session_tests` appears within normal CTest and passes on both OSes.
-- Windows artifact remains named `JOJO-Recompiled-Windows-x64` and contains the single shipping `JOJO-Recompiled.exe` output.
+- Linux: Configure, Build, Production readiness gate, CTest, standalone R2.5 direct UDP transport contract — success.
+- Windows/MSVC: Configure, Build Release, Production readiness gate, CTest Release, standalone R2.5 transport contract, single-executable artifact upload — success.
+- `jojo_online_session_tests` passes inside normal CTest on both operating systems.
+- Artifact remains `JOJO-Recompiled-Windows-x64` and contains the shipping `JOJO-Recompiled.exe` output.
 
-Record the workflow run ID, implementation commit SHA, artifact ID, and SHA-256 digest before documentation updates.
+Record workflow run ID, implementation SHA, artifact ID, and artifact SHA-256 digest.
 
-- [ ] **Step 9: Update project truth documents only after GREEN evidence exists**
+- [ ] **Step 9: Update truth documents only after GREEN evidence exists**
 
-Update `PROJECT-STATE.md` with a concise new R2.5 controller checkpoint containing:
+Update `PROJECT-STATE.md` with branch, design path, implementation SHA, GREEN workflow ID, artifact digest, implemented controller scope, explicit service/UI non-goals, and the unchanged `implemented-unverified` status.
 
-- branch `feature/r2-5-online-controller`;
-- design path;
-- implementation commit SHA;
-- full Linux/Windows workflow run ID;
-- artifact name/digest;
-- implemented scope: direct IPv4 endpoint parser, host/join controller, stable product state/view snapshot, telemetry exposure, gameplay gating, reconnect/disconnect/reset mapping, validation-vs-operational error model, spoof-resistant peer presentation;
-- explicit non-goals: no matchmaking/ranked/public rooms/invitations/accounts/NAT/relay/complete M9 UI;
-- R2.5 remains `implemented-unverified`.
+Update `docs/NEXT-MILESTONES.md` so R2.5 records the product-facing direct-session controller and names the next user-facing increment as in-game Online presentation/integration, still without service claims.
 
-Update `docs/NEXT-MILESTONES.md` so the R2.5 paragraph states that the product-facing direct-session controller now exists and that the next user-facing increment is an in-game Online presentation/integration layer, still without production service claims.
-
-Update only the R2.5 evidence field in `docs/architecture/PRODUCTION-READINESS.tsv`:
+Update only R2.5 evidence in `docs/architecture/PRODUCTION-READINESS.tsv`:
 
 ```tsv
 R2.5	implemented-unverified	github-actions:run-<NEW_GREEN_RUN_ID>	none
 ```
 
-Do not change any other workstream status or blocker.
+Leave every other workstream status/blocker unchanged.
 
-- [ ] **Step 10: Commit the checkpoint documents**
+- [ ] **Step 10: Commit checkpoint documents**
 
 ```bash
 git add PROJECT-STATE.md docs/NEXT-MILESTONES.md docs/architecture/PRODUCTION-READINESS.tsv
 git commit -m "checkpoint: record R2.5 online controller evidence"
 ```
 
-- [ ] **Step 11: Require one final full CI run on the documentation checkpoint HEAD**
+- [ ] **Step 11: Require final full CI on the documentation checkpoint HEAD**
 
-Push the checkpoint commit and require the same Linux/Windows/readiness/CTest/standalone-R2.5/artifact gates to pass again. Confirm the final branch HEAD equals the tested checkpoint SHA and record the final artifact digest.
+Push the checkpoint commit and require the same Linux/Windows/readiness/CTest/standalone-R2.5/artifact gates again. Confirm final branch HEAD equals the tested checkpoint SHA and record the final artifact digest.
 
 - [ ] **Step 12: Final truth check**
 
-Verify all of the following before claiming package completion:
-
 ```text
 feature/r2-5-online-controller HEAD == final GREEN checkpoint SHA
-main unchanged from the package start
+main unchanged from package start
 R2.5 status == implemented-unverified
 R2.2/R2.4 blockers unchanged
 R2.6 status unchanged
