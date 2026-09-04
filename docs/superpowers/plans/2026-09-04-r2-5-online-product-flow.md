@@ -2,57 +2,47 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement the portable Direct Online product-flow model that exposes Host/Join, lifecycle, telemetry, validation, disconnect/reset behavior, and a gameplay-readiness gate around the integrated `OnlineSessionController`.
+**Goal:** Implement the portable Direct Online product-flow model around the integrated `OnlineSessionController`, exposing Host/Join, lifecycle, validation, telemetry, disconnect/reset behavior, packet preservation, and gameplay readiness.
 
-**Architecture:** Add `OnlineMenuSession` in `jojo_core` as a pure product/UI state model. It owns exactly one `OnlineSessionController`, maps controller lifecycle into `OnlineMenuScreen`, keeps join-endpoint form text/validation separate from operational session errors, and returns gameplay packets unchanged from `tick()` for a future rollback/gameplay bridge. The first-run Win32 conversion shell remains untouched.
+**Architecture:** Add `OnlineMenuSession` to `jojo_core` as a UI/product-state model that owns exactly one `OnlineSessionController`. It maps controller lifecycle into menu state, keeps local form validation separate from operational session faults, and returns gameplay packets unchanged from `tick()`. The first-run Win32 conversion shell remains untouched.
 
-**Tech Stack:** C++20, CMake, CTest, existing `OnlineSessionController`, loopback UDP integration tests, Linux CI, Windows x64/MSVC CI.
+**Tech Stack:** C++20, CMake, CTest, existing Direct UDP/`OnlineSessionController`, Linux CI, Windows x64/MSVC CI.
 
 **Spec:** `docs/superpowers/specs/2026-09-04-r2-5-online-product-flow-design.md`
 
 ## Global Constraints
 
-- Direct Host/Join only; do not add Casual, Ranked, matchmaking, rooms, invites, accounts, relay, NAT traversal, DNS/hostnames, IPv6, encryption, spectator, replay, or service-backed UI.
+- Direct Host/Join only; no Casual, Ranked, matchmaking, public rooms, invites, accounts, relay, NAT traversal, DNS/hostnames, IPv6, encryption, spectator, replay, or service-backed UI.
 - `OnlineMenuSession` must not open sockets directly or duplicate reconnect/liveness/telemetry logic.
 - `OnlineSessionController` remains the sole owner of Direct session behavior.
-- `src/app_win32/main.cpp` must remain the first-run conversion/preparation shell; do not add Online controls there.
-- `can_start_gameplay` must always be derived from `OnlineSessionController::view().can_send_gameplay`.
-- `tick(now_ms)` must return gameplay packets from controller polling unchanged and in order.
-- Form validation errors remain local to the menu and must not fault the controller.
-- Operational session errors mirror controller fault semantics.
+- `src/app_win32/main.cpp` remains the first-run conversion/preparation shell; no Online controls there.
+- `can_start_gameplay` is always derived from `controller_.view().can_send_gameplay`.
+- `tick(now_ms)` returns controller gameplay packets unchanged and in order.
+- Form validation errors never fault the controller.
+- Operational session failures mirror controller fault semantics.
 - Reconnect timeout and normal peer disconnect map to `disconnected`, not `faulted`.
-- `return_home()` must never silently disconnect a connected peer.
-- Caller supplies `now_ms`; the menu must not read wall-clock time.
-- No proprietary game data, extracted assets, commercial fingerprints, saves, or generated commercial content may be committed.
-- Generic tests/CI must not promote R2.5 from `implemented-unverified` or claim commercial online compatibility.
+- `return_home()` must never silently drop a connected peer.
+- The caller supplies `now_ms`; the menu never reads wall-clock time.
+- No proprietary commercial game data/assets/fingerprints/saves/generated content may be committed.
+- Generic CI does not promote R2.5 beyond `implemented-unverified` or prove commercial online compatibility.
 
 ---
 
-### Task 1: Portable menu-state contract RED
+### Task 1: RED contract for the portable Online menu
 
 **Files:**
 - Create: `tests/test_online_menu.cpp`
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `OnlineSessionController`, `OnlineSessionState`, `OnlineSessionViewState`, `DirectSessionRole`, `DirectSessionTiming`, `NetworkEndpoint`, `NetworkPacket`, `ErrorCode`.
-- Produces requirements for:
-  - `enum class OnlineMenuScreen { home, hosting, joining, connected, reconnecting, disconnected, faulted };`
-  - `struct OnlineMenuViewState`
-  - `class OnlineMenuSession`
-  - `OnlineMenuSession::view()`
-  - `OnlineMenuSession::set_join_endpoint(std::string)`
-  - `OnlineMenuSession::start_host(...)`
-  - `OnlineMenuSession::start_join(...)`
-  - `OnlineMenuSession::tick(...)`
-  - `OnlineMenuSession::disconnect(...)`
-  - `OnlineMenuSession::return_home()`.
+- Consumes: existing online/network/result types.
+- Produces requirements for `OnlineMenuScreen`, `OnlineMenuViewState`, and `OnlineMenuSession`.
 
-- [ ] **Step 1: Create the RED test target and initial contract test**
+- [ ] **Step 1: Write the failing initial-state test**
 
-Add `tests/test_online_menu.cpp` with a tiny test harness matching the existing `test_online_session.cpp` style and include `core/online_menu.h`.
+Create `tests/test_online_menu.cpp` with the same lightweight `expect()` harness style as `tests/test_online_session.cpp` and include `core/online_menu.h`.
 
-The first assertions must require this exact initial state:
+Require:
 
 ```cpp
 jojo::OnlineMenuSession menu;
@@ -61,14 +51,14 @@ expect(view.screen == jojo::OnlineMenuScreen::home, "initial screen is home");
 expect(view.can_host, "home allows host");
 expect(view.can_join, "home allows join");
 expect(!view.can_disconnect, "home cannot disconnect");
-expect(!view.can_return_home, "home has no back transition");
+expect(!view.can_return_home, "home has no return-home transition");
 expect(!view.can_start_gameplay, "home blocks gameplay");
-expect(view.join_endpoint_text.empty(), "join field starts empty");
-expect(view.validation_error.empty(), "validation error starts empty");
+expect(view.join_endpoint_text.empty(), "join endpoint starts empty");
+expect(view.validation_error.empty(), "validation starts clear");
 expect(view.session_error == jojo::ErrorCode::none, "session error starts clear");
 ```
 
-- [ ] **Step 2: Register the RED test in CMake**
+- [ ] **Step 2: Register the test target without implementation**
 
 Add:
 
@@ -78,18 +68,13 @@ target_link_libraries(jojo_online_menu_tests PRIVATE jojo_core)
 add_test(NAME jojo_online_menu_tests COMMAND jojo_online_menu_tests)
 ```
 
-Do not add `src/core/online_menu.cpp` to `jojo_core` yet.
+Do not add `src/core/online_menu.cpp` yet.
 
-- [ ] **Step 3: Push RED and verify the expected failure**
+- [ ] **Step 3: Verify RED in branch CI**
 
-Expected Linux/Windows failure: compile error because `core/online_menu.h` does not exist.
+Expected failure on Linux and Windows: `core/online_menu.h` missing. Do not accept unrelated failures as RED evidence.
 
-Acceptance evidence:
-- Linux reaches the new target and fails at missing header.
-- Windows reaches the new target and fails at missing header.
-- No unrelated failure is accepted as RED evidence.
-
-- [ ] **Step 4: Commit the RED checkpoint**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add tests/test_online_menu.cpp CMakeLists.txt
@@ -98,7 +83,7 @@ git commit -m "test: require R2.5 online product flow"
 
 ---
 
-### Task 2: View model, endpoint editing, and Home semantics GREEN
+### Task 2: GREEN view model, Home behavior, and join validation
 
 **Files:**
 - Create: `src/core/online_menu.h`
@@ -107,8 +92,8 @@ git commit -m "test: require R2.5 online product flow"
 - Modify: `tests/test_online_menu.cpp`
 
 **Interfaces:**
-- Consumes: `OnlineSessionController::view()`, `parse_direct_endpoint`, `format_direct_endpoint`.
-- Produces:
+- Consumes: `OnlineSessionController`, `parse_direct_endpoint`, controller view state.
+- Produces this public API:
 
 ```cpp
 enum class OnlineMenuScreen {
@@ -142,11 +127,7 @@ struct OnlineMenuViewState {
     ErrorCode session_error{ErrorCode::none};
     std::string session_error_detail{};
 };
-```
 
-and:
-
-```cpp
 class OnlineMenuSession {
 public:
     [[nodiscard]] const OnlineMenuViewState& view() const noexcept { return view_; }
@@ -160,65 +141,51 @@ public:
     [[nodiscard]] Result<void> disconnect(std::uint64_t now_ms);
     void return_home() noexcept;
 private:
+    friend struct OnlineMenuSessionTestAccess;
     void refresh_view() noexcept;
     OnlineSessionController controller_{};
     OnlineMenuViewState view_{};
 };
 ```
 
-- [ ] **Step 1: Extend tests for endpoint text and local validation**
+`OnlineMenuSessionTestAccess` is not production API. It is only a friend declaration so the test translation unit can exercise exact packet forwarding without exposing the controller publicly.
 
-Add assertions:
+- [ ] **Step 1: Extend tests for form state and invalid endpoint**
 
 ```cpp
 menu.set_join_endpoint("bad-endpoint");
 expect(menu.view().join_endpoint_text == "bad-endpoint", "endpoint text stored");
 
 const auto invalid = menu.start_join(jojo::NetworkEndpoint::loopback(0), fast_timing(), 0);
-expect(!invalid, "malformed join is rejected");
-expect(invalid.error == jojo::ErrorCode::invalid_argument, "malformed join uses invalid_argument");
-expect(menu.view().screen == jojo::OnlineMenuScreen::home, "malformed join stays home");
-expect(!menu.view().validation_error.empty(), "malformed join exposes validation detail");
-expect(menu.view().session_error == jojo::ErrorCode::none, "form error does not become session fault");
-expect(menu.view().can_host && menu.view().can_join, "form error keeps actions enabled");
+expect(!invalid && invalid.error == jojo::ErrorCode::invalid_argument,
+       "malformed join is validation failure");
+expect(menu.view().screen == jojo::OnlineMenuScreen::home,
+       "malformed join remains home");
+expect(!menu.view().validation_error.empty(), "validation detail exposed");
+expect(menu.view().session_error == jojo::ErrorCode::none,
+       "form validation does not become session fault");
 
 menu.set_join_endpoint("127.0.0.1:34567");
-expect(menu.view().validation_error.empty(), "editing clears prior validation error");
+expect(menu.view().validation_error.empty(), "editing clears form error");
 ```
 
-Also test duplicate/misused `start_host`/`start_join` attempts return `invalid_argument` without fabricating a new fault.
+Also require duplicate/misused Host/Join calls to return `invalid_argument` without overwriting an existing operational fault.
 
-- [ ] **Step 2: Implement the header and initial view refresh rules**
+- [ ] **Step 2: Implement state mapping and mirrored fields**
 
-`refresh_view()` must copy controller fields and set permissions by mapped state:
+`refresh_view()` copies role/endpoints/telemetry/session error from `controller_.view()` and maps states exactly:
 
 ```cpp
-switch (controller_.view().state) {
-case OnlineSessionState::inactive:
-    view_.screen = OnlineMenuScreen::home;
-    break;
-case OnlineSessionState::waiting_for_peer:
-    view_.screen = OnlineMenuScreen::hosting;
-    break;
-case OnlineSessionState::connecting:
-    view_.screen = OnlineMenuScreen::joining;
-    break;
-case OnlineSessionState::connected:
-    view_.screen = OnlineMenuScreen::connected;
-    break;
-case OnlineSessionState::reconnecting:
-    view_.screen = OnlineMenuScreen::reconnecting;
-    break;
-case OnlineSessionState::disconnected:
-    view_.screen = OnlineMenuScreen::disconnected;
-    break;
-case OnlineSessionState::faulted:
-    view_.screen = OnlineMenuScreen::faulted;
-    break;
-}
+inactive         -> home
+waiting_for_peer -> hosting
+connecting       -> joining
+connected        -> connected
+reconnecting     -> reconnecting
+disconnected     -> disconnected
+faulted          -> faulted
 ```
 
-Permissions must be recomputed every refresh:
+Recompute permissions on every refresh:
 
 ```cpp
 view_.can_host = view_.screen == OnlineMenuScreen::home;
@@ -233,35 +200,29 @@ view_.can_return_home =
 view_.can_start_gameplay = controller_.view().can_send_gameplay;
 ```
 
-`home` and `connected` must both expose `can_return_home == false`.
+Home and Connected both expose `can_return_home == false`.
 
-- [ ] **Step 3: Implement endpoint editing and join validation**
+- [ ] **Step 3: Implement endpoint editing and Join delegation**
 
-`set_join_endpoint` stores the string and clears only `validation_error`.
+`set_join_endpoint()` stores text and clears only `validation_error`.
 
-`start_join` must:
-1. reject unless current screen is Home;
-2. parse `view_.join_endpoint_text` with `parse_direct_endpoint`;
-3. on parse failure, set `validation_error = parsed.detail` and return the parser failure without calling the controller;
-4. on success, clear `validation_error`, delegate to `controller_.join`, call `refresh_view()`, and return the controller result.
+`start_join()`:
+1. requires Home;
+2. parses `join_endpoint_text` with `parse_direct_endpoint`;
+3. on parse failure, sets `validation_error`, returns that failure, leaves controller inactive;
+4. on parse success, clears validation error, calls `controller_.join(...)`, refreshes view, returns controller result.
 
-- [ ] **Step 4: Implement Host delegation and add source to CMake**
+- [ ] **Step 4: Implement Host delegation and wire source into `jojo_core`**
 
-`start_host` must reject outside Home, delegate to `controller_.host`, call `refresh_view()`, and preserve controller fault semantics.
+`start_host()` requires Home, calls `controller_.host(...)`, refreshes view, returns the controller result.
 
-Add `src/core/online_menu.cpp` to `jojo_core` in `CMakeLists.txt`.
+Add `src/core/online_menu.cpp` to `jojo_core`.
 
-- [ ] **Step 5: Run targeted GREEN tests**
+- [ ] **Step 5: Verify targeted GREEN**
 
-Run:
+Run the new menu tests and existing `jojo_online_session_tests`; both must pass on Linux and Windows.
 
-```bash
-ctest --test-dir build --output-on-failure -R "jojo_online_menu_tests|jojo_online_session_tests"
-```
-
-Expected: both tests pass on Linux and Windows.
-
-- [ ] **Step 6: Commit the GREEN checkpoint**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/core/online_menu.h src/core/online_menu.cpp tests/test_online_menu.cpp CMakeLists.txt
@@ -270,19 +231,17 @@ git commit -m "feat: add portable online product flow state"
 
 ---
 
-### Task 3: Real Host/Join, tick packet preservation, and telemetry GREEN
+### Task 3: GREEN real Host/Join, `tick()`, packet preservation, and telemetry
 
 **Files:**
 - Modify: `tests/test_online_menu.cpp`
 - Modify: `src/core/online_menu.cpp`
 
 **Interfaces:**
-- Consumes: Task 2 `OnlineMenuSession` API.
-- Produces: real loopback lifecycle through `start_host`, `start_join`, and `tick`, plus exact packet preservation.
+- Consumes: Task 2 public API.
+- Produces: real loopback connection flow and transparent packet return.
 
-- [ ] **Step 1: Add loopback pair helpers**
-
-Mirror the existing fast timing profile from `test_online_session.cpp`:
+- [ ] **Step 1: Add deterministic fast timing and pair helper**
 
 ```cpp
 jojo::DirectSessionTiming fast_timing() {
@@ -295,55 +254,54 @@ jojo::DirectSessionTiming fast_timing() {
 }
 ```
 
-Create a helper that:
-1. starts Host on loopback port 0;
-2. reads Host `local_endpoint` from its view;
-3. writes that formatted endpoint into Client `join_endpoint_text`;
-4. calls Client `start_join`;
-5. repeatedly calls `host.tick(now)` and `client.tick(now)` until both screens are Connected or a bounded iteration count is exhausted.
+Pair helper:
+1. Host on `NetworkEndpoint::loopback(0)`;
+2. read resolved Host endpoint;
+3. format it into Client endpoint text;
+4. start Client Join;
+5. bounded alternating `tick(now)` calls until both become Connected.
 
-- [ ] **Step 2: Add assertions for Hosting/Joining/Connected mapping**
+- [ ] **Step 2: Require Hosting/Joining/Connected product state**
 
-Require:
+Check Host role/ephemeral endpoint, Client remote endpoint, gameplay gate closed before connection and open only when both are Connected, explicit disconnect enabled only Connected, and `can_return_home == false` Connected.
 
-```cpp
-expect(host.view().screen == jojo::OnlineMenuScreen::hosting, "host maps waiting to hosting");
-expect(host.view().role == jojo::DirectSessionRole::host, "host role visible");
-expect(host.view().local_endpoint && host.view().local_endpoint->port != 0,
-       "host ephemeral endpoint visible");
-expect(!host.view().can_start_gameplay, "hosting blocks gameplay");
+- [ ] **Step 3: Implement `tick()` transparently**
 
-expect(client.view().screen == jojo::OnlineMenuScreen::joining, "client maps connecting to joining");
-expect(client.view().remote_endpoint == host.view().local_endpoint, "join target visible");
+Home/inactive `tick()` returns `invalid_argument` and leaves Home non-faulted.
 
-expect(host.view().screen == jojo::OnlineMenuScreen::connected, "host connected");
-expect(client.view().screen == jojo::OnlineMenuScreen::connected, "client connected");
-expect(host.view().can_start_gameplay && client.view().can_start_gameplay,
-       "connected opens gameplay readiness gate");
-expect(host.view().can_disconnect && client.view().can_disconnect,
-       "connected enables explicit disconnect");
-expect(!host.view().can_return_home && !client.view().can_return_home,
-       "connected cannot silently return home");
-```
-
-- [ ] **Step 3: Implement `tick()` as a transparent controller poll**
-
-`tick(now_ms)` must reject Home/inactive with `invalid_argument` and preserve Home without faulting.
-
-For active sessions:
+For active controller state:
 
 ```cpp
 auto packets = controller_.poll(now_ms);
 refresh_view();
-if (!packets) return Result<std::vector<NetworkPacket>>::failure(packets.error, packets.detail);
+if (!packets) {
+    return Result<std::vector<NetworkPacket>>::failure(
+        packets.error, packets.detail);
+}
 return packets;
 ```
 
-Do not filter packet kinds in the menu layer.
+No packet filtering, reordering, conversion, or consumption occurs in the menu.
 
-- [ ] **Step 4: Add gameplay-packet preservation test**
+- [ ] **Step 4: Implement test-private controller access**
 
-After connecting Host/Client, construct an input packet:
+In `tests/test_online_menu.cpp`, define the friend exactly in namespace `jojo`:
+
+```cpp
+namespace jojo {
+struct OnlineMenuSessionTestAccess {
+    static OnlineSessionController& controller(OnlineMenuSession& menu) noexcept {
+        return menu.controller_;
+    }
+};
+}
+```
+
+This is the only seam used for exact packet-forwarding verification. Do not add a production accessor.
+
+- [ ] **Step 5: Prove `tick()` preserves gameplay packets exactly**
+
+Connect two menus. Build:
 
 ```cpp
 jojo::NetworkPacket packet{};
@@ -353,27 +311,44 @@ packet.frame = 77;
 packet.payload = {9, 8, 7, 6};
 ```
 
-Send it through the already integrated lower-level controller path available to the test. If direct access to the menu-owned controller is intentionally unavailable, use the peer menu flow and lower-level network API only through a test seam that does not become public product API. The final assertion must be:
+Send from Client through:
 
 ```cpp
-expect(received.value.size() == 1, "tick returns exactly one gameplay packet");
-expect(received.value.front() == packet, "tick preserves gameplay packet exactly");
+auto& client_controller = jojo::OnlineMenuSessionTestAccess::controller(client);
+const auto sent = client_controller.send(packet, 21);
+expect(static_cast<bool>(sent), "test peer sends gameplay packet");
 ```
 
-If a minimal test-only seam is needed, keep it private to the test translation unit and do not expose mutable controller ownership in `OnlineMenuSession` public API.
+Then call `host.tick(22)` and require:
 
-- [ ] **Step 5: Add telemetry mirror assertions**
+```cpp
+expect(received && received.value.size() == 1,
+       "tick returns exactly one gameplay packet");
+expect(received.value.front() == packet,
+       "tick preserves gameplay packet exactly");
+```
 
-After traffic/ticks, require menu counters and RTT/jitter/loss to equal the underlying controller-derived values that are observable through the resulting flow. At minimum assert sent/received counters become nonzero on the expected peers and packet loss remains numerically consistent with controller behavior.
+- [ ] **Step 6: Prove telemetry mirrors controller-derived results**
 
-- [ ] **Step 6: Run targeted tests and full branch CI**
+After traffic/ticks, require expected sent/received counters to be nonzero and compare all exposed telemetry fields to the private test-access controller view on the same menu:
 
-Expected:
-- `jojo_online_menu_tests` passes;
-- `jojo_online_session_tests` remains green;
-- Linux and Windows/MSVC build and CTest pass.
+```cpp
+const auto& source = jojo::OnlineMenuSessionTestAccess::controller(host).view();
+expect(host.view().rtt_ms == source.rtt_ms, "RTT mirrors controller");
+expect(host.view().jitter_ms == source.jitter_ms, "jitter mirrors controller");
+expect(host.view().packet_loss_percent == source.packet_loss_percent,
+       "loss mirrors controller");
+expect(host.view().packets_sent == source.packets_sent,
+       "sent counter mirrors controller");
+expect(host.view().packets_received == source.packets_received,
+       "received counter mirrors controller");
+expect(host.view().packets_lost == source.packets_lost,
+       "lost counter mirrors controller");
+```
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Run targeted tests + branch CI and commit**
+
+Require Linux + Windows build/CTest green, including existing online-session tests.
 
 ```bash
 git add src/core/online_menu.cpp tests/test_online_menu.cpp
@@ -382,78 +357,41 @@ git commit -m "feat: connect online product flow to direct sessions"
 
 ---
 
-### Task 4: Reconnect, disconnect, fault, and return-home lifecycle GREEN
+### Task 4: GREEN reconnect, disconnect, faults, and return-home semantics
 
 **Files:**
 - Modify: `tests/test_online_menu.cpp`
 - Modify: `src/core/online_menu.cpp`
 
 **Interfaces:**
-- Consumes: Tasks 2-3 lifecycle and tick behavior.
-- Produces: complete state/reset contract required by the design spec.
+- Consumes: Tasks 2-3 menu lifecycle.
+- Produces: complete approved lifecycle/reset/error contract.
 
-- [ ] **Step 1: Add reconnect transition tests**
+- [ ] **Step 1: Add reconnect recovery test**
 
-Using a connected loopback pair and `fast_timing()`, drive one side past liveness timeout without servicing its peer until the menu maps to `reconnecting`.
-
-Require:
-
-```cpp
-expect(menu.view().screen == jojo::OnlineMenuScreen::reconnecting,
-       "silence maps to reconnecting");
-expect(!menu.view().can_start_gameplay, "reconnecting blocks gameplay");
-expect(menu.view().remote_endpoint == pinned_peer, "reconnecting preserves pinned peer");
-expect(menu.view().can_return_home, "reconnecting allows local cancel");
-```
-
-Then service both sides and require recovery to `connected`.
+Drive a connected pair past liveness timeout while withholding peer service until one side is `reconnecting`. Require pinned peer retained, gameplay blocked, `can_return_home == true`. Resume both peers and require return to Connected.
 
 - [ ] **Step 2: Add reconnect-timeout test**
 
-Drive a fresh pair into reconnecting and advance beyond `reconnect_timeout_ms` without peer recovery.
-
-Require:
-
-```cpp
-expect(menu.view().screen == jojo::OnlineMenuScreen::disconnected,
-       "reconnect timeout maps to disconnected");
-expect(menu.view().session_error == jojo::ErrorCode::none,
-       "reconnect timeout is not a fault");
-expect(menu.view().can_return_home, "disconnected can return home");
-```
+Drive a fresh pair to Reconnecting and advance beyond reconnect deadline without recovery. Require Disconnected, `session_error == none`, gameplay blocked, return-home enabled.
 
 - [ ] **Step 3: Implement and test explicit disconnect**
 
-`disconnect(now_ms)` must:
-1. require Connected;
-2. delegate to `controller_.disconnect(now_ms)`;
-3. refresh the view;
-4. return the controller result.
+`disconnect(now_ms)` requires Connected, delegates to controller, refreshes, returns controller result. Local side becomes Disconnected immediately; peer becomes Disconnected after its next tick.
 
-Require the local side to become Disconnected immediately and the peer to become Disconnected after its next `tick()`.
-
-Misuse while Home/Hosting/Joining/Reconnecting/Disconnected/Faulted must return `invalid_argument` and preserve lifecycle state.
+All other screens reject `disconnect()` with `invalid_argument` and preserve state.
 
 - [ ] **Step 4: Add deterministic operational-fault test**
 
-Use a loopback bind collision, matching the existing `OnlineSessionController` fault-contract strategy:
-1. start one Host on an explicit loopback port;
-2. start a second menu Host on the same explicit endpoint;
-3. require failure with `io_error`;
-4. require second menu screen `faulted`;
-5. require `session_error == io_error` and non-empty detail;
-6. require direct retry without reset to fail with `invalid_argument` while preserving the original fault.
+Bind one Host to an explicit loopback port and attempt a second Host on the same endpoint. Require the second menu to return `io_error`, map Faulted, preserve error/detail, and reject direct retry with `invalid_argument` until reset.
 
-- [ ] **Step 5: Implement `return_home()` exactly by screen**
-
-Rules:
+- [ ] **Step 5: Implement `return_home()` exactly**
 
 ```cpp
 switch (view_.screen) {
 case OnlineMenuScreen::home:
-    return;
 case OnlineMenuScreen::connected:
-    return; // explicit disconnect required first
+    return;
 case OnlineMenuScreen::hosting:
 case OnlineMenuScreen::joining:
 case OnlineMenuScreen::reconnecting:
@@ -462,46 +400,30 @@ case OnlineMenuScreen::faulted:
     controller_.reset();
     break;
 }
+const auto endpoint_text = view_.join_endpoint_text;
+view_.validation_error.clear();
+refresh_view();
+view_.join_endpoint_text = endpoint_text;
 ```
 
-After reset:
-- preserve `join_endpoint_text`;
-- clear `validation_error`;
-- clear role/endpoints/telemetry/session error through controller reset + refresh;
-- set Home permissions;
-- keep gameplay blocked.
+The implementation must preserve endpoint text, clear transient validation/session evidence via reset/refresh, and never silently reset Connected.
 
-- [ ] **Step 6: Add return-home tests for every legal source screen**
+- [ ] **Step 6: Test every return-home source state**
 
-Required cases:
+Require:
 - Home -> no-op;
 - Hosting -> Home;
 - Joining -> Home;
 - Reconnecting -> Home;
 - Disconnected -> Home;
 - Faulted -> Home;
-- Connected -> stays Connected and peer remains alive until explicit `disconnect`.
+- Connected -> remains Connected and peer stays alive until explicit Disconnect.
 
-Also require endpoint text retention across legal return-home reset:
+Also require endpoint text retained across every legal reset path and both validation/session errors cleared on Home.
 
-```cpp
-menu.set_join_endpoint("127.0.0.1:34567");
-// drive into resettable state
-menu.return_home();
-expect(menu.view().join_endpoint_text == "127.0.0.1:34567",
-       "return home retains endpoint text");
-expect(menu.view().validation_error.empty(), "return home clears validation error");
-expect(menu.view().session_error == jojo::ErrorCode::none,
-       "return home clears session fault");
-```
+- [ ] **Step 7: Full verification and commit**
 
-- [ ] **Step 7: Run targeted and full tests**
-
-Run the new menu test and existing session test first, then full CTest on Linux and Windows.
-
-Expected: all green.
-
-- [ ] **Step 8: Commit**
+Run targeted menu/session tests, then full CTest on Linux and Windows.
 
 ```bash
 git add src/core/online_menu.cpp tests/test_online_menu.cpp
@@ -510,7 +432,7 @@ git commit -m "test: lock online product flow lifecycle"
 
 ---
 
-### Task 5: Package verification and truth-boundary checkpoint
+### Task 5: Final feature evidence and repository truth checkpoint
 
 **Files:**
 - Modify: `PROJECT-STATE.md`
@@ -518,70 +440,54 @@ git commit -m "test: lock online product flow lifecycle"
 - Modify: `docs/architecture/PRODUCTION-READINESS.tsv`
 
 **Interfaces:**
-- Consumes: successful implementation commits and CI evidence from Tasks 1-4.
-- Produces: evidence-aligned repository truth for the new R2.5 product-flow checkpoint.
+- Consumes: successful Tasks 1-4 and exact CI/artifact evidence.
+- Produces: evidence-aligned R2.5 checkpoint with unchanged readiness semantics.
 
-- [ ] **Step 1: Run the final feature-branch CI on the exact implementation HEAD**
+- [ ] **Step 1: Verify exact functional implementation HEAD**
 
-Require:
-- Linux configure/build success;
-- Linux production-readiness gate success;
-- Linux CTest success;
-- Linux R2.5 direct UDP contract success;
-- Windows MSVC configure/build Release success;
-- Windows production-readiness gate success;
-- Windows CTest Release success;
-- Windows R2.5 direct UDP contract success;
-- single `JOJO-Recompiled-Windows-x64` artifact upload success.
+Require final feature branch CI success for:
+- Linux configure/build;
+- production-readiness gate;
+- full CTest;
+- R2.5 direct UDP contract;
+- Windows MSVC Release configure/build;
+- Windows readiness gate;
+- Windows CTest Release;
+- Windows R2.5 UDP contract;
+- `JOJO-Recompiled-Windows-x64` artifact upload.
 
-Record run ID, exact feature HEAD SHA, artifact ID, size, and SHA-256 digest.
+Record exact HEAD SHA, run ID, artifact ID, size, and SHA-256 digest.
 
-- [ ] **Step 2: Update `PROJECT-STATE.md` without overstating readiness**
+- [ ] **Step 2: Update `PROJECT-STATE.md`**
 
-Add an R2.5 Online Product Flow checkpoint containing:
-- branch name;
-- spec path;
-- plan path;
-- functional/test checkpoint SHA;
-- GREEN workflow run;
-- Windows artifact ID/digest;
-- implemented scope: Direct-only product flow, Host/Join state, validation, lifecycle mapping, telemetry exposure, packet preservation, disconnect/reset semantics;
-- explicit truth boundary: no rendered commercial menu, matchmaking, ranked, rooms, relay/NAT, accounts, or commercial rollback integration.
-
-Keep R2.5 status `implemented-unverified`.
+Record branch, spec, plan, functional checkpoint, GREEN run, artifact evidence, implemented Direct product-flow scope, and explicit non-goals. Keep R2.5 `implemented-unverified`.
 
 - [ ] **Step 3: Update `docs/NEXT-MILESTONES.md`**
 
-State that the portable Direct Online product flow is implemented on its feature branch and that the next honest increment is rendering/consuming it in the real in-game presentation path when that path exists, then game-specific rollback bridging when commercial integration evidence is available.
+State that Direct Online product flow is implemented and the next honest step is to render/consume it in the real in-game presentation path, followed by game-specific rollback bridging when commercial evidence permits. Do not claim M9 complete.
 
-Do not state that M9 is complete.
+- [ ] **Step 4: Update only R2.5 evidence if convention requires latest checkpoint**
 
-- [ ] **Step 4: Update readiness evidence only after successful feature CI**
-
-In `docs/architecture/PRODUCTION-READINESS.tsv`, update only the R2.5 evidence field to the successful feature workflow if repository convention requires latest checkpoint evidence.
-
-The row must remain:
+Keep row shape:
 
 ```tsv
 R2.5	implemented-unverified	github-actions:run-<successful-run-id>	none
 ```
 
-- [ ] **Step 5: Commit the documentation checkpoint**
+- [ ] **Step 5: Commit documentation checkpoint**
 
 ```bash
 git add PROJECT-STATE.md docs/NEXT-MILESTONES.md docs/architecture/PRODUCTION-READINESS.tsv
 git commit -m "checkpoint: record R2.5 online product flow evidence"
 ```
 
-- [ ] **Step 6: Verify the docs-checkpoint HEAD again**
+- [ ] **Step 6: Verify docs-checkpoint HEAD**
 
-Because docs changes trigger CI, require the final branch HEAD to pass the same Linux and Windows pipeline before claiming the package complete.
+Because docs trigger CI, require the final branch HEAD to pass Linux and Windows again before claiming package completion. Record final docs-run/artifact separately rather than recursively editing evidence.
 
-Record the final run and artifact separately from the functional checkpoint if necessary to avoid recursive documentation-evidence churn.
+- [ ] **Step 7: Branch-finishing handoff**
 
-- [ ] **Step 7: Integration handoff**
-
-After final green verification, use the branch-finishing workflow. Do not update `main` without explicit user authorization.
+Use the finishing-a-development-branch workflow. Do not merge/update `main` without explicit user authorization.
 
 ---
 
@@ -589,38 +495,12 @@ After final green verification, use the branch-finishing workflow. Do not update
 
 ### Spec coverage
 
-Covered explicitly:
-- Direct-only scope;
-- portable `OnlineMenuSession` boundary;
-- all seven product screens;
-- endpoint text and validation separation;
-- Host/Join delegation;
-- controller-owned lifecycle/telemetry;
-- `tick()` packet preservation;
-- gameplay readiness gate;
-- reconnect/recovery/timeout;
-- explicit disconnect;
-- operational fault persistence;
-- `return_home()` semantics for every screen;
-- endpoint-text retention;
-- no Win32 conversion-shell Online UI;
-- CI/evidence and readiness truth boundary.
+The plan explicitly covers Direct-only scope, all seven menu states, form validation, Host/Join delegation, controller-owned lifecycle, transparent `tick()` packet return, telemetry mirroring, gameplay gate, reconnect recovery/timeout, explicit disconnect, operational faults, all `return_home()` semantics, endpoint-text retention, Win32-shell exclusion, CI evidence, and readiness truth boundaries.
 
 ### Placeholder scan
 
-No `TBD`, `TODO`, “implement later”, “similar to”, or unspecified generic error-handling steps remain.
+No `TBD`, `TODO`, generic “handle errors”, unspecified test seam, or deferred implementation placeholder remains.
 
 ### Type consistency
 
-The plan uses the same public names and signatures as the approved spec:
-- `OnlineMenuScreen`
-- `OnlineMenuViewState`
-- `OnlineMenuSession`
-- `set_join_endpoint`
-- `start_host`
-- `start_join`
-- `tick`
-- `disconnect`
-- `return_home`.
-
-One implementation-sensitive point is intentionally constrained rather than exposed as public API: the packet-preservation integration test must not add a mutable controller accessor merely for testing. If a seam is necessary, it stays test-private.
+All public names/signatures match the approved spec. The only additional declaration is the private `friend struct OnlineMenuSessionTestAccess`, used solely by `tests/test_online_menu.cpp`; it does not change the production-facing API.
