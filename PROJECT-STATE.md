@@ -4,9 +4,11 @@
 
 - Repository: `matheuz232/JOJO-Recompiled`
 - Current integrated branch: `main`
-- Current `main` HEAD: `0c76a7c089e9d4a0a09c4f98c850cedc20180b30`
-- R2.5 merge commit: `e13f7fc541315b7ab0ae1dc3d0e1c388db368700`
-- Post-merge `main` CI: `33838410540` — Linux and Windows passed build, readiness, tests and the R2.5 UDP contract.
+- R2.5 online-controller merge commit: `5122c2ad4eb475ec852eb7196f2f98dc8fa2b998`
+- Post-merge `main` CI: `33862743012` — Linux and Windows passed build, readiness, CTests and the R2.5 UDP contract.
+- Windows artifact: `JOJO-Recompiled-Windows-x64`
+- Artifact ID: `9932817079`
+- Artifact digest: `sha256:f574aace1a1083e7227610c4a2a441d54986ef60869d4311f685b0ddc769a3ff`
 - Shipping policy: one `JOJO-Recompiled.exe`.
 - Mods remain deferred until the base game reaches 100%.
 
@@ -16,7 +18,7 @@
 - R2.2: `blocked-external-evidence` — requires a legally supplied supported commercial image.
 - R2.3: `implemented-unverified` — generic execution/device integration exists; commercial compatibility is not proven.
 - R2.4: `blocked-external-evidence` — real gameplay integration requires the same legal commercial evidence.
-- R2.5: `implemented-unverified` — direct UDP transport plus reconnect/liveness/telemetry are integrated into `main`; the product-facing direct-session controller is implemented on its feature branch; M9 is not complete.
+- R2.5: `implemented-unverified` — direct UDP transport, reconnect/liveness/telemetry and the product-facing direct-session controller are integrated into `main`; M9 is not complete.
 - R2.6: `not-started`
 
 ## R2.5 reconnect checkpoint
@@ -32,14 +34,18 @@ Implemented scope includes configurable heartbeat/liveness/reconnect timing, pin
 
 ## R2.5 online controller checkpoint
 
-- Branch: `feature/r2-5-online-controller`
+- Source branch: `feature/r2-5-online-controller` (merged)
 - Design: `docs/superpowers/specs/2026-09-04-r2-5-online-controller-design.md`
 - Plan: `docs/superpowers/plans/2026-09-04-r2-5-online-controller.md`
 - Functional/test checkpoint: `2a39d9cd51e62b7a53ee9fef6754df30b25510c8`
-- GREEN workflow: `33842642660`
+- Feature GREEN workflow: `33842642660`
+- Feature checkpoint: `4e308e5652372b27e9d54ae594a2cf9cbd9f8041`
+- Feature checkpoint workflow: `33843852831`
+- Integration merge commit: `5122c2ad4eb475ec852eb7196f2f98dc8fa2b998`
+- Post-merge `main` workflow: `33862743012`
 - Windows artifact: `JOJO-Recompiled-Windows-x64`
-- Artifact ID: `9925476699`
-- Artifact digest: `sha256:06ccafe6611df7bb55cb1c7094e0304f724537fa95b511ae08f816cc60ab346e`
+- Artifact ID: `9932817079`
+- Artifact digest: `sha256:f574aace1a1083e7227610c4a2a441d54986ef60869d4311f685b0ddc769a3ff`
 
 Implemented controller scope includes strict IPv4 `A.B.C.D:PORT` parsing, host/join lifecycle, waiting/connecting/connected/reconnecting/disconnected/faulted product states, local/remote endpoint presentation, gameplay gating, RTT/jitter/loss/counter telemetry, reconnect recovery/timeout mapping, explicit disconnect, reset, spoof-resistant liveness behavior, and operational-fault persistence.
 
