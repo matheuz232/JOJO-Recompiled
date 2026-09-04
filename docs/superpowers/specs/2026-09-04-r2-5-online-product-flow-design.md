@@ -133,7 +133,7 @@ struct OnlineMenuViewState {
 - `role`, endpoints, telemetry, and session errors mirror `OnlineSessionController::view()`.
 - `can_start_gameplay` is always derived from `OnlineSessionController::view().can_send_gameplay`.
 - `can_disconnect` is true only when the underlying controller is connected.
-- `can_return_home` is false while connected because leaving a live session must not silently discard the peer; the caller must invoke `disconnect(now_ms)` first.
+- `can_return_home` is true in Hosting, Joining, Reconnecting, Disconnected, and Faulted; it is false in Home and Connected. Connected must use explicit `disconnect(now_ms)` before returning Home.
 - `can_host` and `can_join` are true only in Home when no active controller session exists.
 
 ## Public API
@@ -180,7 +180,7 @@ Exact private helpers may differ during implementation, but the public semantics
 
 `set_join_endpoint(text)` only updates `join_endpoint_text` and clears any prior form-level `validation_error`.
 
-It must not parse immediately, open sockets, alter session state, or produce a controller fault.
+It must not parse immediately, open sockets, alter session state, or produce a controller fault. It may update the retained text while another screen is active, but this never changes the active network session and does not make Join available outside Home.
 
 ### Starting Host
 
@@ -200,6 +200,8 @@ On operational controller failure:
 - screen becomes `faulted`;
 - controller `ErrorCode` and detail are exposed;
 - retry requires reset via `return_home()`.
+
+Calling `start_host` outside Home returns `invalid_argument`, preserves the current lifecycle state, and does not create or overwrite a session fault.
 
 ### Starting Join
 
@@ -225,11 +227,15 @@ On success:
 
 Operational failure follows the same `faulted` behavior as Host.
 
+Calling `start_join` outside Home returns `invalid_argument`, preserves the current lifecycle state, and does not create or overwrite a session fault.
+
 ### Tick
 
-`tick(now_ms)` is the single caller-driven progression point for product state.
+`tick(now_ms)` is the single caller-driven progression point for an active product session.
 
-It delegates to `OnlineSessionController::poll(now_ms)`, refreshes the UI snapshot, and returns every gameplay packet produced by the controller.
+It is valid only while the menu is Hosting, Joining, Connected, or Reconnecting. In Home, Disconnected, or Faulted it returns `invalid_argument` without changing the view or fault state.
+
+For a valid active session, it delegates to `OnlineSessionController::poll(now_ms)`, refreshes the UI snapshot, and returns every gameplay packet produced by the controller.
 
 The menu layer must not drop, rewrite, reorder, deserialize into gameplay objects, or otherwise consume returned gameplay packets. This preserves a clean handoff point for the future rollback/gameplay bridge.
 
@@ -271,7 +277,7 @@ On success:
 - gameplay gate closes;
 - the peer will observe normal remote disconnect through its own poll/tick path.
 
-Disconnect misuse remains a validation error/result and does not fabricate a controller fault.
+Calling `disconnect` outside Connected returns `invalid_argument`, preserves the current lifecycle state, and does not fabricate a controller fault.
 
 ### Return Home / Reset
 
@@ -283,14 +289,14 @@ Rules:
 - from Disconnected: reset controller and clear transient UI/session state;
 - from Faulted: reset controller and clear fault state;
 - from Hosting, Joining, or Reconnecting: cancel locally by resetting the controller; do not fabricate a remote notification;
-- from Connected: do not silently reset and do not return Home; the UI/caller must invoke `disconnect(now_ms)` first.
+- from Connected: no-op; do not silently reset and do not return Home. The UI/caller must invoke `disconnect(now_ms)` first.
 
 After a successful return to Home:
 
 - role/endpoints/telemetry/session error are cleared;
 - gameplay is blocked;
 - Host/Join actions are enabled;
-- the endpoint text may remain available for user convenience;
+- the endpoint text remains available for user convenience;
 - `validation_error` is cleared.
 
 The retained endpoint-text rule prevents needless retyping while keeping transport state fully reset.
@@ -357,29 +363,33 @@ Testing must use TDD RED -> GREEN and real loopback `OnlineSessionController` be
 The required contract includes at least:
 
 1. initial Home state and action permissions;
-2. endpoint editing and clearing prior validation error;
-3. malformed endpoint remains Home and does not fault controller behavior;
-4. Host starts and maps to Hosting/Waiting for Peer;
-5. Join starts and maps to Joining/Connecting;
-6. real loopback Host/Join pair reaches Connected through caller-driven ticks;
-7. local and remote endpoints are exposed correctly;
-8. role is exposed correctly;
-9. telemetry counters/RTT/jitter/loss mirror controller updates;
-10. gameplay gate is false before connection and true only while Connected;
-11. gameplay packet returned by controller poll is preserved and returned by `tick()`;
-12. silence maps to Reconnecting without a second menu-owned timer;
-13. pinned-peer reconnect recovery maps back to Connected;
-14. reconnect timeout maps to Disconnected and not Faulted;
-15. explicit disconnect maps local and peer views to Disconnected;
-16. deterministic operational failure maps to Faulted and preserves error code/detail;
-17. Faulted session cannot retry directly;
-18. `return_home()` from Faulted clears the controller fault and enables a fresh Host/Join;
-19. `return_home()` from Disconnected returns Home;
-20. `return_home()` from Hosting/Joining/Reconnecting cancels locally and returns Home;
-21. `return_home()` from Connected is rejected semantically/no-op and does not silently drop the peer;
-22. endpoint text is retained across `return_home()` while transient errors/session evidence are cleared;
-23. all prior `jojo_online_session_tests` remain green;
-24. full Linux and Windows/MSVC CI, readiness gate, CTest suite, R2.5 direct UDP contract, and Windows single-executable artifact remain green.
+2. exact `can_return_home` policy across all menu screens;
+3. endpoint editing and clearing prior validation error;
+4. malformed endpoint remains Home and does not fault controller behavior;
+5. Host starts and maps to Hosting/Waiting for Peer;
+6. Host/Join misuse outside Home returns validation failure without changing lifecycle/fault state;
+7. Join starts and maps to Joining/Connecting;
+8. real loopback Host/Join pair reaches Connected through caller-driven ticks;
+9. local and remote endpoints are exposed correctly;
+10. role is exposed correctly;
+11. telemetry counters/RTT/jitter/loss mirror controller updates;
+12. gameplay gate is false before connection and true only while Connected;
+13. gameplay packet returned by controller poll is preserved and returned by `tick()`;
+14. `tick()` in Home/Disconnected/Faulted returns validation failure without state mutation;
+15. silence maps to Reconnecting without a second menu-owned timer;
+16. pinned-peer reconnect recovery maps back to Connected;
+17. reconnect timeout maps to Disconnected and not Faulted;
+18. explicit disconnect maps local and peer views to Disconnected;
+19. disconnect misuse outside Connected preserves lifecycle/fault state;
+20. deterministic operational failure maps to Faulted and preserves error code/detail;
+21. Faulted session cannot retry directly;
+22. `return_home()` from Faulted clears the controller fault and enables a fresh Host/Join;
+23. `return_home()` from Disconnected returns Home;
+24. `return_home()` from Hosting/Joining/Reconnecting cancels locally and returns Home;
+25. `return_home()` from Connected is a no-op and does not silently drop the peer;
+26. endpoint text is retained across `return_home()` while transient errors/session evidence are cleared;
+27. all prior `jojo_online_session_tests` remain green;
+28. full Linux and Windows/MSVC CI, readiness gate, CTest suite, R2.5 direct UDP contract, and Windows single-executable artifact remain green.
 
 Tests prove the portable product-flow contract only. They do not establish commercial-game compatibility or complete M9.
 
