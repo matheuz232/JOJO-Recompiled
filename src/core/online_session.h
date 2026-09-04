@@ -39,6 +39,32 @@ struct OnlineSessionViewState {
 [[nodiscard]] Result<NetworkEndpoint> parse_direct_endpoint(std::string_view text);
 [[nodiscard]] std::string format_direct_endpoint(NetworkEndpoint endpoint);
 
-class OnlineSessionController;
+class OnlineSessionController {
+public:
+    [[nodiscard]] const OnlineSessionViewState& view() const noexcept { return view_; }
+
+    [[nodiscard]] Result<void> host(
+        NetworkEndpoint local,
+        DirectSessionTiming timing = {});
+
+    [[nodiscard]] Result<void> join(
+        NetworkEndpoint local,
+        NetworkEndpoint remote,
+        DirectSessionTiming timing,
+        std::uint64_t now_ms);
+
+    [[nodiscard]] Result<std::vector<NetworkPacket>> poll(std::uint64_t now_ms);
+    [[nodiscard]] Result<void> send(const NetworkPacket& packet,
+                                    std::uint64_t now_ms);
+    [[nodiscard]] Result<void> disconnect(std::uint64_t now_ms);
+    void reset() noexcept;
+
+private:
+    void refresh_view() noexcept;
+    void set_fault(ErrorCode error, std::string detail);
+
+    std::optional<DirectUdpSession> session_{};
+    OnlineSessionViewState view_{};
+};
 
 } // namespace jojo
