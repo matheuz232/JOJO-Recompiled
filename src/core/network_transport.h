@@ -311,10 +311,18 @@ enum class DirectSessionRole {
     client,
 };
 
+struct DirectSessionTiming {
+    std::uint64_t retry_interval_ms{100u};
+    std::uint64_t heartbeat_interval_ms{500u};
+    std::uint64_t liveness_timeout_ms{2000u};
+    std::uint64_t reconnect_timeout_ms{5000u};
+};
+
 enum class DirectSessionState {
     idle,
     connecting,
     connected,
+    reconnecting,
     disconnected,
 };
 
@@ -330,14 +338,37 @@ public:
         DirectSessionRole role,
         NetworkEndpoint local,
         std::uint64_t retry_interval_ms = 100u) {
+        DirectSessionTiming timing{};
+        timing.retry_interval_ms = retry_interval_ms;
+        return bind(role, local, timing);
+    }
+
+    [[nodiscard]] static Result<DirectUdpSession> bind(
+        DirectSessionRole role,
+        NetworkEndpoint local,
+        DirectSessionTiming timing) {
+        if (timing.heartbeat_interval_ms == 0u ||
+            timing.liveness_timeout_ms == 0u ||
+            timing.reconnect_timeout_ms == 0u) {
+            return Result<DirectUdpSession>::failure(
+                ErrorCode::invalid_argument,
+                "direct-session heartbeat/liveness/reconnect timing must be non-zero");
+        }
+        if (timing.liveness_timeout_ms < timing.heartbeat_interval_ms) {
+            return Result<DirectUdpSession>::failure(
+                ErrorCode::invalid_argument,
+                "direct-session liveness timeout must not be shorter than heartbeat interval");
+        }
+
         auto transport = UdpNetworkTransport::bind(local);
         if (!transport) {
             return Result<DirectUdpSession>::failure(transport.error, transport.detail);
         }
         DirectUdpSession session;
         session.role_ = role;
+        session.timing_ = timing;
         session.transport_ = std::move(transport.value);
-        session.reliability_.emplace(retry_interval_ms);
+        session.reliability_.emplace(timing.retry_interval_ms);
         session.telemetry_.state = NetworkConnectionState::disconnected;
         return Result<DirectUdpSession>::success(std::move(session));
     }
@@ -361,23 +392,19 @@ public:
                                          "direct-session remote port must be non-zero");
         }
         if (state_ == DirectSessionState::connected ||
-            state_ == DirectSessionState::connecting) {
+            state_ == DirectSessionState::connecting ||
+            state_ == DirectSessionState::reconnecting) {
             return Result<void>::failure(ErrorCode::invalid_argument,
                                          "direct-session connect is already active");
         }
+
         remote_ = remote;
-        NetworkPacket hello{};
-        hello.kind = NetworkPacketKind::session_hello;
-        hello.sequence = next_sequence_++;
-        hello.timestamp_ms = now_ms;
-        hello_sequence_ = hello.sequence;
-        const auto tracked = reliability_->track(hello, now_ms);
-        if (!tracked) return tracked;
-        const auto sent = send_control_packet(hello);
-        if (!sent) {
-            reliability_->acknowledge(hello.sequence);
+        const auto hello = send_new_hello(now_ms);
+        if (!hello) {
+            if (hello_sequence_ != 0u) reliability_->acknowledge(hello_sequence_);
+            hello_sequence_ = 0u;
             remote_.reset();
-            return sent;
+            return hello;
         }
         state_ = DirectSessionState::connecting;
         telemetry_.state = NetworkConnectionState::reconnecting;
@@ -389,6 +416,12 @@ public:
         if (!reliability_) {
             return Result<std::vector<NetworkPacket>>::failure(
                 ErrorCode::backend_unavailable, "direct UDP session is not bound");
+        }
+
+        if (state_ == DirectSessionState::reconnecting &&
+            interval_elapsed(now_ms, reconnect_started_ms_, timing_.reconnect_timeout_ms)) {
+            mark_disconnected();
+            return Result<std::vector<NetworkPacket>>::success(std::move(delivered));
         }
 
         if (remote_ && state_ != DirectSessionState::disconnected) {
@@ -425,6 +458,13 @@ public:
             telemetry_.record_packet_received();
             if (packet.ack != 0u) reliability_->acknowledge(packet.ack);
 
+            if ((state_ == DirectSessionState::connected ||
+                 state_ == DirectSessionState::reconnecting) &&
+                packet.kind == NetworkPacketKind::disconnect) {
+                mark_disconnected();
+                continue;
+            }
+
             if (role_ == DirectSessionRole::host &&
                 packet.kind == NetworkPacketKind::session_hello) {
                 NetworkPacket accept{};
@@ -443,18 +483,17 @@ public:
                     return Result<std::vector<NetworkPacket>>::failure(
                         sent.error, sent.detail);
                 }
-                state_ = DirectSessionState::connected;
-                telemetry_.state = NetworkConnectionState::connected;
+                mark_connected(now_ms);
                 continue;
             }
 
             if (role_ == DirectSessionRole::client &&
-                state_ == DirectSessionState::connecting &&
+                (state_ == DirectSessionState::connecting ||
+                 state_ == DirectSessionState::reconnecting) &&
                 packet.kind == NetworkPacketKind::session_accept) {
                 if (packet.ack != hello_sequence_) continue;
                 reliability_->acknowledge(hello_sequence_);
-                state_ = DirectSessionState::connected;
-                telemetry_.state = NetworkConnectionState::connected;
+                mark_connected(now_ms);
 
                 NetworkPacket acknowledge{};
                 acknowledge.kind = NetworkPacketKind::ping;
@@ -470,11 +509,8 @@ public:
             }
 
             if (state_ != DirectSessionState::connected) continue;
-            if (packet.kind == NetworkPacketKind::disconnect) {
-                state_ = DirectSessionState::disconnected;
-                telemetry_.state = NetworkConnectionState::disconnected;
-                continue;
-            }
+            refresh_peer_liveness(now_ms);
+
             if (packet.kind == NetworkPacketKind::ping) {
                 NetworkPacket pong{};
                 pong.kind = NetworkPacketKind::pong;
@@ -501,6 +537,30 @@ public:
             }
             delivered.push_back(packet);
         }
+
+        if (state_ == DirectSessionState::connected && remote_) {
+            if (has_peer_receive_time_ &&
+                interval_elapsed(now_ms, last_peer_receive_ms_, timing_.liveness_timeout_ms)) {
+                const auto reconnect = begin_reconnect(now_ms);
+                if (!reconnect) {
+                    return Result<std::vector<NetworkPacket>>::failure(
+                        reconnect.error, reconnect.detail);
+                }
+            } else if (interval_elapsed(
+                           now_ms, last_heartbeat_send_ms_, timing_.heartbeat_interval_ms)) {
+                const auto heartbeat = send_heartbeat(now_ms);
+                if (!heartbeat) {
+                    return Result<std::vector<NetworkPacket>>::failure(
+                        heartbeat.error, heartbeat.detail);
+                }
+            }
+        }
+
+        if (state_ == DirectSessionState::reconnecting &&
+            interval_elapsed(now_ms, reconnect_started_ms_, timing_.reconnect_timeout_ms)) {
+            mark_disconnected();
+        }
+
         return Result<std::vector<NetworkPacket>>::success(std::move(delivered));
     }
 
@@ -533,12 +593,77 @@ public:
         const auto sent = transport_.send_packet(*remote_, packet);
         if (!sent) return sent;
         telemetry_.record_packet_sent();
-        state_ = DirectSessionState::disconnected;
-        telemetry_.state = NetworkConnectionState::disconnected;
+        mark_disconnected();
         return Result<void>::success();
     }
 
 private:
+    [[nodiscard]] static bool interval_elapsed(
+        std::uint64_t now_ms,
+        std::uint64_t then_ms,
+        std::uint64_t interval_ms) noexcept {
+        return now_ms >= then_ms && now_ms - then_ms >= interval_ms;
+    }
+
+    void mark_connected(std::uint64_t now_ms) noexcept {
+        state_ = DirectSessionState::connected;
+        telemetry_.state = NetworkConnectionState::connected;
+        last_peer_receive_ms_ = now_ms;
+        last_heartbeat_send_ms_ = now_ms;
+        reconnect_started_ms_ = 0u;
+        has_peer_receive_time_ = true;
+    }
+
+    void refresh_peer_liveness(std::uint64_t now_ms) noexcept {
+        last_peer_receive_ms_ = now_ms;
+        has_peer_receive_time_ = true;
+    }
+
+    void mark_disconnected() noexcept {
+        state_ = DirectSessionState::disconnected;
+        telemetry_.state = NetworkConnectionState::disconnected;
+        reconnect_started_ms_ = 0u;
+    }
+
+    [[nodiscard]] Result<void> send_new_hello(std::uint64_t now_ms) {
+        NetworkPacket hello{};
+        hello.kind = NetworkPacketKind::session_hello;
+        hello.sequence = next_sequence_++;
+        hello.timestamp_ms = now_ms;
+        hello_sequence_ = hello.sequence;
+        const auto tracked = reliability_->track(hello, now_ms);
+        if (!tracked) return tracked;
+        return send_control_packet(hello);
+    }
+
+    [[nodiscard]] Result<void> begin_reconnect(std::uint64_t now_ms) {
+        if (!remote_) {
+            return Result<void>::failure(ErrorCode::invalid_argument,
+                                         "direct-session reconnect requires pinned peer");
+        }
+        state_ = DirectSessionState::reconnecting;
+        telemetry_.state = NetworkConnectionState::reconnecting;
+        telemetry_.record_packet_lost();
+        reconnect_started_ms_ = now_ms;
+        last_heartbeat_send_ms_ = now_ms;
+
+        if (role_ == DirectSessionRole::client) {
+            return send_new_hello(now_ms);
+        }
+        return Result<void>::success();
+    }
+
+    [[nodiscard]] Result<void> send_heartbeat(std::uint64_t now_ms) {
+        NetworkPacket ping{};
+        ping.kind = NetworkPacketKind::ping;
+        ping.sequence = next_sequence_++;
+        ping.timestamp_ms = now_ms;
+        const auto sent = send_control_packet(ping);
+        if (!sent) return sent;
+        last_heartbeat_send_ms_ = now_ms;
+        return Result<void>::success();
+    }
+
     [[nodiscard]] Result<void> send_control_packet(const NetworkPacket& packet) {
         if (!remote_) {
             return Result<void>::failure(ErrorCode::invalid_argument,
@@ -552,12 +677,17 @@ private:
 
     DirectSessionRole role_{DirectSessionRole::host};
     DirectSessionState state_{DirectSessionState::idle};
+    DirectSessionTiming timing_{};
     UdpNetworkTransport transport_{};
     std::optional<NetworkEndpoint> remote_{};
     std::optional<ControlReliabilityQueue> reliability_{};
     NetworkTelemetry telemetry_{};
     std::uint32_t next_sequence_{1u};
     std::uint32_t hello_sequence_{};
+    std::uint64_t last_peer_receive_ms_{};
+    std::uint64_t last_heartbeat_send_ms_{};
+    std::uint64_t reconnect_started_ms_{};
+    bool has_peer_receive_time_{};
 };
 
 } // namespace jojo
