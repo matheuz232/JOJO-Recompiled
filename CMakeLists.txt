@@ -22,6 +22,7 @@ add_library(jojo_core STATIC
   src/core/training.cpp
   src/core/rollback.cpp
   src/core/network_protocol.cpp
+  src/core/online_session.cpp
   src/core/disc_image.cpp
   src/core/disc_media.cpp
   src/core/iso9660.cpp
@@ -245,6 +246,10 @@ add_test(NAME jojo_training_tests COMMAND jojo_training_tests)
 add_executable(jojo_rollback_tests tests/test_rollback.cpp)
 target_link_libraries(jojo_rollback_tests PRIVATE jojo_core)
 add_test(NAME jojo_rollback_tests COMMAND jojo_rollback_tests)
+
+add_executable(jojo_online_session_tests tests/test_online_session.cpp)
+target_link_libraries(jojo_online_session_tests PRIVATE jojo_core)
+add_test(NAME jojo_online_session_tests COMMAND jojo_online_session_tests)
 
 add_executable(jojo_mod_policy_tests tests/test_mod_policy.cpp)
 target_link_libraries(jojo_mod_policy_tests PRIVATE jojo_core)
