@@ -317,6 +317,58 @@ void test_spoof_does_not_refresh_product_liveness() {
     expect(host.view().remote_endpoint == pinned,
            "reconnect retains original pinned peer after spoof");
 }
+
+void test_operational_fault_contract() {
+    jojo::OnlineSessionController first;
+    expect(static_cast<bool>(first.host(jojo::NetworkEndpoint::loopback(0), fast_timing())),
+           "first host binds");
+    if (!first.view().local_endpoint) return;
+    const auto occupied = *first.view().local_endpoint;
+
+    jojo::OnlineSessionController second;
+    const auto collision = second.host(occupied, fast_timing());
+    expect(!collision, "second host bind collision fails");
+    expect(collision.error == jojo::ErrorCode::io_error,
+           "bind collision preserves transport io_error");
+    expect(second.view().state == jojo::OnlineSessionState::faulted,
+           "operational bind failure faults controller");
+    expect(second.view().last_error == collision.error,
+           "fault snapshot preserves error code");
+    expect(second.view().last_error_detail == collision.detail &&
+               !second.view().last_error_detail.empty(),
+           "fault snapshot preserves detail");
+
+    const auto retry_without_reset = second.host(
+        jojo::NetworkEndpoint::loopback(0), fast_timing());
+    expect(!retry_without_reset &&
+               retry_without_reset.error == jojo::ErrorCode::invalid_argument,
+           "faulted controller requires reset before restart");
+    expect(second.view().last_error == collision.error,
+           "lifecycle misuse does not overwrite preserved fault");
+
+    second.reset();
+    expect(second.view().state == jojo::OnlineSessionState::inactive,
+           "reset clears faulted state");
+    expect(second.view().last_error == jojo::ErrorCode::none,
+           "reset clears fault code");
+    expect(static_cast<bool>(second.host(jojo::NetworkEndpoint::loopback(0), fast_timing())),
+           "reset permits host after operational fault");
+
+    jojo::OnlineSessionController corrected;
+    const auto bad_join = corrected.join(jojo::NetworkEndpoint::loopback(0),
+                                         jojo::NetworkEndpoint::loopback(0),
+                                         fast_timing(), 0);
+    expect(!bad_join && bad_join.error == jojo::ErrorCode::invalid_argument,
+           "zero remote port is validation failure");
+    expect(corrected.view().state == jojo::OnlineSessionState::inactive,
+           "bad join input leaves controller inactive");
+    expect(corrected.view().last_error == jojo::ErrorCode::none &&
+               corrected.view().last_error_detail.empty(),
+           "bad join input stores no fault");
+    expect(static_cast<bool>(corrected.join(jojo::NetworkEndpoint::loopback(0),
+                                            occupied, fast_timing(), 0)),
+           "corrected join input retries without reset");
+}
 } // namespace
 
 int main() {
@@ -326,5 +378,6 @@ int main() {
     test_reconnect_recovery_and_timeout();
     test_disconnect_and_reset();
     test_spoof_does_not_refresh_product_liveness();
+    test_operational_fault_contract();
     return failures == 0 ? 0 : 1;
 }
