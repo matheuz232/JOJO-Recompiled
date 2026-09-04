@@ -23,7 +23,6 @@ add_library(jojo_core STATIC
   src/core/rollback.cpp
   src/core/network_protocol.cpp
   src/core/online_session.cpp
-  src/core/online_menu.cpp
   src/core/disc_image.cpp
   src/core/disc_media.cpp
   src/core/iso9660.cpp
