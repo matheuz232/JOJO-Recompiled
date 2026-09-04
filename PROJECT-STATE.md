@@ -13,7 +13,7 @@
 - R2.2: `blocked-external-evidence` — legally supplied supported commercial image required.
 - R2.3: `implemented-unverified` — generic device/execution implementation exists; commercial compatibility is not proven.
 - R2.4: `blocked-external-evidence` — real gameplay integration requires the same legal commercial evidence.
-- R2.5: `implemented-unverified` — direct UDP/session transport increment exists; M9 is not complete.
+- R2.5: `implemented-unverified` — direct UDP session transport plus reconnect/liveness/telemetry increments exist; M9 is not complete.
 - R2.6: `not-started`.
 - Priority: `R2.5 -> R2.6 -> 100% -> mods`, with R2.2/R2.4 resumed immediately when legal commercial evidence is available.
 
@@ -37,6 +37,8 @@ Implemented generic scope includes chained Maple DMA, full-chain validation/atom
 - RED workflow: `33712848574` — standalone contract compiled and failed because `core/network_transport.h` was absent.
 - Implementation commit: `7ca8dff3fb0a24f13d6be12b6051ee3a7c77bd0d`.
 - Targeted GREEN workflow: `33712996387`.
+- Windows CI environment fix: `921e77108adeaea931b3620e9c82a4e161c5b1b7`.
+- Full Linux/Windows/readiness/artifact workflow after CI fix: `33835799076`.
 
 Implemented increment:
 
@@ -54,7 +56,31 @@ Implemented increment:
 - explicit disconnect state propagation;
 - RAII socket lifecycle with POSIX sockets and Winsock implementation selected at compile time.
 
-This increment does **not** claim production matchmaking, ranked services, NAT traversal, relay service, accounts, encryption, public rooms, invitations, profiles/history/replays or complete M9 UI.
+## R2.5 reconnect/liveness/telemetry checkpoint
+
+- Design: `docs/superpowers/specs/2026-09-04-r2-5-reconnect-telemetry-design.md`.
+- Plan: `docs/superpowers/plans/2026-09-04-r2-5-reconnect-telemetry.md`.
+- RED commit: `bb1614c52114b37e3181cf5e805b3ff840c49978`.
+- RED workflow: `33837212025` — repository build/readiness/CTest remained green while the standalone R2.5 contract failed on the intentionally missing reconnect API/state.
+- Implementation commit: `4e7460fa04c7c40b44bc88e87cfd6b1eff6e01cc`.
+- Full Linux/Windows/readiness/artifact GREEN workflow: `33837379074`.
+- Windows artifact: `JOJO-Recompiled-Windows-x64`, digest `sha256:df3c8a7b66e894aa7566a02b2fc3ba2d2dd4ea5f152aea7c7ba8b801ed148704`.
+
+Implemented increment:
+
+- explicit `DirectSessionTiming` with defaults of 100 ms control retry, 500 ms heartbeat, 2000 ms liveness timeout and 5000 ms reconnect timeout;
+- invalid zero heartbeat/liveness/reconnect timings rejected, and liveness shorter than heartbeat rejected;
+- caller-time-driven heartbeat ping/pong and RTT/jitter telemetry;
+- valid traffic from the pinned peer refreshes liveness while traffic from other endpoints is ignored before liveness accounting;
+- silence transitions `connected -> reconnecting` and records heartbeat-loss telemetry;
+- gameplay/data send and delivery remain gated to `connected`;
+- client reconnect reuses `session_hello`/`session_accept` only with the existing pinned endpoint;
+- host reconnect acceptance remains pinned to the already selected peer;
+- successful same-peer handshake restores `connected` without changing gameplay ownership;
+- reconnect deadline transitions terminally to `disconnected` and late queued traffic cannot auto-revive the session;
+- explicit peer/local disconnect remains terminal.
+
+These R2.5 increments do **not** claim production matchmaking, ranked services, NAT traversal, relay service, accounts, encryption, public rooms, invitations, profiles/history/replays, game-specific online integration or complete M9 UI.
 
 ## Working protocol
 
