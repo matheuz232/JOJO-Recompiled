@@ -1,8 +1,10 @@
 #include "core/conversion.h"
 #include "core/disc_image.h"
 #include "core/version.h"
+#include <array>
 #include <charconv>
 #include <fstream>
+#include <string_view>
 #include <system_error>
 #ifdef _WIN32
 #define NOMINMAX
@@ -11,6 +13,17 @@
 
 namespace jojo {
 namespace {
+struct ObservedDiscRevision {
+    std::string_view source_format;
+    std::uint64_t source_size;
+    std::string_view hash_hex;
+    std::string_view revision_id;
+};
+
+constexpr std::array<ObservedDiscRevision, 1> observed_disc_revisions{{
+    {"bin", 666806112ull, "b8b5dbf79cdb9fcf", "jojo-usa-observed-b8b5dbf79cdb9fcf"},
+}};
+
 std::string trim(std::string s) {
     const auto first = s.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) return {};
@@ -48,6 +61,23 @@ Result<void> replace_file(const std::filesystem::path& temp,
     return Result<void>::success();
 #endif
 }
+}
+
+Result<GameRevisionMatch> identify_observed_disc_revision(
+    std::string_view source_format,
+    std::uint64_t source_size,
+    std::string_view hash_hex) {
+    for (const auto& observed : observed_disc_revisions) {
+        if (observed.source_format == source_format &&
+            observed.source_size == source_size &&
+            observed.hash_hex == hash_hex) {
+            return Result<GameRevisionMatch>::success(
+                GameRevisionMatch{std::string(observed.revision_id)});
+        }
+    }
+    return Result<GameRevisionMatch>::failure(
+        ErrorCode::unknown_revision,
+        "disc fingerprint does not match any observed game revision");
 }
 
 Result<void> save_conversion_manifest_atomic(const std::filesystem::path& path,
@@ -155,6 +185,15 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
     report(ConversionStage::identifying_revision, 45, "identify_revision",
            "Identificando a revisão exata do jogo.");
     auto revision = identify_game_revision(filesystem.value, options.revision_profiles);
+    if (!revision && revision.error == ErrorCode::unknown_revision) {
+        auto observed = identify_observed_disc_revision(
+            fp.value.format, fp.value.size_bytes, fp.value.hash_hex);
+        if (observed) {
+            revision = std::move(observed);
+            report(ConversionStage::identifying_revision, 45, "revision_observed",
+                   "Revisão observada reconhecida pelo fingerprint completo da imagem.");
+        }
+    }
     if (!revision) {
         const bool may_prepare_unverified =
             options.allow_unverified_base_conversion &&
