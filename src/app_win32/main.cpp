@@ -4,6 +4,7 @@
 #include "core/runtime.h"
 #include <windows.h>
 #include <knownfolders.h>
+#include <shellapi.h>
 #include <shobjidl.h>
 #include <shlobj_core.h>
 #include <algorithm>
@@ -89,6 +90,25 @@ void paint(HDC dc,RECT c){
     draw_text(dc,L"Dados convertidos: %LOCALAPPDATA%\\JOJO Recompiled",{80,646,600,690},small_font,RGB(144,128,155),DT_LEFT|DT_TOP|DT_WORDBREAK);
 }
 
+bool supported_image(const fs::path& image) {
+    const auto ext=image.extension().wstring();
+    const auto is=[](const std::wstring& lhs,const wchar_t* rhs){return CompareStringOrdinal(lhs.c_str(),-1,rhs,-1,TRUE)==CSTR_EQUAL;};
+    return is(ext,L".iso")||is(ext,L".bin")||is(ext,L".cue")||is(ext,L".gdi");
+}
+
+bool usable_image(const fs::path& image) {
+    const DWORD attributes=GetFileAttributesW(image.c_str());
+    return attributes!=INVALID_FILE_ATTRIBUTES && (attributes&FILE_ATTRIBUTE_DIRECTORY)==0 && supported_image(image);
+}
+
+void select_image(const fs::path& image) {
+    source=image.wstring();
+    SetWindowTextW(path_box,source.c_str());
+    status=L"Imagem selecionada. Pronto para preparar.";
+    add_log(L"Imagem selecionada.");
+    InvalidateRect(win,nullptr,FALSE);
+}
+
 std::wstring choose_image(){
     IFileOpenDialog* d=nullptr; if(FAILED(CoCreateInstance(CLSID_FileOpenDialog,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&d)))) return {};
     const COMDLG_FILTERSPEC f[]={{L"Imagens suportadas",L"*.iso;*.bin;*.cue;*.gdi"},{L"Todos os arquivos",L"*.*"}};
@@ -128,11 +148,12 @@ void make_fonts(){
     button_font=body_font;
 }
 
-void create_controls(){
-    path_box=CreateWindowExW(0,L"EDIT",L"Nenhuma imagem selecionada",WS_CHILD|WS_VISIBLE|ES_READONLY|ES_AUTOHSCROLL,82,286,616,42,win,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_PATH)),GetModuleHandleW(nullptr),nullptr);
-    select_btn=CreateWindowExW(0,L"BUTTON",L"SELECIONAR",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,712,286,208,42,win,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_SELECT)),GetModuleHandleW(nullptr),nullptr);
-    prepare_btn=CreateWindowExW(0,L"BUTTON",L"PREPARAR JOGO",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,640,644,280,48,win,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_PREPARE)),GetModuleHandleW(nullptr),nullptr);
+void create_controls(HWND parent){
+    path_box=CreateWindowExW(0,L"EDIT",L"Nenhuma imagem selecionada",WS_CHILD|WS_VISIBLE|ES_READONLY|ES_AUTOHSCROLL,82,286,616,42,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_PATH)),GetModuleHandleW(nullptr),nullptr);
+    select_btn=CreateWindowExW(0,L"BUTTON",L"SELECIONAR",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,712,286,208,42,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_SELECT)),GetModuleHandleW(nullptr),nullptr);
+    prepare_btn=CreateWindowExW(0,L"BUTTON",L"PREPARAR JOGO",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,640,644,280,48,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_PREPARE)),GetModuleHandleW(nullptr),nullptr);
     SendMessageW(path_box,WM_SETFONT,reinterpret_cast<WPARAM>(body_font),TRUE);
+    DragAcceptFiles(parent,TRUE);
 }
 
 void draw_button(DRAWITEMSTRUCT* d){
@@ -143,10 +164,18 @@ void draw_button(DRAWITEMSTRUCT* d){
 
 LRESULT CALLBACK proc(HWND h,UINT m,WPARAM w,LPARAM l){
     switch(m){
-    case WM_CREATE:create_controls();refresh_install();return 0;
+    case WM_CREATE:win=h;create_controls(h);refresh_install();return 0;
     case WM_COMMAND:
-        if(LOWORD(w)==ID_SELECT){auto p=choose_image();if(!p.empty()){source=p;SetWindowTextW(path_box,p.c_str());status=L"Imagem selecionada. Pronto para preparar.";add_log(L"Imagem selecionada.");InvalidateRect(h,nullptr,FALSE);}return 0;}
+        if(LOWORD(w)==ID_SELECT){auto p=choose_image();if(!p.empty()&&usable_image(fs::path(p)))select_image(fs::path(p));return 0;}
         if(LOWORD(w)==ID_PREPARE){start_conversion();return 0;}break;
+    case WM_DROPFILES:{
+        const auto drop=reinterpret_cast<HDROP>(w); const UINT count=DragQueryFileW(drop,0xFFFFFFFF,nullptr,0);
+        if(count==1){
+            const UINT length=DragQueryFileW(drop,0,nullptr,0); std::wstring path(static_cast<size_t>(length)+1,L'\0');
+            if(DragQueryFileW(drop,0,path.data(),length+1)){path.resize(length);const fs::path image(path);if(usable_image(image))select_image(image);}
+        }
+        DragFinish(drop);return 0;
+    }
     case WM_PROGRESS:{std::unique_ptr<ProgressMsg> p(reinterpret_cast<ProgressMsg*>(l));if(p){percent=std::clamp(p->p.percent,0,100);status=wide(p->p.detail);add_log(L"["+std::to_wstring(percent)+L"%] "+wide(p->p.detail));InvalidateRect(h,nullptr,FALSE);}return 0;}
     case WM_FINISHED:{std::unique_ptr<FinishMsg> p(reinterpret_cast<FinishMsg*>(l));running=false;set_enabled(true);if(!p||!p->r){status=L"Falha na preparação."+(p?L" "+wide(p->r.detail):L"");if(p)add_log(L"ERRO: "+wide(p->r.detail));}else{percent=100;converted=true;SetWindowTextW(prepare_btn,L"REFAZER PREPARAÇÃO");auto r=jojo::bootstrap_runtime(game_dir);if(!r&&r.error==jojo::ErrorCode::backend_unavailable){status=L"Preparação base concluída. O backend nativo é o próximo marco.";add_log(L"Conversão base concluída.");}else if(!r){status=L"Validação do runtime falhou: "+wide(r.detail);}else status=L"Instalação nativa pronta.";}InvalidateRect(h,nullptr,FALSE);return 0;}
     case WM_DRAWITEM:draw_button(reinterpret_cast<DRAWITEMSTRUCT*>(l));return TRUE;
