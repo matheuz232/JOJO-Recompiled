@@ -30,6 +30,7 @@ using ConversionProgressCallback = std::function<void(const ConversionProgress&)
 
 struct ConversionOptions {
     std::vector<GameRevisionProfile> revision_profiles;
+    bool allow_unverified_base_conversion{false};
 };
 
 struct ConversionManifest {
