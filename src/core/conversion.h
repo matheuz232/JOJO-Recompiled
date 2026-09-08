@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace jojo {
@@ -44,6 +45,10 @@ struct ConversionManifest {
     std::string backend{"pending-game-specific-recompiler"};
 };
 
+[[nodiscard]] Result<GameRevisionMatch> identify_observed_disc_revision(
+    std::string_view source_format,
+    std::uint64_t source_size,
+    std::string_view hash_hex);
 [[nodiscard]] Result<ConversionManifest> convert_image(
     const std::filesystem::path& source,
     const std::filesystem::path& install_dir,
