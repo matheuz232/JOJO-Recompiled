@@ -156,7 +156,17 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
            "Identificando a revisão exata do jogo.");
     auto revision = identify_game_revision(filesystem.value, options.revision_profiles);
     if (!revision) {
-        return Result<ConversionManifest>::failure(revision.error, revision.detail);
+        const bool may_prepare_unverified =
+            options.allow_unverified_base_conversion &&
+            options.revision_profiles.empty() &&
+            revision.error == ErrorCode::unknown_revision;
+        if (!may_prepare_unverified) {
+            return Result<ConversionManifest>::failure(revision.error, revision.detail);
+        }
+        revision = Result<GameRevisionMatch>::success(
+            GameRevisionMatch{"unverified-fnv1a64-" + fp.value.hash_hex});
+        report(ConversionStage::identifying_revision, 45, "revision_unverified",
+               "Revisão ainda não verificada; continuando somente com a preparação base.");
     }
 
     report(ConversionStage::preparing_installation, 65, "prepare_installation",
@@ -190,7 +200,9 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
 Result<ConversionManifest> convert_image(const std::filesystem::path& source,
                                          const std::filesystem::path& install_dir,
                                          const ConversionProgressCallback& on_progress) {
-    return convert_image(source, install_dir, ConversionOptions{}, on_progress);
+    ConversionOptions options{};
+    options.allow_unverified_base_conversion = true;
+    return convert_image(source, install_dir, options, on_progress);
 }
 
 }
