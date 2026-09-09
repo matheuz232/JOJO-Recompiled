@@ -3,13 +3,15 @@
 ## Active development line
 
 - Repository: `matheuz232/JOJO-Recompiled`
-- Active branch: `feature/ps1-visible-boot-m3b-evidence`
+- Active branch: `feature/ps1-m3c-deep-checkpoint-evidence`
 - Active platform: **Sony PlayStation 1**
 - Product scope: **JoJo PS1 only**
 - M3A code-head commit: `814c956eefd608080320aff270d59568fbb2b28a`
 - M3A verification workflow: `34334677057` (run #1339)
 - M3B evidence-capture code-head commit: `c460d34c8e46f0fddae026fbdcf570c1e7e3bedf`
 - M3B evidence-capture verification workflow: `34404397974` (run #1349)
+- M3C deep-evidence code-head commit: `323ce3f6ec38eb142294ee0356e8e3d42517cbf6`
+- M3C verification workflow: `34409918112` (run #1361)
 - Linux job: passed configure, build, production-readiness gate, PS1 active-architecture gate, CTest, observed-disc revision contract, and UDP transport contract.
 - Windows job: passed configure, Release build, production-readiness gate, PS1 active-architecture gate, Release CTest, observed-disc revision contract, UDP transport contract, and artifact upload.
 - Shipping policy: one `JOJO-Recompiled.exe`.
@@ -58,19 +60,32 @@ The synthetic M3A contract covers:
 
 The immutable implementation evidence is GitHub Actions run `34334677057` on code-head `814c956eefd608080320aff270d59568fbb2b28a`, with both Linux and Windows jobs successful.
 
-## M3B evidence-capture surface
+## M3B evidence-capture surface and first local commercial evidence
 
-The single Windows executable now exposes an explicit `EXECUTAR CHECKPOINT` action only when the selected local installation validates as PS1 M1/M3A-compatible. The action runs the existing bounded M3A reference checkpoint with a 10,000-instruction budget and exports only bounded derived diagnostics to `%LOCALAPPDATA%/JOJO Recompiled/diagnostics/m3a-checkpoint.txt`.
+The Windows executable exposes `EXECUTAR CHECKPOINT` only when the selected local installation validates as PS1 M1/M3A-compatible and writes bounded derived diagnostics to `%LOCALAPPDATA%/JOJO Recompiled/diagnostics/m3a-checkpoint.txt`.
 
-The installation-backed checkpoint-to-file path and Win32 control are verified by GitHub Actions run `34404397974` on code-head `c460d34c8e46f0fddae026fbdcf570c1e7e3bedf`, with both `Portable core / Linux` and `Windows x64 / MSVC 2022` successful.
+The first user-supplied local derived report from the supported commercial JoJo installation reached the original 10,000-instruction budget and stopped with `execution_budget_exhausted`. Its final observed state was `last_pc=0x8001001c` and `last_opcode=0xac400000`. It reported zero BIOS calls, zero accepted interrupts, zero DMA transfers, zero GPU GP0/GP1 commands, zero VRAM writes and zero presented frames. BIOS, MMIO, CPU-boundary and unsupported-access fields were all `none`.
 
-CI does not contain the user's commercial JoJo image, so this run supplies **no commercial JoJo checkpoint evidence**. No PlayStation BIOS/HLE function was implemented by this M3B evidence-capture plan. This surface exists only to capture the first real JoJo boundary locally and safely enough to drive the next synthetic RED→GREEN contract.
+That report is evidence that the commercial executable retired 10,000 instructions through the current bounded reference path. It is **not** evidence of commercial boot, BIOS/HLE progress, device progress, rendering or playability, and it did not identify a BIOS selector/address or device boundary to implement.
+
+## M3C deep bounded evidence probe
+
+Because the first real report exhausted the 10,000-instruction budget before reaching a recognized boundary, M3C deepens evidence capture without fabricating any BIOS/device success:
+
+- the local evidence policy is explicitly bounded at **1,000,000 instructions**;
+- the report retains only the most recent **8 PC/opcode samples** as a bounded trace window;
+- trace samples are serialized as additive `trace_*` fields in the existing derived report format;
+- the installation-backed deep-evidence API reuses validation, bounded R3000A execution and atomic report writing;
+- `EXECUTAR CHECKPOINT` now invokes that deep-evidence API directly;
+- no BIOS/HLE, MMIO device, GPU, CD-ROM, DMA, timer, SPU or GTE behavior was added by M3C.
+
+Synthetic RED→GREEN coverage proves the one-million-instruction policy with a looping PS1 fixture, bounded eight-sample trace capture, trace report serialization and no mutation of the prepared installation. GitHub Actions run `34409918112` on code-head `323ce3f6ec38eb142294ee0356e8e3d42517cbf6` passed both `Portable core / Linux` and `Windows x64 / MSVC 2022`, including the Windows executable upload.
 
 ## Truth boundary
 
 The following are still **not implemented or not verified** at this point:
 
-- commercial JoJo execution beyond a locally captured bounded checkpoint from the user's supported installation;
+- commercial JoJo execution beyond the currently captured bounded checkpoints;
 - PlayStation BIOS/HLE services required by the commercial game;
 - GTE execution semantics beyond the explicit COP2 boundary;
 - IRQ/timer device behavior required by JoJo;
@@ -84,11 +99,11 @@ The following are still **not implemented or not verified** at this point:
 - commercial boot;
 - rendering, audio, input, gameplay or playability.
 
-Synthetic fixtures and CI prove only the repository contracts they exercise. They are not proof that the commercial game boots or is playable.
+Synthetic fixtures and CI prove only the repository contracts they exercise. The first local commercial report proves only the bounded execution fields recorded above; it does not prove that the commercial game boots or is playable.
 
 ## Commercial-image evidence still required
 
-The user's previously observed whole-image fingerprint is known. The corrected PS1 pipeline now provides the local Windows path to prepare/validate the supported installation and run the bounded checkpoint, but the actual commercial boundary report still has to be produced locally from the user's legally obtained image.
+The user's previously observed whole-image fingerprint is known, and a first bounded checkpoint has now been produced locally from the user's legally obtained image. The next required evidence is the deeper M3C report that either identifies the first actual JoJo BIOS/CPU/device boundary or supplies enough bounded trace evidence to diagnose a repeated execution loop.
 
 No commercial game bytes, extracted PS-X EXE, proprietary BIOS, raw sectors, or unrestricted guest-memory dumps are to be committed to the repository or CI. Commercial checkpoint evidence must remain bounded and derived.
 
@@ -97,17 +112,17 @@ No commercial game bytes, extracted PS-X EXE, proprietary BIOS, raw sectors, or 
 Canonical status remains in `docs/architecture/PRODUCTION-READINESS.tsv`.
 
 - R2.1: repository truth/release gates — verified.
-- R2.2: commercial revision enablement — blocked on local commercial-image discovery evidence.
-- R2.3: JoJo-specific reference execution checkpoint — `implemented-unverified`, evidenced by GitHub Actions run `34334677057`; blocker is `jojo-bios-hle-and-device-runtime-not-implemented`.
+- R2.2: commercial revision enablement — blocked on the canonical local commercial-image discovery evidence required by that gate.
+- R2.3: JoJo-specific reference execution checkpoint — `implemented-unverified`; M3C deep evidence capture is available, but the first JoJo BIOS/device boundary is not yet identified.
 - R2.4: real gameplay integration — not started.
 - R2.5: host-side online/rollback infrastructure exists but is not integrated with the commercial JoJo PS1 game.
 - R2.6: production validation/release — not started.
 
 ## Next priority
 
-Run the supported local JoJo installation through `EXECUTAR CHECKPOINT` and inspect only the bounded derived report at `%LOCALAPPDATA%/JOJO Recompiled/diagnostics/m3a-checkpoint.txt`.
+Run the M3C Windows executable against the already prepared supported JoJo installation and click `EXECUTAR CHECKPOINT`. Inspect only the bounded derived report at `%LOCALAPPDATA%/JOJO Recompiled/diagnostics/m3a-checkpoint.txt`.
 
-Do not implement or speculate about a BIOS/HLE service before that report identifies the actual JoJo boundary selector/address. Once the local report identifies it, reproduce that boundary with the smallest synthetic RED→GREEN contract and implement only the JoJo-required service. IRQ/timers, DMA, CD-ROM, GPU and GTE subsets remain evidence-driven follow-on work.
+If the deeper report identifies an A0/B0/C0 BIOS selector, CPU boundary or MMIO/device address, reproduce exactly that boundary with the smallest synthetic RED→GREEN contract and implement only the JoJo-required service. If it again ends by instruction-budget exhaustion, use the eight bounded `trace_*` samples to distinguish forward initialization from a repeated execution loop before increasing the budget again.
 
 Keep MIPS CFG/IR and Windows x64 lowering downstream of visible boot. This project has no compatibility target for unrelated games.
 
