@@ -24,6 +24,7 @@ add_library(jojo_core STATIC
   src/core/iso9660.cpp
   src/core/ps1_system_cnf.cpp
   src/core/ps1_exe.cpp
+  src/core/ps1_installation.cpp
   src/core/dreamcast_boot.cpp
   src/core/dreamcast_analysis.cpp
   src/core/dreamcast_memory.cpp
