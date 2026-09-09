@@ -1,5 +1,6 @@
 #include "core/conversion.h"
 #include "core/disc_image.h"
+#include "core/game_backend.h"
 #include "core/version.h"
 #include <array>
 #include <charconv>
@@ -284,7 +285,7 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
                "Revisão ainda não verificada; continuando somente com a preparação base.");
     }
 
-    report(ConversionStage::preparing_installation, 65, "prepare_installation",
+    report(ConversionStage::preparing_installation, 55, "prepare_installation",
            "Preparando os diretórios da instalação convertida.");
     std::error_code ec;
     std::filesystem::create_directories(install_dir / "data", ec);
@@ -302,13 +303,59 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
     manifest.hash_hex = fp.value.hash_hex;
     manifest.revision_id = revision.value.revision_id;
 
-    report(ConversionStage::writing_manifest, 90, "write_manifest",
-           "Gravando os metadados da instalação.");
+    report(ConversionStage::writing_manifest, 55, "write_pending_manifest",
+           "Gravando o estado pendente antes de preparar o backend específico do jogo.");
     auto saved = save_conversion_manifest_atomic(install_dir / "game_manifest.ini", manifest);
     if (!saved) return Result<ConversionManifest>::failure(saved.error, saved.detail);
 
+    if (!supports_game_native_backend(manifest.revision_id)) {
+        report(ConversionStage::completed, 100, "conversion_complete",
+               "Preparação base concluída; o backend específico do jogo ainda será adicionado.");
+        return Result<ConversionManifest>::success(std::move(manifest));
+    }
+
+    GameBackendProgressCallback backend_progress = [&](GameBackendStage stage) {
+        switch (stage) {
+            case GameBackendStage::boot_analyzed:
+                report(ConversionStage::preparing_game_backend, 65,
+                       "analyze_game_boot",
+                       "Programa de boot Dreamcast analisado para a revisão reconhecida.");
+                break;
+            case GameBackendStage::cache_ready:
+                report(ConversionStage::building_native_backend, 80,
+                       "build_native_backend",
+                       "Backend nativo gerado ou reutilizado para o programa identificado.");
+                break;
+            case GameBackendStage::cache_verified:
+                report(ConversionStage::verifying_native_backend, 92,
+                       "verify_native_backend",
+                       "Cache do backend nativo recarregado e verificado.");
+                break;
+        }
+    };
+
+    auto prepared = prepare_game_native_backend(
+        manifest.revision_id, filesystem.value, install_dir, backend_progress);
+    if (!prepared) {
+        return Result<ConversionManifest>::failure(prepared.error, prepared.detail);
+    }
+
+    manifest.boot_program_hash_hex = prepared.value.boot_program_hash_hex;
+    manifest.backend_abi_version = prepared.value.abi_version;
+    manifest.backend_program_hash = prepared.value.program_hash;
+    manifest.backend_block_count = prepared.value.block_count;
+    manifest.backend_native_block_count = prepared.value.native_block_count;
+    manifest.backend_fallback_block_count = prepared.value.fallback_block_count;
+    manifest.backend_native_code_bytes = prepared.value.native_code_bytes;
+    manifest.backend = "native-ready";
+
+    report(ConversionStage::promoting_native_backend, 97, "promote_native_backend",
+           "Promovendo a instalação após verificar o backend nativo.");
+    saved = save_conversion_manifest_atomic(install_dir / "game_manifest.ini", manifest);
+    if (!saved) return Result<ConversionManifest>::failure(saved.error, saved.detail);
+
     report(ConversionStage::completed, 100, "conversion_complete",
-           "Preparação base concluída; o backend específico do jogo ainda será adicionado.");
+           "Backend nativo da revisão reconhecida preparado; validação fim a fim é o próximo marco.");
     return Result<ConversionManifest>::success(std::move(manifest));
 }
 
