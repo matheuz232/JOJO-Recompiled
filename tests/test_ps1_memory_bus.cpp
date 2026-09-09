@@ -20,8 +20,17 @@ int main() {
 
     CHECK(bus.write16(0x1F801074u, 0xFFFFu).status == jojo::R3000aBusStatus::ok);
     CHECK(bus.interrupt_mask() == 0x07FFu);
+    const auto imask_enabled = bus.read16(0x1F801074u);
+    CHECK(imask_enabled.status == jojo::R3000aBusStatus::ok);
+    CHECK(imask_enabled.value == 0x07FFu);
+
     CHECK(bus.write16(0x1F801074u, 0x0000u).status == jojo::R3000aBusStatus::ok);
     CHECK(bus.interrupt_mask() == 0x0000u);
+    const auto imask_disabled = bus.read16(0x1F801074u);
+    CHECK(imask_disabled.status == jojo::R3000aBusStatus::ok);
+    CHECK(imask_disabled.value == 0x0000u);
+
+    CHECK(bus.read32(0x1F801074u).status == jojo::R3000aBusStatus::unsupported);
     CHECK(bus.write16(0x1F801070u, 0x0000u).status == jojo::R3000aBusStatus::unsupported);
 
     const auto unsupported = bus.read32(0x1F801070u);
