@@ -27,6 +27,10 @@ struct InstallationInfo {
 [[nodiscard]] Result<Ps1BootReport> bootstrap_runtime_checkpoint(
     const std::filesystem::path& install_root,
     const Ps1BootOptions& options = {});
+[[nodiscard]] Result<Ps1BootReport> bootstrap_runtime_checkpoint_to_file(
+    const std::filesystem::path& install_root,
+    const std::filesystem::path& report_path,
+    const Ps1BootOptions& options = {});
 [[nodiscard]] Result<void> bootstrap_runtime(
     const std::filesystem::path& install_root);
 
