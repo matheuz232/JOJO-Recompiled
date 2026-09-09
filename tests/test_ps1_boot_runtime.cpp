@@ -40,11 +40,11 @@ static void test_budget_exhaustion_keeps_bounded_recent_trace() {
         0x00000000u,
     };
     auto runtime = make_runtime(words);
-    const auto report = runtime.run({12u});
+    const auto report = runtime.run({20u});
 
     CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
-    CHECK(report.recent_trace.size() == 8u);
-    if (report.recent_trace.size() == 8u) {
+    CHECK(report.recent_trace.size() == 16u);
+    if (report.recent_trace.size() == 16u) {
         CHECK(report.recent_trace.front().pc == 0x80010000u);
         CHECK(report.recent_trace.back().pc == 0x80010004u);
         for (const auto& sample : report.recent_trace) {
