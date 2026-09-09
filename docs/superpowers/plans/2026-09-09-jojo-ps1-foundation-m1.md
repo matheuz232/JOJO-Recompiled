@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the incorrect Dreamcast/SH-4 commercial path with a truthful PlayStation 1 foundation that recognizes the supported JoJo image, resolves `SYSTEM.CNF`, validates the real PS-X EXE, installs required user-local data into a user-selected root, and records only verified M1 evidence.
+**Goal:** Replace the incorrect Dreamcast/SH-4 commercial path with a truthful PlayStation 1 foundation that recognizes the supported JoJo image, resolves `SYSTEM.CNF`, validates the PS-X EXE, installs required user-local data into a user-selected root, and records only verified M1 evidence.
 
-**Architecture:** Keep the existing console-independent media/ISO9660/revision infrastructure where it is correct, add focused PS1 `SYSTEM.CNF`, PS-X EXE, and generation-installation components, then rewrite conversion/runtime around manifest v2. Only after the replacement path is green remove Dreamcast/SH-4/native-backend sources and tests from the active repository. This plan deliberately stops before R3000A execution; a successful M1 installation must report that MIPS/runtime work is still pending.
+**Architecture:** Preserve console-independent media/ISO9660/revision infrastructure, add focused PS1 `SYSTEM.CNF`, PS-X EXE, and generation-installation components, then rewrite conversion/runtime around manifest v2. Remove Dreamcast/SH-4/native-backend source and tests only after the replacement M1 path is green. This plan intentionally stops before R3000A execution: a valid M1 install is inspectable and source-independent, but not bootable.
 
 **Tech Stack:** C++20, CMake 3.20+, CTest, Windows x64 / Visual Studio 2022, Win32/COM shell dialogs, portable Linux CI for core tests.
 
@@ -27,28 +27,26 @@
 
 ---
 
-## File Structure for This Plan
+## File Structure
 
-### New production files
+### Create
 
-- `src/core/ps1_system_cnf.h` — strict `SYSTEM.CNF` parsing and ISO9660 boot-target discovery.
-- `src/core/ps1_system_cnf.cpp` — parser implementation and path normalization.
-- `src/core/ps1_exe.h` — PS-X EXE metadata and parser interfaces.
-- `src/core/ps1_exe.cpp` — PS-X EXE header validation, full-file hash, and ISO9660 executable loading.
-- `src/core/ps1_installation.h` — generation/staging/activation interfaces.
-- `src/core/ps1_installation.cpp` — generation allocation, atomic active pointer, and active-install resolution.
-
-### New tests/fixtures
-
-- `tests/ps1_fixture.h` — fully synthetic PS1 ISO/PS-X EXE fixture builder.
+- `src/core/ps1_system_cnf.h` — strict `SYSTEM.CNF` parsing and ISO9660 boot discovery.
+- `src/core/ps1_system_cnf.cpp` — parser/path normalization.
+- `src/core/ps1_exe.h` — PS-X EXE metadata/parser interfaces.
+- `src/core/ps1_exe.cpp` — PS-X EXE validation and full-file hash.
+- `src/core/ps1_installation.h` — install destination, staging, generation activation, active resolution.
+- `src/core/ps1_installation.cpp` — filesystem implementation.
+- `tests/ps1_fixture.h` — synthetic PS1 ISO and PS-X EXE builders.
 - `tests/test_ps1_system_cnf.cpp`
 - `tests/test_ps1_exe.cpp`
+- `tests/test_ps1_manifest.cpp`
 - `tests/test_ps1_installation.cpp`
 - `tests/test_ps1_conversion.cpp`
 - `tests/test_ps1_runtime_installation.cpp`
-- `cmake/CheckPs1ActiveArchitecture.cmake` — active-source hygiene gate after Dreamcast cleanup.
+- `cmake/CheckPs1ActiveArchitecture.cmake`
 
-### Existing files modified
+### Modify
 
 - `src/core/disc_image.cpp`
 - `src/core/disc_media.cpp`
@@ -62,6 +60,7 @@
 - `tests/iso_fixture.h`
 - `tests/test_disc_media.cpp`
 - `tests/test_main.cpp`
+- `tests/test_observed_disc_revision.cpp`
 - `tests/test_win32_image_selection.cpp`
 - `CMakeLists.txt`
 - `.github/workflows/build.yml`
@@ -71,65 +70,68 @@
 - `docs/architecture/PRODUCTION-ROADMAP.md`
 - `docs/architecture/PRODUCTION-READINESS.tsv`
 
-### Dreamcast/SH-4 guest-backend files deleted in Task 9
+### Delete at Task 9
 
-- `src/core/dreamcast_analysis.cpp`
-- `src/core/dreamcast_analysis.h`
-- `src/core/dreamcast_boot.cpp`
-- `src/core/dreamcast_boot.h`
-- `src/core/dreamcast_boot_runner.cpp`
-- `src/core/dreamcast_boot_runner.h`
-- `src/core/dreamcast_bus.cpp`
-- `src/core/dreamcast_bus.h`
-- `src/core/dreamcast_interrupts.cpp`
-- `src/core/dreamcast_interrupts.h`
-- `src/core/dreamcast_maple.h`
-- `src/core/dreamcast_memory.cpp`
-- `src/core/dreamcast_memory.h`
-- `src/core/dreamcast_pvr2.cpp`
-- `src/core/dreamcast_pvr2.h`
-- `src/core/dreamcast_system_asic.cpp`
-- `src/core/dreamcast_system_asic.h`
-- `src/core/sh4_cfg.cpp`
-- `src/core/sh4_cfg.h`
-- `src/core/sh4_decoder.cpp`
-- `src/core/sh4_decoder.h`
-- `src/core/sh4_interrupt_entry.cpp`
-- `src/core/sh4_ir.cpp`
-- `src/core/sh4_ir.h`
-- `src/core/sh4_opcode_census.cpp`
-- `src/core/sh4_opcode_census.h`
-- `src/core/sh4_reference_boundary.cpp`
-- `src/core/sh4_reference_bus.cpp`
-- `src/core/sh4_reference_executor.cpp`
-- `src/core/sh4_reference_executor.h`
-- `src/core/game_backend.cpp`
-- `src/core/game_backend.h`
-- `src/core/native_backend.cpp`
-- `src/core/native_backend.h`
-- `src/core/native_x64.cpp`
-- `src/core/native_x64.h`
+Production guest/backend files:
 
-The host-side `native_mod_loader.*` is not part of the guest SH-4 backend and remains in this milestone.
+```text
+src/core/dreamcast_analysis.cpp
+src/core/dreamcast_analysis.h
+src/core/dreamcast_boot.cpp
+src/core/dreamcast_boot.h
+src/core/dreamcast_boot_runner.cpp
+src/core/dreamcast_boot_runner.h
+src/core/dreamcast_bus.cpp
+src/core/dreamcast_bus.h
+src/core/dreamcast_interrupts.cpp
+src/core/dreamcast_interrupts.h
+src/core/dreamcast_maple.h
+src/core/dreamcast_memory.cpp
+src/core/dreamcast_memory.h
+src/core/dreamcast_pvr2.cpp
+src/core/dreamcast_pvr2.h
+src/core/dreamcast_system_asic.cpp
+src/core/dreamcast_system_asic.h
+src/core/sh4_cfg.cpp
+src/core/sh4_cfg.h
+src/core/sh4_decoder.cpp
+src/core/sh4_decoder.h
+src/core/sh4_interrupt_entry.cpp
+src/core/sh4_ir.cpp
+src/core/sh4_ir.h
+src/core/sh4_opcode_census.cpp
+src/core/sh4_opcode_census.h
+src/core/sh4_reference_boundary.cpp
+src/core/sh4_reference_bus.cpp
+src/core/sh4_reference_executor.cpp
+src/core/sh4_reference_executor.h
+src/core/game_backend.cpp
+src/core/game_backend.h
+src/core/native_backend.cpp
+src/core/native_backend.h
+src/core/native_x64.cpp
+src/core/native_x64.h
+```
+
+`native_mod_loader.*` stays; it is host-side mod loading, not the SH-4 guest backend.
 
 ---
 
-### Task 1: Make the Accepted Media Contract PS1-Only
+### Task 1: Make Media Acceptance PS1-Only
 
 **Files:**
 - Modify: `src/core/disc_image.cpp`
 - Modify: `src/core/disc_media.cpp`
 - Modify: `tests/test_main.cpp`
 - Modify: `tests/test_disc_media.cpp`
-- Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: existing `bool supported_disc_extension(std::string_view)` and `Result<LogicalSectorSource> open_logical_sector_source(const std::filesystem::path&)`.
-- Produces: active acceptance of `.iso`, `.bin`, `.cue`; explicit rejection of `.gdi`; existing raw 2352 MODE1/MODE2 and CUE behavior unchanged.
+- Consumes: `supported_disc_extension`, `open_logical_sector_source`.
+- Produces: `.iso`, `.bin`, `.cue` accepted; `.gdi` rejected; raw MODE1/2352 offset 16 and MODE2/2352 offset 24 preserved.
 
-- [ ] **Step 1: Change the extension contract test to RED**
+- [ ] **Step 1: Write RED media assertions**
 
-In `tests/test_main.cpp`, replace the GDI-positive assertion with:
+Replace the extension test in `tests/test_main.cpp` with:
 
 ```cpp
 static void test_disc_extension_detection() {
@@ -141,18 +143,24 @@ static void test_disc_extension_detection() {
 }
 ```
 
-In `tests/test_disc_media.cpp`, add a test that creates a text `.gdi` file and checks:
+Add to `tests/test_disc_media.cpp`:
 
 ```cpp
-const auto opened = jojo::open_logical_sector_source(gdi_path);
-CHECK(!opened);
-CHECK(opened.error == jojo::ErrorCode::unsupported_format);
-CHECK(opened.detail.find(".gdi") != std::string::npos);
+static void test_gdi_is_not_an_active_ps1_format() {
+    const auto path = temp_path("rejected.gdi");
+    { std::ofstream out(path); out << "1\n"; }
+    const auto opened = jojo::open_logical_sector_source(path);
+    CHECK(!opened);
+    CHECK(opened.error == jojo::ErrorCode::unsupported_format);
+    CHECK(opened.detail.find(".gdi") != std::string::npos);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
 ```
 
-- [ ] **Step 2: Run the targeted tests and verify RED**
+Use the file's existing temporary-path helper name if it differs; do not add a second helper with the same responsibility.
 
-Run:
+- [ ] **Step 2: Run RED**
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -160,11 +168,11 @@ cmake --build build --target jojo_tests jojo_media_tests --parallel 2
 ctest --test-dir build -R "jojo_tests|jojo_media_tests" --output-on-failure
 ```
 
-Expected: FAIL because `.gdi` is still accepted.
+Expected: FAIL because GDI is still accepted.
 
-- [ ] **Step 3: Remove GDI from the active media path**
+- [ ] **Step 3: Implement PS1-only acceptance**
 
-Change `supported_disc_extension` in `src/core/disc_image.cpp` to:
+In `src/core/disc_image.cpp`:
 
 ```cpp
 bool supported_disc_extension(std::string_view filename) {
@@ -173,23 +181,23 @@ bool supported_disc_extension(std::string_view filename) {
 }
 ```
 
-Change its error text to exactly:
+Change unsupported-format text to:
 
 ```cpp
 "supported PS1 formats: .iso, .bin, .cue"
 ```
 
-In `src/core/disc_media.cpp`, remove the `open_gdi_source` branch from `open_logical_sector_source` and return the existing unsupported-format error for `.gdi`. Do not change `.bin` raw offsets: MODE1/2352 remains user offset 16 and MODE2/2352 remains user offset 24.
+In `src/core/disc_media.cpp`, remove the `.gdi` dispatch from `open_logical_sector_source`. Do not change existing CUE parsing or raw BIN offsets.
 
-- [ ] **Step 4: Run media tests GREEN**
+- [ ] **Step 4: Run GREEN**
 
 Run the same build/CTest commands. Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/core/disc_image.cpp src/core/disc_media.cpp tests/test_main.cpp tests/test_disc_media.cpp CMakeLists.txt
-git commit -m "fix: make commercial media contract PS1-only"
+git add src/core/disc_image.cpp src/core/disc_media.cpp tests/test_main.cpp tests/test_disc_media.cpp
+git commit -m "fix: make media acceptance PS1-only"
 ```
 
 ---
@@ -203,8 +211,6 @@ git commit -m "fix: make commercial media contract PS1-only"
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `Iso9660Image`, `read_iso9660_file`.
-- Produces:
 
 ```cpp
 struct Ps1SystemCnf {
@@ -215,26 +221,46 @@ Result<Ps1SystemCnf> parse_ps1_system_cnf(std::string_view text);
 Result<Ps1SystemCnf> read_ps1_system_cnf(const Iso9660Image& image);
 ```
 
-`boot_iso_path` is normalized to an ISO9660 virtual path beginning with `/` and without `;1`, for example `/SLUS_TEST.00`.
+Normalized path starts with `/` and has no `;1`, e.g. `/SLUS_TEST.00`.
 
-- [ ] **Step 1: Write RED parser tests**
+- [ ] **Step 1: Create an actual RED test harness**
 
-Create `tests/test_ps1_system_cnf.cpp` with checks covering at least these exact inputs:
+`tests/test_ps1_system_cnf.cpp` starts with:
 
 ```cpp
-CHECK(parse("BOOT = cdrom:\\SLUS_TEST.00;1\r\n").boot_iso_path == "/SLUS_TEST.00");
-CHECK(parse("  boot=CDROM:\\DIR\\GAME.EXE;1  \n").boot_iso_path == "/DIR/GAME.EXE");
-CHECK_FAILS("TCB = 4\n");
-CHECK_FAILS("BOOT = cdrom:\\..\\GAME.EXE;1\n");
-CHECK_FAILS("BOOT = cdrom:\\A.EXE;1\nBOOT = cdrom:\\B.EXE;1\n");
-CHECK_FAILS("BOOT = host0:GAME.EXE\n");
-```
+#include "core/ps1_system_cnf.h"
+#include <iostream>
+#include <string_view>
 
-Use the repository's simple `CHECK` pattern; do not introduce a new test framework.
+static int failures = 0;
+#define CHECK(expr) do { if (!(expr)) { std::cerr << __LINE__ << " CHECK failed: " #expr "\n"; ++failures; } } while (0)
+
+static void expect_ok(std::string_view input, std::string_view expected) {
+    const auto parsed = jojo::parse_ps1_system_cnf(input);
+    CHECK(parsed);
+    if (parsed) CHECK(parsed.value.boot_iso_path == expected);
+}
+
+static void expect_fail(std::string_view input) {
+    const auto parsed = jojo::parse_ps1_system_cnf(input);
+    CHECK(!parsed);
+    if (!parsed) CHECK(parsed.error == jojo::ErrorCode::unsupported_format);
+}
+
+int main() {
+    expect_ok("BOOT = cdrom:\\SLUS_TEST.00;1\r\n", "/SLUS_TEST.00");
+    expect_ok("  boot=CDROM:\\DIR\\GAME.EXE;1  \n", "/DIR/GAME.EXE");
+    expect_fail("TCB = 4\n");
+    expect_fail("BOOT = cdrom:\\..\\GAME.EXE;1\n");
+    expect_fail("BOOT = cdrom:\\A.EXE;1\nBOOT = cdrom:\\B.EXE;1\n");
+    expect_fail("BOOT = host0:GAME.EXE\n");
+    return failures ? 1 : 0;
+}
+```
 
 - [ ] **Step 2: Register and run RED**
 
-Add:
+Add `src/core/ps1_system_cnf.cpp` to `jojo_core` and:
 
 ```cmake
 add_executable(jojo_ps1_system_cnf_tests tests/test_ps1_system_cnf.cpp)
@@ -242,48 +268,46 @@ target_link_libraries(jojo_ps1_system_cnf_tests PRIVATE jojo_core)
 add_test(NAME jojo_ps1_system_cnf_tests COMMAND jojo_ps1_system_cnf_tests)
 ```
 
-and add `src/core/ps1_system_cnf.cpp` to `jojo_core`.
-
 Run:
 
 ```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --target jojo_ps1_system_cnf_tests --parallel 2
-ctest --test-dir build -R jojo_ps1_system_cnf_tests --output-on-failure
 ```
 
-Expected: compile/link FAIL before interfaces exist.
+Expected: compile failure until the new header/interface exists.
 
-- [ ] **Step 3: Implement the parser minimally and strictly**
+- [ ] **Step 3: Implement parser**
 
-Create `src/core/ps1_system_cnf.h` with the interface above. In `ps1_system_cnf.cpp`:
+Rules:
 
-- split by lines;
-- trim ASCII whitespace;
-- compare key `BOOT` case-insensitively;
-- require exactly one `BOOT` declaration;
-- require a `cdrom:` prefix case-insensitively;
-- accept one or more `\` or `/` separators after `cdrom:`;
-- replace backslashes with `/`;
-- remove terminal `;1` case-insensitively;
-- reject absolute host paths, drive letters, empty components, `.` and `..` traversal;
-- prepend `/` to the normalized ISO path;
-- return `ErrorCode::unsupported_format` for malformed/ambiguous content;
-- `read_ps1_system_cnf` reads `/SYSTEM.CNF` through `read_iso9660_file`, converts bytes to a string, and invokes the parser.
+```text
+trim ASCII whitespace
+BOOT key case-insensitive
+exactly one BOOT declaration
+cdrom: prefix case-insensitive
+convert backslashes to slashes
+strip terminal ;1
+reject host drive letters
+reject empty normalized target
+reject . and .. components
+prepend /
+malformed or ambiguous input -> ErrorCode::unsupported_format
+```
 
-- [ ] **Step 4: Run GREEN**
+`read_ps1_system_cnf` reads `/SYSTEM.CNF` with `read_iso9660_file`, converts bytes verbatim to `std::string`, then parses.
 
-Expected: all `jojo_ps1_system_cnf_tests` pass.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Run GREEN and commit**
 
 ```bash
+ctest --test-dir build -R jojo_ps1_system_cnf_tests --output-on-failure
 git add src/core/ps1_system_cnf.h src/core/ps1_system_cnf.cpp tests/test_ps1_system_cnf.cpp CMakeLists.txt
-git commit -m "feat: parse PS1 SYSTEM.CNF boot target"
+git commit -m "feat: parse PS1 SYSTEM.CNF"
 ```
 
 ---
 
-### Task 3: Add a PS-X EXE Parser and Synthetic PS1 Fixture
+### Task 3: Add PS-X EXE Validation and Synthetic PS1 Fixture
 
 **Files:**
 - Create: `src/core/ps1_exe.h`
@@ -293,8 +317,6 @@ git commit -m "feat: parse PS1 SYSTEM.CNF boot target"
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `Iso9660Image`, `read_iso9660_file`, normalized boot path from Task 2.
-- Produces:
 
 ```cpp
 struct Ps1ExeMetadata {
@@ -313,82 +335,57 @@ struct Ps1Executable {
 };
 
 Result<Ps1Executable> parse_ps1_executable(std::span<const std::uint8_t> bytes);
-Result<Ps1Executable> read_ps1_executable(const Iso9660Image& image, std::string_view iso_path);
+Result<Ps1Executable> read_ps1_executable(const Iso9660Image& image,
+                                          std::string_view iso_path);
 ```
 
-- [ ] **Step 1: Build a fully synthetic PS-X EXE fixture**
+- [ ] **Step 1: Add synthetic PS-X EXE builder**
 
-In `tests/ps1_fixture.h`, implement a helper that creates a byte vector of `0x800 + text_size` bytes and writes:
+`tests/ps1_fixture.h` provides a helper returning `0x800 + 16` bytes with:
 
 ```text
-0x000: "PS-X EXE" (8 bytes)
-0x010: entry PC (LE32)
-0x014: initial GP (LE32)
-0x018: text load address (LE32)
-0x01C: text size (LE32)
-0x030: stack base (LE32)
-0x034: stack size (LE32)
-0x800: synthetic MIPS-looking payload bytes chosen by the test only
+0x000 "PS-X EXE"
+0x010 entry=0x80010000 LE32
+0x014 gp=0x80018000 LE32
+0x018 load=0x80010000 LE32
+0x01C text_size=16 LE32
+0x030 stack_base=0x801FFF00 LE32
+0x034 stack_size=0x100 LE32
+0x800 16 synthetic bytes owned by the test
 ```
 
-Use synthetic values:
+- [ ] **Step 2: Write RED parser tests**
 
-```cpp
-entry_pc         = 0x80010000u;
-initial_gp       = 0x80018000u;
-text_load_address= 0x80010000u;
-text_size        = 16u;
-stack_base       = 0x801FFF00u;
-stack_size       = 0x00000100u;
+Check all six metadata values, 16-digit lowercase FNV-1a hash, and byte-for-byte preservation. Negative cases mutate synthetic buffers to reject:
+
+```text
+wrong magic
+file < 0x800
+text size > payload
+unaligned entry PC
+unaligned text load address
+unaligned text size
 ```
-
-No commercial executable bytes may appear in the fixture.
-
-- [ ] **Step 2: Write RED PS-X EXE tests**
-
-Verify:
-
-```cpp
-CHECK(exe.metadata.entry_pc == 0x80010000u);
-CHECK(exe.metadata.initial_gp == 0x80018000u);
-CHECK(exe.metadata.text_load_address == 0x80010000u);
-CHECK(exe.metadata.text_size == 16u);
-CHECK(exe.metadata.stack_base == 0x801FFF00u);
-CHECK(exe.metadata.stack_size == 0x100u);
-CHECK(exe.metadata.fnv1a64_hex.size() == 16u);
-CHECK(exe.file_bytes == fixture_bytes);
-```
-
-Also mutate fixtures so tests reject:
-
-- magic not equal to `PS-X EXE`;
-- file shorter than `0x800` bytes;
-- text size larger than available payload;
-- entry PC not 4-byte aligned;
-- text load address not 4-byte aligned;
-- text size not 4-byte aligned.
 
 - [ ] **Step 3: Register and run RED**
 
-Add `ps1_exe.cpp` to core and `jojo_ps1_exe_tests` to CMake. Run the target and expect compile/link failure before implementation.
+Add `ps1_exe.cpp` to `jojo_core` and register `jojo_ps1_exe_tests`. Expected: compile failure before implementation.
 
-- [ ] **Step 4: Implement parser and full-file hash**
+- [ ] **Step 4: Implement parser**
 
-Use explicit little-endian reads; do not cast the header to a packed host struct. Validate exact 8-byte magic and all bounds before reading. Compute FNV-1a 64 over the **entire PS-X EXE file**, render lowercase 16-digit hex, and preserve the exact input bytes in `Ps1Executable::file_bytes`.
+Use explicit little-endian reads, not a packed host struct. Hash the complete PS-X EXE file with FNV-1a 64 and render 16 lowercase hex digits. Validate bounds before every header/payload access. Do not add PS1 RAM-range checks in M1; those belong to the memory/runtime milestone.
 
-Do not validate guest RAM ranges in this task; the M1 contract validates file structure, while PS1 memory-map validity belongs to the later runtime/memory milestone.
-
-- [ ] **Step 5: Run GREEN and commit**
+- [ ] **Step 5: GREEN + commit**
 
 ```bash
 ctest --test-dir build -R jojo_ps1_exe_tests --output-on-failure
 git add src/core/ps1_exe.h src/core/ps1_exe.cpp tests/ps1_fixture.h tests/test_ps1_exe.cpp CMakeLists.txt
-git commit -m "feat: validate PS-X EXE metadata"
+git commit -m "feat: validate PS-X EXE"
 ```
 
 ---
 
-### Task 4: Replace Manifest v1 Backend Claims with Manifest v2 Evidence
+### Task 4: Replace Manifest v1 Native Claims with Manifest v2 Evidence
 
 **Files:**
 - Modify: `src/core/conversion.h`
@@ -396,9 +393,7 @@ git commit -m "feat: validate PS-X EXE metadata"
 - Create: `tests/test_ps1_manifest.cpp`
 - Modify: `CMakeLists.txt`
 
-**Interfaces:**
-- Consumes: source fingerprint and PS-X EXE metadata.
-- Produces the v2 `ConversionManifest` contract:
+**Produces:**
 
 ```cpp
 struct ConversionManifest {
@@ -434,47 +429,44 @@ struct ConversionManifest {
 };
 ```
 
-Delete `backend`, `boot_program_hash_hex`, and all SH-4/native-backend metadata fields from this struct.
+Remove `backend`, `boot_program_hash_hex`, backend ABI/hash/block counts, and `has_complete_native_backend_metadata`.
 
-- [ ] **Step 1: Write RED truth-contract tests**
+- [ ] **Step 1: Write RED round-trip and truth tests**
 
-Create a complete synthetic manifest with `media_status=verified` and `executable_status=verified`; save/load and compare every field.
-
-Add negative assertions that `save_conversion_manifest_atomic` fails with `ErrorCode::invalid_installation` when:
+Create a fully populated synthetic v2 manifest; save/load and compare every field. Negative saves must return `invalid_installation` for:
 
 ```text
 manifest_version != 2
 platform != playstation
-executable_status == verified but media_status != verified
-executable_status == verified but boot_executable is empty
-executable_status == verified but psx_exe_hash_fnv1a64 is empty
-executable_status == verified but any mandatory PS-X numeric field is absent
-any M1+ status is set to verified while executable_status is not verified
+executable_status=verified while media_status!=verified
+verified executable with empty system_cnf_path
+verified executable with empty boot_executable
+verified executable with empty psx_exe_hash_fnv1a64
+verified executable missing any PS-X numeric metadata field
+mips/reference/native/hardware/boot/render/audio/input/gameplay=verified while executable_status!=verified
 ```
 
-For this milestone, mandatory numeric fields are entry, load address, initial GP, text size, stack base, stack size; zero values are valid if the PS-X EXE header explicitly contains zero.
+Zero numeric values remain legal because zero can be present in the PS-X EXE header.
 
 - [ ] **Step 2: Run RED**
 
-Expected: tests fail against the v1/native-backend schema.
+Expected: old schema fails the new test.
 
-- [ ] **Step 3: Implement strict v2 serialization**
+- [ ] **Step 3: Implement strict v2 serialization/parsing**
 
-Use stable keys exactly matching the field names above. Serialize addresses as `0x` plus eight lowercase hex digits and sizes as decimal. Parsing must reject overflow, malformed hex, duplicate keys that affect truth-sensitive fields, and a missing mandatory v2 key.
+Use stable keys matching field names. Addresses serialize as `0x` plus eight lowercase hex digits; sizes serialize decimal. Reject duplicate truth-sensitive keys, malformed hex, overflow, and missing required v2 keys.
 
-Remove `has_complete_native_backend_metadata` entirely.
-
-- [ ] **Step 4: Run GREEN and commit**
+- [ ] **Step 4: GREEN + commit**
 
 ```bash
 ctest --test-dir build -R jojo_ps1_manifest_tests --output-on-failure
 git add src/core/conversion.h src/core/conversion.cpp tests/test_ps1_manifest.cpp CMakeLists.txt
-git commit -m "feat: define truthful PS1 manifest v2"
+git commit -m "feat: define PS1 manifest v2"
 ```
 
 ---
 
-### Task 5: Add Transactional Install Generations and Atomic Activation
+### Task 5: Add Destination Validation and Transactional Install Generations
 
 **Files:**
 - Create: `src/core/ps1_installation.h`
@@ -483,8 +475,6 @@ git commit -m "feat: define truthful PS1 manifest v2"
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: user-selected install root and manifest writer from Task 4.
-- Produces:
 
 ```cpp
 struct PendingInstallGeneration {
@@ -500,40 +490,52 @@ struct ActiveInstallGeneration {
     std::filesystem::path manifest_path;
 };
 
+Result<void> validate_install_destination(const std::filesystem::path& install_root,
+                                          std::uint64_t required_bytes);
 Result<PendingInstallGeneration> begin_install_generation(const std::filesystem::path& install_root);
 Result<void> commit_install_generation(const std::filesystem::path& install_root,
                                        const PendingInstallGeneration& generation);
 Result<ActiveInstallGeneration> resolve_active_install_generation(const std::filesystem::path& install_root);
 ```
 
-- [ ] **Step 1: Write RED generation tests**
+- [ ] **Step 1: Write RED destination tests**
 
-Use a temporary root. Assert the first pending generation is `generation-000001`, the second allocated after a committed first generation is `generation-000002`, and staging lives under `<root>/.staging/<generation-id>` while committed data lives under `<root>/generations/<generation-id>`.
+Use a temp root and assert:
 
-Create a valid dummy `game_manifest.ini` inside generation A, commit A, then begin B without committing it. Assert:
-
-```cpp
-const auto active = resolve_active_install_generation(root);
-CHECK(active);
-CHECK(active.value.generation_id == "generation-000001");
+```text
+empty path rejected
+existing regular file used as install_root rejected
+existing writable directory accepted
+required_bytes greater than available space rejected when std::filesystem::space succeeds
 ```
 
-Also corrupt `active_install.ini` with `../escape` and assert resolution rejects traversal.
+For the space test, do not allocate huge files. Obtain `space(root).available` and call validation with `available + 1` only if increment does not overflow; otherwise skip only that assertion and keep the rest of the test active.
 
-- [ ] **Step 2: Run RED**
+- [ ] **Step 2: Write RED generation tests**
 
-Expected: interfaces do not exist.
+Assert first ID `generation-000001`; after commit, next ID `generation-000002`. Staging path is `<root>/.staging/<id>`, final path is `<root>/generations/<id>`.
 
-- [ ] **Step 3: Implement staging and active pointer**
+Commit generation A with a regular `game_manifest.ini`; begin B but do not commit. `resolve_active_install_generation` must still return A. Corrupt active pointer with `../escape` and assert rejection.
 
-`begin_install_generation` must create only the selected install root plus `.staging/<id>` and required parent directories. It must not create or overwrite `active_install.ini`.
+- [ ] **Step 3: Run RED**
 
-`commit_install_generation` must:
+Expected: interfaces missing.
 
-1. require a regular staging `game_manifest.ini`;
-2. create `generations/`;
-3. rename the staging directory to `generations/<id>` on the same volume;
-4. write `active_install.ini.tmp` containing exactly:
+- [ ] **Step 4: Implement destination validation**
+
+`validate_install_destination`:
+
+```text
+reject empty root
+reject root if it exists as a non-directory
+find nearest existing ancestor for std::filesystem::space
+if space() succeeds and available < required_bytes -> io_error
+if space() itself is unsupported/fails -> do not fabricate free-space data; let real writes be authority
+```
+
+- [ ] **Step 5: Implement staging + atomic active pointer**
+
+`begin_install_generation` creates `<root>/.staging/<id>` only after destination validation by the caller. `commit_install_generation` requires staging `game_manifest.ini`, renames staging to `generations/<id>` on the same volume, then writes `active_install.ini.tmp`:
 
 ```ini
 format=1
@@ -541,18 +543,16 @@ generation_id=generation-000001
 manifest=generations/generation-000001/game_manifest.ini
 ```
 
-5. flush/close it;
-6. atomically replace `active_install.ini` using the repository's Windows `MoveFileExW(... MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` pattern and `std::filesystem::rename` on non-Windows;
-7. leave an older valid pointer untouched if any earlier step fails.
+Replace the pointer atomically with `MoveFileExW(... MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` on Windows and `std::filesystem::rename` on non-Windows. Older valid pointer must remain untouched if pre-activation steps fail.
 
-`resolve_active_install_generation` must reject absolute paths, `..`, mismatched generation IDs, missing generation directories, and missing manifests.
+`resolve_active_install_generation` rejects absolute manifest paths, `..`, ID/path mismatch, missing generation directory, and missing manifest.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [ ] **Step 6: GREEN + commit**
 
 ```bash
 ctest --test-dir build -R jojo_ps1_installation_tests --output-on-failure
 git add src/core/ps1_installation.h src/core/ps1_installation.cpp tests/test_ps1_installation.cpp CMakeLists.txt
-git commit -m "feat: add transactional PS1 install generations"
+git commit -m "feat: add transactional PS1 installations"
 ```
 
 ---
@@ -562,14 +562,12 @@ git commit -m "feat: add transactional PS1 install generations"
 **Files:**
 - Modify: `src/core/conversion.h`
 - Modify: `src/core/conversion.cpp`
-- Create: `tests/test_ps1_conversion.cpp`
 - Modify: `tests/ps1_fixture.h`
+- Create: `tests/test_ps1_conversion.cpp`
 - Modify: `tests/test_observed_disc_revision.cpp`
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: Tasks 1–5 plus existing revision profiles and exact observed whole-image fingerprint recognition.
-- Produces:
 
 ```cpp
 enum class ConversionStage {
@@ -591,11 +589,11 @@ struct ConversionOptions {
 };
 ```
 
-`convert_image(source, install_root, options, callback)` and the production overload remain the entry points. Remove `allow_unverified_base_conversion`.
+Remove `allow_unverified_base_conversion`.
 
-- [ ] **Step 1: Extend `tests/ps1_fixture.h` to emit a complete synthetic PS1 ISO**
+- [ ] **Step 1: Make a complete synthetic PS1 ISO fixture**
 
-The fixture must contain at minimum:
+`tests/ps1_fixture.h` emits:
 
 ```text
 /SYSTEM.CNF
@@ -603,7 +601,7 @@ The fixture must contain at minimum:
 /DATA/ASSET.DAT
 ```
 
-`SYSTEM.CNF` content:
+`SYSTEM.CNF`:
 
 ```text
 BOOT = cdrom:\SLUS_TEST.00;1
@@ -612,15 +610,11 @@ EVENT = 10
 STACK = 801FFF00
 ```
 
-`SLUS_TEST.00` is the synthetic PS-X EXE from Task 3. `ASSET.DAT` contains a small ASCII synthetic payload.
+`SLUS_TEST.00` is Task 3's synthetic PS-X EXE. Provide cooked ISO and raw MODE2/2352 variants.
 
-Provide helpers for cooked ISO and raw MODE2/2352 conversion so the same M1 conversion contract can run against both layouts.
+- [ ] **Step 2: Write RED conversion tests**
 
-- [ ] **Step 2: Write RED end-to-end conversion tests**
-
-Use an injected `GameRevisionProfile` containing synthetic file hashes for `/SYSTEM.CNF`, `/SLUS_TEST.00`, and `/DATA/ASSET.DAT`.
-
-Assert a successful conversion produces:
+Inject a `GameRevisionProfile` with synthetic hashes for all three fixture files. Successful conversion must create:
 
 ```text
 <root>/active_install.ini
@@ -629,35 +623,45 @@ Assert a successful conversion produces:
 <root>/generations/generation-000001/data/boot.psxexe
 ```
 
-Assert the manifest has:
+Manifest assertions:
 
 ```cpp
-manifest_version == "2"
-platform == "playstation"
-revision_id == "synthetic-ps1-jojo"
-system_cnf_path == "/SYSTEM.CNF"
-boot_executable == "/SLUS_TEST.00"
-media_status == "verified"
-executable_status == "verified"
-mips_analysis_status == "pending"
-native_codegen_status == "pending"
-boot_status == "pending"
-gameplay_status == "pending"
+CHECK(m.manifest_version == "2");
+CHECK(m.platform == "playstation");
+CHECK(m.revision_id == "synthetic-ps1-jojo");
+CHECK(m.system_cnf_path == "/SYSTEM.CNF");
+CHECK(m.boot_executable == "/SLUS_TEST.00");
+CHECK(m.media_status == "verified");
+CHECK(m.executable_status == "verified");
+CHECK(m.mips_analysis_status == "pending");
+CHECK(m.native_codegen_status == "pending");
+CHECK(m.boot_status == "pending");
+CHECK(m.gameplay_status == "pending");
 ```
 
-Delete the source image after conversion and assert the installed `data/boot.psxexe` remains readable and matches the fixture executable bytes.
+Delete source after conversion; installed `data/boot.psxexe` must still equal synthetic executable bytes.
 
-Run the same conversion once with cooked ISO and once with MODE2/2352 BIN.
+Run conversion against cooked ISO and MODE2/2352 BIN.
 
-Add failure tests for missing `SYSTEM.CNF`, malformed `BOOT`, invalid PS-X EXE magic, unknown revision, and an unwritable/invalid destination. None may create or change `active_install.ini`.
+Failure cases:
+
+```text
+missing SYSTEM.CNF
+malformed BOOT
+invalid PS-X EXE magic
+unknown revision
+install root is an existing regular file
+```
+
+None may create/change `active_install.ini`.
 
 - [ ] **Step 3: Run RED**
 
-Expected: old conversion attempts Dreamcast backend preparation or writes v1 layout.
+Expected: current conversion routes to Dreamcast backend or old v1 layout.
 
-- [ ] **Step 4: Implement the M1 conversion sequence**
+- [ ] **Step 4: Implement M1 conversion**
 
-The production overload must retain the exact observed source fingerprint contract already established for the user's image:
+Production overload keeps the already observed whole-image fingerprint only:
 
 ```text
 format=bin
@@ -666,49 +670,42 @@ fnv1a64=b8b5dbf79cdb9fcf
 revision_id=jojo-usa-observed-b8b5dbf79cdb9fcf
 ```
 
-Do not embed any other commercial metadata or bytes.
+No additional commercial bytes/metadata are committed.
 
 Sequence:
 
 ```text
-validate source extension/file
+validate source
 fingerprint source
-open PS1 logical sectors + ISO9660
+open logical PS1 media + ISO9660
 identify revision
-read + parse /SYSTEM.CNF
-read + validate resolved PS-X EXE
-begin install generation
+read raw /SYSTEM.CNF + parse boot target
+read/validate PS-X EXE
+required_bytes = SYSTEM.CNF bytes + PS-X EXE bytes + 65536
+validate selected destination
+begin generation
 create staging data/ and logs/
-write exact SYSTEM.CNF bytes to data/SYSTEM.CNF
-write exact PS-X EXE bytes to data/boot.psxexe
-construct manifest v2 with M1 evidence only
+write exact SYSTEM.CNF -> data/SYSTEM.CNF
+write exact executable -> data/boot.psxexe
+construct v2 manifest with media/executable verified; all later statuses pending
 save staging game_manifest.ini last
-commit generation + active pointer
+commit generation and active pointer
 return manifest
 ```
 
-If writing any local file fails, return an error and never activate the new generation.
+Source file streams are input-only. Do not call any Dreamcast/SH-4/native-backend preparation.
 
-Do not call `prepare_game_native_backend`, Dreamcast analysis, SH-4 analysis, or native backend cache code.
-
-- [ ] **Step 5: Run GREEN on cooked and MODE2 tests**
+- [ ] **Step 5: GREEN + commit**
 
 ```bash
 ctest --test-dir build -R "jojo_ps1_conversion_tests|jojo_media_tests|jojo_iso_tests|observed" --output-on-failure
-```
-
-Expected: PASS.
-
-- [ ] **Step 6: Commit**
-
-```bash
 git add src/core/conversion.h src/core/conversion.cpp tests/ps1_fixture.h tests/test_ps1_conversion.cpp tests/test_observed_disc_revision.cpp CMakeLists.txt
-git commit -m "feat: convert JoJo media through PS1 executable discovery"
+git commit -m "feat: discover and install JoJo PS1 executable"
 ```
 
 ---
 
-### Task 7: Make Runtime Validation Truthful for M1 and Reject Legacy v1 Installs
+### Task 7: Truthful Runtime Validation + Explicit Legacy Classification
 
 **Files:**
 - Modify: `src/core/runtime.h`
@@ -717,34 +714,42 @@ git commit -m "feat: convert JoJo media through PS1 executable discovery"
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `resolve_active_install_generation`, manifest v2, local `data/boot.psxexe`, PS-X EXE parser.
-- Produces:
 
 ```cpp
+enum class InstallationKind {
+    absent,
+    legacy_v1,
+    ps1_m1
+};
+
 struct InstallationInfo {
     std::filesystem::path install_root;
     std::filesystem::path generation_dir;
     ConversionManifest manifest;
 };
 
+Result<InstallationKind> classify_installation(const std::filesystem::path& install_root);
 Result<InstallationInfo> validate_installation(const std::filesystem::path& install_root);
 Result<void> bootstrap_runtime(const std::filesystem::path& install_root);
 ```
 
-- [ ] **Step 1: Write RED runtime-install tests**
+- [ ] **Step 1: Write RED validation tests**
 
-From a synthetic successful M1 conversion, assert `validate_installation(root)` succeeds even after deleting the source image.
+For a synthetic M1 conversion, `classify_installation` returns `ps1_m1` and `validate_installation` succeeds after source deletion.
 
-Then mutate copies and assert rejection for:
+Create a root-level v1 manifest and assert `classify_installation` returns `legacy_v1`. `validate_installation` must fail with detail containing both `legacy` and `Dreamcast/SH-4`.
 
-- `manifest_version=1` with detail containing `legacy` and `Dreamcast/SH-4`;
-- `platform` not equal to `playstation`;
-- missing `data/boot.psxexe`;
-- changed byte in `data/boot.psxexe` causing full-file hash mismatch;
-- manifest `boot_executable` empty while executable status is verified;
-- active pointer referencing a missing generation.
+Other negative cases:
 
-Assert `bootstrap_runtime` on a valid M1 installation returns:
+```text
+platform != playstation
+missing data/boot.psxexe
+one modified executable byte -> hash mismatch
+active pointer to missing generation
+verified executable metadata different from re-parsed local file
+```
+
+`bootstrap_runtime` on a valid M1 install must return:
 
 ```cpp
 CHECK(!boot);
@@ -753,31 +758,37 @@ CHECK(boot.detail.find("R3000A") != std::string::npos);
 CHECK(boot.detail.find("not implemented") != std::string::npos);
 ```
 
-This is deliberate: M1 is installable/inspectable, not bootable.
-
 - [ ] **Step 2: Run RED**
 
-Expected: current runtime requires `native-ready` SH-4 cache and fails the new contract.
+Expected: current runtime requires SH-4 native cache.
 
-- [ ] **Step 3: Rewrite runtime validation**
+- [ ] **Step 3: Implement classification/validation**
 
-Remove `game_backend.h` and `native_backend.h` dependencies. Resolve active generation, load manifest v2, require `platform=playstation`, require `media_status=verified` and `executable_status=verified`, parse `data/boot.psxexe`, and compare all stored PS-X metadata/hash against the local file.
+Rules:
 
-For a root that lacks `active_install.ini` but contains an old root-level `game_manifest.ini`, inspect enough of that manifest to identify v1 and return the explicit legacy error rather than a generic missing-installation error.
+```text
+no active_install.ini and no root game_manifest.ini -> absent
+root game_manifest.ini manifest_version=1 -> legacy_v1
+valid active pointer + v2 manifest -> ps1_m1
+```
 
-`bootstrap_runtime` must call `validate_installation` first, then return the explicit R3000A-not-implemented `backend_unavailable` error. It must not create caches or promote status.
+`validate_installation` resolves active generation, loads v2, requires `platform=playstation`, `media_status=verified`, `executable_status=verified`, parses local `data/boot.psxexe`, and compares stored hash/entry/load/gp/text/stack metadata.
 
-- [ ] **Step 4: Run GREEN and commit**
+Legacy files are not deleted or rewritten by validation.
+
+`bootstrap_runtime` validates first, then returns explicit R3000A-not-implemented `backend_unavailable`; it creates no cache and changes no status.
+
+- [ ] **Step 4: GREEN + commit**
 
 ```bash
 ctest --test-dir build -R jojo_ps1_runtime_installation_tests --output-on-failure
 git add src/core/runtime.h src/core/runtime.cpp tests/test_ps1_runtime_installation.cpp CMakeLists.txt
-git commit -m "fix: validate PS1 M1 installs without false boot claims"
+git commit -m "fix: validate PS1 M1 installs truthfully"
 ```
 
 ---
 
-### Task 8: Persist a User-Selectable Install Root and Add Win32 Folder Selection
+### Task 8: User-Selectable Install Root in Settings and Win32 UI
 
 **Files:**
 - Modify: `src/core/settings.h`
@@ -785,15 +796,15 @@ git commit -m "fix: validate PS1 M1 installs without false boot claims"
 - Modify: `tests/test_main.cpp`
 - Modify: `src/app_win32/main.cpp`
 - Modify: `tests/test_win32_image_selection.cpp`
-- Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: existing atomic settings file, M1 conversion and runtime validation.
-- Produces: `AppSettings::install_root`, settings key `install_root=...`, Win32 folder picker, remembered install root.
+- `AppSettings` contains `std::string install_root{}`.
+- Settings serialize `install_root=`; legacy `install_dir=` is read-only migration input.
+- UI exposes separate source-image and install-root controls.
 
-- [ ] **Step 1: Write RED settings migration tests**
+- [ ] **Step 1: Write RED settings tests**
 
-Change the settings round-trip test to:
+Round trip:
 
 ```cpp
 jojo::AppSettings in{};
@@ -801,30 +812,20 @@ in.install_root = "C:/Games/JOJO-Recompiled";
 CHECK(jojo::save_settings_atomic(path, in));
 const auto loaded = jojo::load_settings(path);
 CHECK(loaded);
-CHECK(loaded.value.install_root == in.install_root);
+if (loaded) CHECK(loaded.value.install_root == in.install_root);
 ```
 
-Add a legacy-input test that writes:
+Legacy file:
 
 ```ini
 install_dir=D:/Old/JoJo
 ```
 
-and asserts `load_settings` maps it to `install_root == "D:/Old/JoJo"`. Saving that result must emit `install_root=` and must not emit `install_dir=`.
+must load into `install_root`. Re-saving must contain `install_root=` and not `install_dir=`.
 
-- [ ] **Step 2: Run settings test RED**
+- [ ] **Step 2: Run RED and implement settings migration**
 
-Expected: `AppSettings::install_root` does not exist.
-
-- [ ] **Step 3: Implement settings key migration**
-
-In `AppSettings`, replace `install_dir` with:
-
-```cpp
-std::string install_root{};
-```
-
-Parser behavior:
+Replace `AppSettings::install_dir` with `install_root`. Parser:
 
 ```cpp
 if (key == "install_root") result.install_root = value;
@@ -833,65 +834,57 @@ else if (key == "install_dir" && result.install_root.empty()) result.install_roo
 
 Serializer writes only `install_root=`.
 
-- [ ] **Step 4: Write RED Win32 UX assertions**
+- [ ] **Step 3: Add RED Win32 control assertions**
 
-Assign stable IDs:
+Stable IDs:
 
 ```cpp
-ID_SOURCE_PATH = 1001
-ID_SELECT_SOURCE = 1002
-ID_PREPARE = 1003
-ID_INSTALL_PATH = 1004
-ID_SELECT_INSTALL = 1005
+ID_SOURCE_PATH = 1001;
+ID_SELECT_SOURCE = 1002;
+ID_PREPARE = 1003;
+ID_INSTALL_PATH = 1004;
+ID_SELECT_INSTALL = 1005;
 ```
 
-Update `tests/test_win32_image_selection.cpp` to assert both path fields and both selection buttons are visible/usable. Click `ID_SELECT_INSTALL`, assert a native `#32770` dialog opens, cancel it, and assert the install path remains unchanged.
+`tests/test_win32_image_selection.cpp` asserts both edit fields and both chooser buttons are visible/usable. Clicking install chooser must open native `#32770`; cancelling leaves install field unchanged. Source drop loop is only `.iso`, `.cue`, `.BIN`; a `.gdi` drop must not replace selection.
 
-Update source-drop test extensions to `{L".iso", L".cue", L".BIN"}` and add a `.gdi` drop assertion that selection is unchanged.
+- [ ] **Step 4: Implement Win32 install-root UX**
 
-- [ ] **Step 5: Run Win32 test RED in Windows CI or local VS2022 environment**
+Use `IFileOpenDialog` with `FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM`.
 
-Expected: install controls are absent and GDI is still listed in UI filters.
-
-- [ ] **Step 6: Implement folder selection and persistence**
-
-Use `IFileOpenDialog` with `FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM`. The application root remains `%LOCALAPPDATA%\JOJO Recompiled`; the settings path is `<app_root>/settings.ini`.
-
-Startup sequence:
+Settings path remains `<app_root>/settings.ini`. Startup:
 
 ```text
-load settings.ini if valid
-if install_root is empty: propose <app_root>/game
-set install-path edit control
-call refresh_install() against selected/proposed root
+load valid settings if present
+if install_root empty -> propose <app_root>/game
+show proposed/stored root
+classify installation at that root
 ```
 
-Do **not** create the selected game install root merely by starting the application. It is created only when conversion starts.
+Do not create the game root at startup.
 
-When the user chooses another folder:
+On folder selection:
 
 ```text
 update game_dir
-update install edit box
+update install-path edit
 save settings atomically
-refresh installation status
+refresh installation classification
 ```
 
-Update the source picker filter and messages to `.iso;*.bin;*.cue` only.
+If classification is `legacy_v1`, show explicit incompatible-legacy text and set prepare button to `RECONVERTER NESTA PASTA`; reconversion leaves old root-level v1 manifest/log untouched and creates the new generations/active pointer beside them.
 
-Replace fixed text `Dados convertidos: %LOCALAPPDATA%...` with a visible install-root label derived from `game_dir`.
-
-After successful M1 conversion, UI text must be equivalent to:
+If classification is `absent`, show preparation prompt. If `ps1_m1`, show:
 
 ```text
 Executável PS1 identificado e instalação validada. Análise R3000A/MIPS é o próximo marco.
 ```
 
-It must not say `backend nativo preparado`, `native-ready`, or imply bootability.
+Source picker accepts `.iso;*.bin;*.cue`, not GDI. Replace fixed `%LOCALAPPDATA%` install copy with actual `game_dir` display.
 
-- [ ] **Step 7: Run settings + Windows tests GREEN**
+- [ ] **Step 5: Run GREEN**
 
-Linux/portable:
+Portable:
 
 ```bash
 ctest --test-dir build -R jojo_tests --output-on-failure
@@ -903,10 +896,10 @@ Windows:
 ctest --test-dir build -C Release -R jojo_win32_image_selection_tests --output-on-failure
 ```
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/core/settings.h src/core/settings.cpp tests/test_main.cpp src/app_win32/main.cpp tests/test_win32_image_selection.cpp CMakeLists.txt
+git add src/core/settings.h src/core/settings.cpp tests/test_main.cpp src/app_win32/main.cpp tests/test_win32_image_selection.cpp
 git commit -m "feat: let users choose JoJo install root"
 ```
 
@@ -920,85 +913,114 @@ git commit -m "feat: let users choose JoJo install root"
 - Modify: `.github/workflows/build.yml`
 - Modify: `tests/iso_fixture.h`
 - Modify: `tests/test_main.cpp`
-- Delete: all guest/backend source files listed in the File Structure section.
-- Delete old Dreamcast/SH-4/backend tests listed below.
+- Delete: all production guest/backend files listed above.
+- Delete: old guest/backend tests listed below.
 
-**Interfaces:**
-- Consumes: complete green PS1 M1 path from Tasks 1–8.
-- Produces: an active repository whose compiled/tested commercial path contains no Dreamcast, SH-4, GDI, `game_backend`, or old guest `native_backend` dependency.
+Delete tests:
 
-**Delete these old tests:**
+```text
+tests/test_dreamcast_analysis.cpp
+tests/test_dreamcast_boot.cpp
+tests/test_dreamcast_boot_runner.cpp
+tests/test_dreamcast_bus_diagnostics.cpp
+tests/test_dreamcast_executable_memory.cpp
+tests/test_dreamcast_irq_delivery.cpp
+tests/test_dreamcast_maple.cpp
+tests/test_dreamcast_pvr2_vblank.cpp
+tests/test_dreamcast_system_asic.cpp
+tests/test_game_backend.cpp
+tests/test_native_backend.cpp
+tests/test_manifest_backend_metadata.cpp
+tests/test_runtime_native_backend.cpp
+tests/test_unverified_conversion.cpp
+tests/test_sh4_addressing_pipeline.cpp
+tests/test_sh4_block_boundary.cpp
+tests/test_sh4_carry_overflow.cpp
+tests/test_sh4_cfg.cpp
+tests/test_sh4_data_manipulation.cpp
+tests/test_sh4_decoder.cpp
+tests/test_sh4_flds_fsts.cpp
+tests/test_sh4_float_ftrc.cpp
+tests/test_sh4_fmov_memory.cpp
+tests/test_sh4_fmov_registers.cpp
+tests/test_sh4_fpscr_banks.cpp
+tests/test_sh4_fpu_arithmetic.cpp
+tests/test_sh4_fpu_compare.cpp
+tests/test_sh4_fpu_completion.cpp
+tests/test_sh4_fpu_constants.cpp
+tests/test_sh4_fpu_disable.cpp
+tests/test_sh4_fpu_mode_switches.cpp
+tests/test_sh4_fpu_unary.cpp
+tests/test_sh4_fpul_transfers.cpp
+tests/test_sh4_gbr_memory.cpp
+tests/test_sh4_gbr_register_transfer.cpp
+tests/test_sh4_integer_pipeline.cpp
+tests/test_sh4_interrupt_entry.cpp
+tests/test_sh4_ir.cpp
+tests/test_sh4_memory_bus.cpp
+tests/test_sh4_memory_pipeline.cpp
+tests/test_sh4_multiply.cpp
+tests/test_sh4_opcode_census.cpp
+tests/test_sh4_pr_mac_register_transfer.cpp
+tests/test_sh4_reference_executor.cpp
+```
 
-- `tests/test_dreamcast_analysis.cpp`
-- `tests/test_dreamcast_boot.cpp`
-- `tests/test_dreamcast_boot_runner.cpp`
-- `tests/test_dreamcast_bus_diagnostics.cpp`
-- `tests/test_dreamcast_executable_memory.cpp`
-- `tests/test_dreamcast_irq_delivery.cpp`
-- `tests/test_dreamcast_maple.cpp`
-- `tests/test_dreamcast_pvr2_vblank.cpp`
-- `tests/test_dreamcast_system_asic.cpp`
-- `tests/test_game_backend.cpp`
-- `tests/test_native_backend.cpp`
-- `tests/test_manifest_backend_metadata.cpp`
-- `tests/test_runtime_native_backend.cpp`
-- `tests/test_unverified_conversion.cpp`
-- `tests/test_sh4_addressing_pipeline.cpp`
-- `tests/test_sh4_block_boundary.cpp`
-- `tests/test_sh4_carry_overflow.cpp`
-- `tests/test_sh4_cfg.cpp`
-- `tests/test_sh4_data_manipulation.cpp`
-- `tests/test_sh4_decoder.cpp`
-- `tests/test_sh4_flds_fsts.cpp`
-- `tests/test_sh4_float_ftrc.cpp`
-- `tests/test_sh4_fmov_memory.cpp`
-- `tests/test_sh4_fmov_registers.cpp`
-- `tests/test_sh4_fpscr_banks.cpp`
-- `tests/test_sh4_fpu_arithmetic.cpp`
-- `tests/test_sh4_fpu_compare.cpp`
-- `tests/test_sh4_fpu_completion.cpp`
-- `tests/test_sh4_fpu_constants.cpp`
-- `tests/test_sh4_fpu_disable.cpp`
-- `tests/test_sh4_fpu_mode_switches.cpp`
-- `tests/test_sh4_fpu_unary.cpp`
-- `tests/test_sh4_fpul_transfers.cpp`
-- `tests/test_sh4_gbr_memory.cpp`
-- `tests/test_sh4_gbr_register_transfer.cpp`
-- `tests/test_sh4_integer_pipeline.cpp`
-- `tests/test_sh4_interrupt_entry.cpp`
-- `tests/test_sh4_ir.cpp`
-- `tests/test_sh4_memory_bus.cpp`
-- `tests/test_sh4_memory_pipeline.cpp`
-- `tests/test_sh4_multiply.cpp`
-- `tests/test_sh4_opcode_census.cpp`
-- `tests/test_sh4_pr_mac_register_transfer.cpp`
-- `tests/test_sh4_reference_executor.cpp`
+- [ ] **Step 1: Add a RED architecture hygiene gate that allows legitimate legacy error text**
 
-- [ ] **Step 1: Add a RED architecture hygiene gate**
-
-Create `cmake/CheckPs1ActiveArchitecture.cmake` that reads active production/test/config files only:
+Create `cmake/CheckPs1ActiveArchitecture.cmake`:
 
 ```cmake
-set(_roots
-  "${JOJO_SOURCE_DIR}/src"
-  "${JOJO_SOURCE_DIR}/tests"
-)
-file(GLOB_RECURSE _active CONFIGURE_DEPENDS
-  "${JOJO_SOURCE_DIR}/src/*.h" "${JOJO_SOURCE_DIR}/src/*.cpp"
-  "${JOJO_SOURCE_DIR}/tests/*.h" "${JOJO_SOURCE_DIR}/tests/*.cpp")
-list(APPEND _active
-  "${JOJO_SOURCE_DIR}/CMakeLists.txt"
-  "${JOJO_SOURCE_DIR}/.github/workflows/build.yml")
-foreach(_file IN LISTS _active)
-  file(READ "${_file}" _text)
+if(NOT DEFINED JOJO_SOURCE_DIR)
+  message(FATAL_ERROR "JOJO_SOURCE_DIR is required")
+endif()
+
+file(GLOB _guest_files
+  "${JOJO_SOURCE_DIR}/src/core/dreamcast_*"
+  "${JOJO_SOURCE_DIR}/src/core/sh4_*")
+if(_guest_files)
+  message(FATAL_ERROR "Dreamcast/SH-4 guest source still exists: ${_guest_files}")
+endif()
+
+foreach(_path IN ITEMS
+  "src/core/game_backend.cpp" "src/core/game_backend.h"
+  "src/core/native_backend.cpp" "src/core/native_backend.h"
+  "src/core/native_x64.cpp" "src/core/native_x64.h")
+  if(EXISTS "${JOJO_SOURCE_DIR}/${_path}")
+    message(FATAL_ERROR "Old guest backend file still exists: ${_path}")
+  endif()
+endforeach()
+
+file(READ "${JOJO_SOURCE_DIR}/CMakeLists.txt" _cmake)
+string(TOLOWER "${_cmake}" _cmake_lower)
+if(_cmake_lower MATCHES "dreamcast_|sh4_|jojo_native_backend|jojo_game_backend")
+  message(FATAL_ERROR "CMake still wires old guest architecture")
+endif()
+
+file(READ "${JOJO_SOURCE_DIR}/.github/workflows/build.yml" _workflow)
+string(TOLOWER "${_workflow}" _workflow_lower)
+if(_workflow_lower MATCHES "usa native backend|runtime native backend|native backend manifest|jojo_game_backend|sh4")
+  message(FATAL_ERROR "Workflow still runs old guest-backend contracts")
+endif()
+
+foreach(_path IN ITEMS
+  "src/core/disc_image.cpp"
+  "src/core/disc_media.cpp"
+  "src/app_win32/main.cpp")
+  file(READ "${JOJO_SOURCE_DIR}/${_path}" _text)
   string(TOLOWER "${_text}" _lower)
-  if(_lower MATCHES "dreamcast|sh4|segakatana|maple|pvr2|\\.gdi")
-    message(FATAL_ERROR "PS1 active-architecture gate failed: ${_file}")
+  if(_path STREQUAL "src/core/disc_image.cpp" AND _lower MATCHES "ext == \"gdi\"")
+    message(FATAL_ERROR "disc_image still accepts GDI")
+  endif()
+  if(_path STREQUAL "src/core/disc_media.cpp" AND _lower MATCHES "open_gdi_source|ext == \"\\.gdi\"")
+    message(FATAL_ERROR "disc_media still dispatches GDI")
+  endif()
+  if(_path STREQUAL "src/app_win32/main.cpp" AND _lower MATCHES "\\*\\.gdi|l\"\\.gdi\"")
+    message(FATAL_ERROR "Win32 UI still offers GDI")
   endif()
 endforeach()
 ```
 
-Do not scan `docs/superpowers/` because historical specs/plans intentionally preserve design history.
+This intentionally does **not** reject human-readable `Dreamcast/SH-4` text in the runtime's legacy-installation error or negative tests.
 
 Run:
 
@@ -1006,21 +1028,21 @@ Run:
 cmake -DJOJO_SOURCE_DIR=$PWD -P cmake/CheckPs1ActiveArchitecture.cmake
 ```
 
-Expected: FAIL on current Dreamcast/SH-4 files.
+Expected: FAIL before cleanup.
 
-- [ ] **Step 2: Remove old guest/backend source and CMake targets**
+- [ ] **Step 2: Delete guest/backend sources and targets**
 
-Delete every production source listed under `Dreamcast/SH-4 guest-backend files deleted in Task 9` and every old test listed above.
+Delete every listed source/test file. Remove corresponding `jojo_core` sources and CTest targets from `CMakeLists.txt`.
 
-Remove their entries/targets from `CMakeLists.txt`. Keep generic core, revision, ISO/media, PS1 M1, host input/presentation, networking/mod/training components.
+Keep generic media/ISO/revision/settings/presentation/input/networking/mod/training code and all new PS1 M1 components.
 
-In `tests/test_main.cpp`, remove includes, constants, helpers, and test calls that reference `game_backend`, Dreamcast boot data, SH-4, native backend, or old v1 conversion layout. Preserve generic settings/disc/hash/device tests.
+Strip Dreamcast-only helpers (`install_dreamcast_ip_metadata`, SH-4 payload constants, SEGAKATANA fields) from `tests/iso_fixture.h`; keep neutral ISO helpers needed by media/ISO tests or migrate them to `ps1_fixture.h`.
 
-In `tests/iso_fixture.h`, remove `install_dreamcast_ip_metadata`, Dreamcast ASCII fields, SH-4 named payloads, and other Dreamcast-only helpers. Keep only neutral ISO helpers still used by `test_iso9660.cpp`/`test_disc_media.cpp`, or migrate those tests to `ps1_fixture.h` and delete `iso_fixture.h` if no references remain.
+Remove old `game_backend` include/helpers/tests from `tests/test_main.cpp`.
 
-- [ ] **Step 3: Replace workflow contracts**
+- [ ] **Step 3: Replace CI contracts**
 
-Delete workflow steps named:
+Delete workflow steps:
 
 ```text
 Native backend manifest contract
@@ -1029,30 +1051,15 @@ USA native backend promotion contract
 Unverified base conversion contract
 ```
 
-Add explicit portable and Windows commands for:
-
-```text
-PS1 SYSTEM.CNF contract
-PS-X EXE contract
-PS1 manifest v2 contract
-PS1 transactional install contract
-PS1 conversion M1 contract
-PS1 runtime installation contract
-PS1 active architecture gate
-Observed disc revision contract
-```
-
-The standard CTest run may already execute the compiled tests; the explicit architecture gate must still run with:
+CTest runs the registered new tests. Add an explicit PS1 architecture gate in Linux and Windows jobs:
 
 ```bash
 cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckPs1ActiveArchitecture.cmake
 ```
 
-- [ ] **Step 4: Run hygiene gate GREEN**
+Keep observed-disc revision contract and generic networking contract.
 
-Run the gate. Expected: PASS.
-
-- [ ] **Step 5: Run complete Linux build/test GREEN**
+- [ ] **Step 4: Run clean GREEN verification**
 
 ```bash
 rm -rf build
@@ -1064,9 +1071,9 @@ cmake -DJOJO_SOURCE_DIR=$PWD -P cmake/CheckPs1ActiveArchitecture.cmake
 ctest --test-dir build --output-on-failure
 ```
 
-Expected: PASS with no Dreamcast/SH-4 target compiled.
+Expected: all pass; no old guest target compiles.
 
-- [ ] **Step 6: Commit cleanup**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add -A
@@ -1075,7 +1082,7 @@ git commit -m "refactor: remove Dreamcast SH-4 commercial architecture"
 
 ---
 
-### Task 10: Correct Current Documentation and Readiness Truth
+### Task 10: Correct Current Documentation, CI Evidence, and M1 Handoff
 
 **Files:**
 - Modify: `README.md`
@@ -1083,63 +1090,28 @@ git commit -m "refactor: remove Dreamcast SH-4 commercial architecture"
 - Modify: `docs/NEXT-MILESTONES.md`
 - Modify: `docs/architecture/PRODUCTION-ROADMAP.md`
 - Modify: `docs/architecture/PRODUCTION-READINESS.tsv`
-- Modify: `docs/BUILD-WINDOWS.md` only if build/test target names changed materially.
+- Modify: `docs/BUILD-WINDOWS.md` only if command/target names changed.
 
-**Interfaces:**
-- Consumes: final M0+M1 implementation state.
-- Produces: current docs that describe PS1 M1 accurately and do not claim commercial boot/gameplay.
+- [ ] **Step 1: Update current-state wording to exact truth**
 
-- [ ] **Step 1: Write the exact current-state wording before editing**
-
-The current-state documents must state these facts:
+Current docs must state:
 
 ```text
 Platform: PlayStation 1
-Game scope: JoJo-only
+Scope: this JoJo only
 Observed USA whole-image fingerprint: recognized
-PS1 media + SYSTEM.CNF + PS-X EXE pipeline: implemented and synthetic-test verified
-User-selectable installation root: implemented
-Transactional generation activation: implemented
+PS1 media/SYSTEM.CNF/PS-X EXE M1 pipeline: implemented and synthetic-test verified
+Install directory: user-selectable
+Transactional active generation: implemented
 R3000A execution: not implemented in M1
 Native x64 codegen: not implemented in M1
-Commercial PS-X EXE discovery on the user's real image: awaiting post-build user evidence until a new build is run locally
+Commercial PS-X EXE discovery on the user's real image: awaiting a new local run until observed
 Boot/render/audio/input/gameplay: not verified
 ```
 
-- [ ] **Step 2: Update machine-readable readiness**
+Do not present old Dreamcast work as active. Historical design files under `docs/superpowers/` remain as history.
 
-Replace Dreamcast-era R2 wording with PS1-specific M1 entries. Use evidence fields that point only to commits/CI runs actually produced during execution. Before a real-image M1 run, the commercial-evidence line must remain `blocked-external-evidence` or equivalent; do not mark it verified because synthetic CI passed.
-
-- [ ] **Step 3: Verify no current docs misstate the active platform**
-
-Run:
-
-```bash
-grep -RniE "Dreamcast|SH-4|Maple|PVR2|native-ready" README.md PROJECT-STATE.md docs/NEXT-MILESTONES.md docs/architecture/PRODUCTION-ROADMAP.md docs/architecture/PRODUCTION-READINESS.tsv
-```
-
-Expected: no active-platform claims remain. Historical notes may mention the migration only if explicitly labeled as superseded history.
-
-- [ ] **Step 4: Commit docs**
-
-```bash
-git add README.md PROJECT-STATE.md docs/NEXT-MILESTONES.md docs/architecture/PRODUCTION-ROADMAP.md docs/architecture/PRODUCTION-READINESS.tsv docs/BUILD-WINDOWS.md
-git commit -m "docs: mark PS1 foundation truthfully"
-```
-
----
-
-### Task 11: Final Verification, Windows CI, and Commercial-Evidence Handoff
-
-**Files:**
-- No production source change unless verification exposes a defect; any defect requires a new RED test before a fix.
-- Update: `PROJECT-STATE.md` and `docs/architecture/PRODUCTION-READINESS.tsv` only with actual CI identifiers after successful runs.
-
-**Interfaces:**
-- Consumes: Tasks 1–10.
-- Produces: CI-backed M0+M1 build and a precise local test request for the user's legally obtained image.
-
-- [ ] **Step 1: Run local/branch verification from a clean build**
+- [ ] **Step 2: Run clean Linux verification**
 
 ```bash
 rm -rf build
@@ -1151,28 +1123,32 @@ cmake -DJOJO_SOURCE_DIR=$PWD -P cmake/CheckPs1ActiveArchitecture.cmake
 ctest --test-dir build --output-on-failure
 ```
 
-Expected: all portable tests pass.
+- [ ] **Step 3: Commit docs and push feature branch**
 
-- [ ] **Step 2: Push branch and require GitHub Actions Linux + Windows success**
+```bash
+git add README.md PROJECT-STATE.md docs/NEXT-MILESTONES.md docs/architecture/PRODUCTION-ROADMAP.md docs/architecture/PRODUCTION-READINESS.tsv docs/BUILD-WINDOWS.md
+git commit -m "docs: mark JoJo PS1 M1 truthfully"
+git push
+```
+
+- [ ] **Step 4: Require GitHub Actions Linux + Windows GREEN**
 
 Windows authority must show:
 
 ```text
-Configure: success
-Build Release: success
-Production readiness gate: success
-PS1 active architecture gate: success
-CTest Release: success
-JOJO-Recompiled-Windows-x64 artifact: exactly JOJO-Recompiled.exe
+Configure success
+Build Release success
+Production readiness gate success
+PS1 active architecture gate success
+CTest Release success
+artifact JOJO-Recompiled-Windows-x64 contains only JOJO-Recompiled.exe
 ```
 
-- [ ] **Step 3: Record CI evidence without overstating commercial status**
+Record actual workflow run ID and artifact digest in `PROJECT-STATE.md`; do not promote commercial M1 evidence based on CI alone.
 
-Update current-state docs with the actual workflow run ID and artifact digest. Keep commercial M1 discovery pending until the user runs the Windows artifact against their image.
+- [ ] **Step 5: Give the user the real-image M1 test contract**
 
-- [ ] **Step 4: Give the user the M1 real-image test contract**
-
-Ask the user to select the same legally obtained PS1 BIN/CUE and any chosen installation directory. The expected successful progress boundary is:
+The user selects their same legally obtained PS1 BIN/CUE and any install directory. Expected success boundary:
 
 ```text
 source recognized
@@ -1184,11 +1160,11 @@ manifest v2 activated
 R3000A/MIPS analysis pending
 ```
 
-The user should return only the application log/manifest metadata needed for diagnosis; do not ask them to upload the commercial BIN, executable, BIOS, or extracted proprietary assets.
+Request only application log and non-proprietary manifest metadata if diagnosis is needed. Do not request upload of the BIN, PS-X EXE, BIOS, or extracted assets.
 
-- [ ] **Step 5: Commercial evidence promotion rule**
+- [ ] **Step 6: Promote commercial M1 only after real evidence**
 
-Only after a real run demonstrates the M1 sequence may `PROJECT-STATE.md` mark commercial PS-X EXE discovery verified. Even then the following remain unverified and must stay so:
+If that real run demonstrates the M1 sequence, update only the M1 commercial evidence status. These remain unverified:
 
 ```text
 R3000A execution
@@ -1201,46 +1177,49 @@ input
 gameplay
 ```
 
-- [ ] **Step 6: Commit evidence-only status update if commercial M1 succeeds**
+If the real run fails, do not mark M1 commercially verified; use the observed failure as the next systematic-debugging input.
+
+- [ ] **Step 7: Commit evidence status only if observed**
 
 ```bash
 git add PROJECT-STATE.md docs/architecture/PRODUCTION-READINESS.tsv
 git commit -m "docs: record verified JoJo PS1 M1 evidence"
 ```
 
-If the user's real run fails, do not make this commit; instead use the failure as the next systematic-debugging input.
+Skip this commit when real-image evidence has not succeeded.
 
 ---
 
-## Milestone Exit Criteria
+## Exit Criteria
 
-This M0+M1 plan is complete only when all of the following are true:
+M0+M1 is complete only when:
 
 1. Linux and Windows CI are green.
-2. Active source/build/tests contain no Dreamcast/SH-4/GDI commercial path.
-3. `.iso`, `.bin`, `.cue`, raw MODE1/2352, raw MODE2/2352 and CUE data-track tests are green where applicable.
-4. Synthetic `SYSTEM.CNF` discovery is green.
-5. Synthetic PS-X EXE parsing and full-file hash are green.
+2. Active build/workflow has no Dreamcast/SH-4/GDI commercial path.
+3. `.iso`, `.bin`, `.cue`, raw MODE1/2352, raw MODE2/2352, and CUE data-track contracts remain green where represented by tests.
+4. Synthetic `SYSTEM.CNF` parsing is green.
+5. Synthetic PS-X EXE metadata/full-file hash is green.
 6. Manifest v2 truth validation is green.
-7. Generation activation preserves the old active install on incomplete conversion.
-8. Win32 UI allows choosing and persisting an install root.
-9. M1 conversion installs `SYSTEM.CNF` and the validated boot executable locally without requiring the source afterward.
-10. Runtime validation verifies the installed executable but explicitly reports R3000A runtime as unavailable.
-11. Current docs contain no false Dreamcast/native-ready claims.
-12. Commercial-image PS-X EXE discovery remains explicitly pending until the user supplies real execution evidence from their own local copy.
+7. Destination validation rejects invalid roots and insufficient known free space.
+8. Incomplete conversion cannot replace the old active generation.
+9. Win32 UI allows choosing/persisting install root.
+10. M1 installs `SYSTEM.CNF` and validated boot executable locally and remains valid after source deletion.
+11. Runtime validates local PS-X EXE but explicitly reports R3000A runtime unavailable.
+12. Current docs contain no false active Dreamcast/native-ready claims.
+13. Commercial PS-X EXE discovery remains pending until the user's local run proves it.
 
 ## Follow-On Plan Boundaries
 
-After M1 commercial evidence is obtained, create separate implementation plans from the same architecture spec in this order, each after inspecting evidence produced by the preceding milestone:
+After M1 commercial evidence, create separate plans in this order, each using evidence from the prior milestone:
 
 1. R3000A reference executor + PS1 memory foundation.
 2. MIPS CFG + PS1 IR.
 3. Windows x64 native codegen/cache.
-4. BIOS/HLE JoJo-only services.
-5. GTE/GPU and real rendering checkpoint.
+4. BIOS/HLE services used by this JoJo.
+5. GTE/GPU + first real rendering checkpoint.
 6. CD-ROM/DMA/timers/interrupts.
 7. SPU/audio.
 8. input + first real boot checkpoint.
 9. gameplay completion for this JoJo only.
 
-This sequencing is intentional: hardware work is evidence-driven from the real JoJo execution path rather than generic PS1 compatibility work.
+This sequencing keeps hardware work evidence-driven rather than building generic PS1 compatibility.
