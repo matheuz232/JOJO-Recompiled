@@ -39,12 +39,14 @@ public:
     Result<void> load_main_ram(std::uint32_t guest_address,
                                std::span<const std::uint8_t> bytes);
 
+    [[nodiscard]] std::uint16_t interrupt_mask() const noexcept;
     const std::optional<Ps1UnsupportedAccess>& last_unsupported_access() const noexcept;
     void clear_last_unsupported_access() noexcept;
 
 private:
     std::vector<std::uint8_t> main_ram_;
     std::array<std::uint8_t, scratchpad_size> scratchpad_{};
+    std::uint16_t interrupt_mask_{};
     std::optional<Ps1UnsupportedAccess> last_unsupported_{};
 };
 
