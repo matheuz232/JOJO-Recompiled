@@ -11,6 +11,8 @@ namespace {
 
 constexpr std::uint32_t kCauseExcCodeMask = 0x0000007cu;
 constexpr std::uint32_t kCauseContextMask = 0xF0000000u; // BD, BT, CE
+constexpr std::uint32_t kCauseBd = 1u << 31;
+constexpr std::uint32_t kCauseBt = 1u << 30;
 constexpr std::uint32_t kStatusModeStackMask = 0x0000003fu;
 constexpr std::uint32_t kStatusBev = 1u << 22;
 
@@ -69,12 +71,23 @@ R3000aStepResult enter_exception(
     R3000aExceptionCode code,
     R3000aStage stage,
     std::uint32_t fault_pc,
+    const R3000aDelaySlot& current_delay,
     std::optional<std::uint32_t> opcode = std::nullopt,
     std::optional<std::uint32_t> bad_vaddr = std::nullopt) noexcept {
     const auto status_before = state.cop0.status;
     state.cop0.cause &= ~(kCauseExcCodeMask | kCauseContextMask);
     state.cop0.cause |= static_cast<std::uint32_t>(code) << 2;
-    state.cop0.epc = fault_pc;
+
+    if (current_delay.active) {
+        state.cop0.cause |= kCauseBd;
+        state.cop0.epc = current_delay.branch_pc;
+        if (current_delay.taken) {
+            state.cop0.cause |= kCauseBt;
+            state.cop0.target_address = current_delay.target;
+        }
+    } else {
+        state.cop0.epc = fault_pc;
+    }
 
     if (code == R3000aExceptionCode::adel || code == R3000aExceptionCode::ades) {
         if (bad_vaddr) state.cop0.bad_vaddr = *bad_vaddr;
@@ -98,9 +111,7 @@ R3000aStepResult enter_exception(
     result.diagnostic.pc = fault_pc;
     result.diagnostic.opcode = opcode;
     result.diagnostic.exception_code = code;
-    if (bad_vaddr) {
-        result.diagnostic.address = *bad_vaddr;
-    }
+    if (bad_vaddr) result.diagnostic.address = *bad_vaddr;
     return result;
 }
 
@@ -109,6 +120,7 @@ R3000aStepResult enter_exception(
 R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
     state.gpr[0] = 0u;
     const std::uint32_t instruction_pc = state.pc;
+    const R3000aDelaySlot current_delay = state.delay_slot;
 
     if ((instruction_pc & 3u) != 0u) {
         auto result = enter_exception(
@@ -116,6 +128,7 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
             R3000aExceptionCode::adel,
             R3000aStage::fetch,
             instruction_pc,
+            current_delay,
             std::nullopt,
             instruction_pc);
         result.diagnostic.access_width = 4u;
@@ -138,16 +151,40 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
             state,
             R3000aExceptionCode::ibe,
             R3000aStage::fetch,
-            instruction_pc);
+            instruction_pc,
+            current_delay);
         result.diagnostic.address = instruction_pc;
         result.diagnostic.access_width = 4u;
         return result;
     }
 
     const auto instruction = decode_mips(fetched.value);
+    if (current_delay.active && is_control_transfer(instruction.op)) {
+        return boundary(
+            state,
+            R3000aBoundaryCode::unpredictable_delay_slot_control_transfer,
+            R3000aStage::execute,
+            instruction_pc,
+            instruction.raw);
+    }
+
     const std::uint32_t rs = state.gpr[instruction.rs];
     const std::uint32_t rt = state.gpr[instruction.rt];
     bool supported = true;
+    bool scheduled_control_transfer = false;
+
+    const auto branch_target = [&]() noexcept {
+        return instruction_pc + 4u + (sign_extend16(instruction.immediate) << 2);
+    };
+    const auto schedule_control_transfer = [&](bool taken, std::uint32_t target) noexcept {
+        state.delay_slot.active = true;
+        state.delay_slot.branch_pc = instruction_pc;
+        state.delay_slot.taken = taken;
+        state.delay_slot.target = target;
+        state.pc = instruction_pc + 4u;
+        state.next_pc = taken ? target : instruction_pc + 8u;
+        scheduled_control_transfer = true;
+    };
 
     switch (instruction.op) {
         case MipsOp::sll:
@@ -171,12 +208,8 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
         case MipsOp::add: {
             const auto value = rs + rt;
             if (add_overflow(rs, rt, value)) {
-                return enter_exception(
-                    state,
-                    R3000aExceptionCode::overflow,
-                    R3000aStage::execute,
-                    instruction_pc,
-                    instruction.raw);
+                return enter_exception(state, R3000aExceptionCode::overflow, R3000aStage::execute,
+                                       instruction_pc, current_delay, instruction.raw);
             }
             write_gpr(state, instruction.rd, value);
             break;
@@ -187,12 +220,8 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
         case MipsOp::sub: {
             const auto value = rs - rt;
             if (sub_overflow(rs, rt, value)) {
-                return enter_exception(
-                    state,
-                    R3000aExceptionCode::overflow,
-                    R3000aStage::execute,
-                    instruction_pc,
-                    instruction.raw);
+                return enter_exception(state, R3000aExceptionCode::overflow, R3000aStage::execute,
+                                       instruction_pc, current_delay, instruction.raw);
             }
             write_gpr(state, instruction.rd, value);
             break;
@@ -295,52 +324,79 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
             const auto immediate = sign_extend16(instruction.immediate);
             const auto value = rs + immediate;
             if (add_overflow(rs, immediate, value)) {
-                return enter_exception(
-                    state,
-                    R3000aExceptionCode::overflow,
-                    R3000aStage::execute,
-                    instruction_pc,
-                    instruction.raw);
+                return enter_exception(state, R3000aExceptionCode::overflow, R3000aStage::execute,
+                                       instruction_pc, current_delay, instruction.raw);
             }
             write_gpr(state, instruction.rt, value);
             break;
         }
+        case MipsOp::j: {
+            const auto target = ((instruction_pc + 4u) & 0xF0000000u) | (instruction.target << 2);
+            schedule_control_transfer(true, target);
+            break;
+        }
+        case MipsOp::jal: {
+            const auto target = ((instruction_pc + 4u) & 0xF0000000u) | (instruction.target << 2);
+            write_gpr(state, 31u, instruction_pc + 8u);
+            schedule_control_transfer(true, target);
+            break;
+        }
+        case MipsOp::jr:
+            schedule_control_transfer(true, rs);
+            break;
+        case MipsOp::jalr:
+            write_gpr(state, instruction.rd, instruction_pc + 8u);
+            schedule_control_transfer(true, rs);
+            break;
+        case MipsOp::beq:
+            schedule_control_transfer(rs == rt, branch_target());
+            break;
+        case MipsOp::bne:
+            schedule_control_transfer(rs != rt, branch_target());
+            break;
+        case MipsOp::blez:
+            schedule_control_transfer(signed_view(rs) <= 0, branch_target());
+            break;
+        case MipsOp::bgtz:
+            schedule_control_transfer(signed_view(rs) > 0, branch_target());
+            break;
+        case MipsOp::bltz:
+            schedule_control_transfer(signed_view(rs) < 0, branch_target());
+            break;
+        case MipsOp::bgez:
+            schedule_control_transfer(signed_view(rs) >= 0, branch_target());
+            break;
+        case MipsOp::bltzal:
+            write_gpr(state, 31u, instruction_pc + 8u);
+            schedule_control_transfer(signed_view(rs) < 0, branch_target());
+            break;
+        case MipsOp::bgezal:
+            write_gpr(state, 31u, instruction_pc + 8u);
+            schedule_control_transfer(signed_view(rs) >= 0, branch_target());
+            break;
         case MipsOp::syscall:
-            return enter_exception(
-                state,
-                R3000aExceptionCode::syscall,
-                R3000aStage::execute,
-                instruction_pc,
-                instruction.raw);
+            return enter_exception(state, R3000aExceptionCode::syscall, R3000aStage::execute,
+                                   instruction_pc, current_delay, instruction.raw);
         case MipsOp::break_:
-            return enter_exception(
-                state,
-                R3000aExceptionCode::breakpoint,
-                R3000aStage::execute,
-                instruction_pc,
-                instruction.raw);
+            return enter_exception(state, R3000aExceptionCode::breakpoint, R3000aStage::execute,
+                                   instruction_pc, current_delay, instruction.raw);
         case MipsOp::reserved:
-            return enter_exception(
-                state,
-                R3000aExceptionCode::reserved_instruction,
-                R3000aStage::decode,
-                instruction_pc,
-                instruction.raw);
+            return enter_exception(state, R3000aExceptionCode::reserved_instruction, R3000aStage::decode,
+                                   instruction_pc, current_delay, instruction.raw);
         default:
             supported = false;
             break;
     }
 
     if (!supported) {
-        return boundary(
-            state,
-            R3000aBoundaryCode::architectural_operation_unimplemented,
-            R3000aStage::execute,
-            instruction_pc,
-            instruction.raw);
+        return boundary(state, R3000aBoundaryCode::architectural_operation_unimplemented,
+                        R3000aStage::execute, instruction_pc, instruction.raw);
     }
 
-    advance_ordinary_pc(state);
+    if (!scheduled_control_transfer) {
+        advance_ordinary_pc(state);
+        if (current_delay.active) state.delay_slot = {};
+    }
     state.gpr[0] = 0u;
     return {};
 }
