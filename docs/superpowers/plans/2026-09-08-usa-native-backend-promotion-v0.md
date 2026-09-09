@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Promote the recognized USA disc revision to `backend=native-ready` only after the local Dreamcast boot program is analyzed, a host-specific native backend cache is generated/reused and reloaded successfully, and the promoted manifest can be revalidated by `bootstrap_runtime()`.
+**Goal:** Promote the recognized USA disc revision to `backend=native-ready` only after the local Dreamcast boot program is analyzed, a host-specific native backend cache is generated/reused and reloaded successfully, and `bootstrap_runtime()` can independently revalidate that persisted cache.
 
-**Architecture:** Add one focused `game_backend` component between revision identification and the existing generic SH-4/native backend. Conversion remains the owner of progress and manifest state, while `game_backend` owns revision eligibility plus boot-analysis/cache-verification policy. Runtime independently reloads and verifies the persisted native plan instead of trusting the `backend=native-ready` string.
+**Architecture:** Add one focused `game_backend` component between revision identification and the existing generic SH-4/native backend. Conversion owns progress plus pending/final manifest transitions; `game_backend` owns revision eligibility, boot analysis, cache generation/reuse and cache reload verification; runtime reloads the persisted plan and verifies it against manifest metadata instead of trusting the `native-ready` string.
 
 **Tech Stack:** C++20, CMake 3.20+, existing Dreamcast ISO9660/IP.BIN pipeline, SH-4 CFG/IR/reference executor, existing x64 native backend/cache, MSVC 2022 x64, GitHub Actions Linux + Windows.
 
@@ -69,12 +69,11 @@ struct GameNativeBackendSummary {
     const GameBackendProgressCallback& on_progress = {});
 ```
 
-- `prepare_game_native_backend(...)` assumes revision identification has already happened. It still rejects every revision except `kJojoUsaObservedRevisionId`.
-- `GameBackendStage` is semantic only; conversion owns percentages and user-facing text.
+`prepare_game_native_backend(...)` assumes revision identification has already happened, but still rejects every revision except `kJojoUsaObservedRevisionId`. `GameBackendStage` is semantic only; conversion owns percentages and user-visible strings.
 
-- [ ] **Step 1: Extend the synthetic ISO fixture with Dreamcast helpers**
+- [ ] **Step 1: Extend the synthetic ISO fixture with reusable Dreamcast helpers**
 
-Add to `tests/iso_fixture.h` reusable helpers that write only synthetic bytes:
+Add `<array>` to `tests/iso_fixture.h`, then add:
 
 ```cpp
 inline void write_ascii_field(const std::filesystem::path& path,
@@ -115,67 +114,70 @@ inline void overwrite_boot_program_12(
 }
 ```
 
-Also add the missing `<array>` include. Do not alter the existing `write_image(...)` behavior used by older tests.
+Keep `write_image(...)` unchanged for existing tests.
 
-- [ ] **Step 2: Write the failing game-backend tests**
+- [ ] **Step 2: Write the RED game-backend tests**
 
-Create `tests/test_game_backend.cpp` with these three RED cases:
+Create `tests/test_game_backend.cpp` with these constants:
 
 ```cpp
 static constexpr std::array<std::uint8_t, 12> kValidBoot{{
     0x01, 0xE0, // MOV #1,R0
     0x02, 0x70, // ADD #2,R0
     0x09, 0x00, // NOP
-    0x09, 0x00, // NOP
-    0x09, 0x00, // NOP
-    0x09, 0x00, // NOP
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
 }};
 
-static void test_supported_usa_revision_builds_and_reloads_native_cache() {
-    const auto root = temp_install("supported");
-    const auto image_path = root / "synthetic.iso";
-    test_iso::write_image(image_path);
-    test_iso::install_dreamcast_ip_metadata(image_path);
-    test_iso::overwrite_boot_program_12(image_path, kValidBoot);
-    const auto image = jojo::open_iso9660(image_path);
-    CHECK(image);
-
-    std::vector<jojo::GameBackendStage> stages;
-    const auto prepared = jojo::prepare_game_native_backend(
-        jojo::kJojoUsaObservedRevisionId, image.value, root,
-        [&](jojo::GameBackendStage stage) { stages.push_back(stage); });
-    CHECK(prepared);
-    if (prepared) {
-        CHECK(prepared.value.boot_program_hash_hex.size() == 16u);
-        CHECK(prepared.value.abi_version == jojo::native_backend_abi_version());
-        CHECK(!prepared.value.program_hash.empty());
-        CHECK(prepared.value.block_count > 0u);
-        CHECK(prepared.value.native_block_count + prepared.value.fallback_block_count ==
-              prepared.value.block_count);
-        CHECK(std::filesystem::is_regular_file(root / "cache/native/compiled_plan.bin"));
-        CHECK(stages == std::vector<jojo::GameBackendStage>{
-            jojo::GameBackendStage::boot_analyzed,
-            jojo::GameBackendStage::cache_ready,
-            jojo::GameBackendStage::cache_verified});
-    }
-}
-
-static void test_unknown_revision_cannot_prepare_backend() {
-    // Same synthetic valid image, but revision_id="other-revision".
-    // Expect !prepared and ErrorCode::backend_unavailable.
-}
-
-static void test_boot_encoding_and_reachable_unsupported_opcode_are_hard_failures() {
-    // Case A: install metadata with device_info="CD-ROM1/1" and expect unsupported_format.
-    // Case B: use GD-ROM metadata but boot bytes start with 0xFFFF and expect backend failure.
-}
+static constexpr std::array<std::uint8_t, 12> kUnsupportedBoot{{
+    0xFF, 0xFF, // reachable unsupported opcode
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
+}};
 ```
 
-The test must delete its temporary tree at the end of each case.
+Implement four concrete assertions:
+
+```cpp
+const auto supported = jojo::prepare_game_native_backend(
+    jojo::kJojoUsaObservedRevisionId, image.value, root,
+    [&](jojo::GameBackendStage s) { stages.push_back(s); });
+CHECK(supported);
+CHECK(supported.value.abi_version == jojo::native_backend_abi_version());
+CHECK(supported.value.block_count > 0u);
+CHECK(supported.value.native_block_count + supported.value.fallback_block_count ==
+      supported.value.block_count);
+CHECK(stages == std::vector<jojo::GameBackendStage>{
+    jojo::GameBackendStage::boot_analyzed,
+    jojo::GameBackendStage::cache_ready,
+    jojo::GameBackendStage::cache_verified});
+CHECK(std::filesystem::is_regular_file(root / "cache/native/compiled_plan.bin"));
+
+const auto wrong_revision = jojo::prepare_game_native_backend(
+    "other-revision", image.value, root);
+CHECK(!wrong_revision);
+CHECK(wrong_revision.error == jojo::ErrorCode::backend_unavailable);
+
+const auto milcd = jojo::prepare_game_native_backend(
+    jojo::kJojoUsaObservedRevisionId, milcd_image.value, milcd_root);
+CHECK(!milcd);
+CHECK(milcd.error == jojo::ErrorCode::unsupported_format);
+
+const auto unsupported = jojo::prepare_game_native_backend(
+    jojo::kJojoUsaObservedRevisionId, unsupported_image.value, unsupported_root);
+CHECK(!unsupported);
+CHECK(unsupported.error == jojo::ErrorCode::backend_unavailable);
+```
+
+Construct `image` from normal GD-ROM metadata plus `kValidBoot`; construct `milcd_image` with `install_dreamcast_ip_metadata(path, "CD-ROM1/1")`; construct `unsupported_image` with normal GD-ROM metadata plus `kUnsupportedBoot`. Delete every temp root after each case.
 
 - [ ] **Step 3: Register the RED target**
 
-In `CMakeLists.txt` add `src/core/game_backend.cpp` to `jojo_core`, then add:
+Add `src/core/game_backend.cpp` to `jojo_core`, then add:
 
 ```cmake
 add_executable(jojo_game_backend_tests tests/test_game_backend.cpp)
@@ -183,9 +185,7 @@ target_link_libraries(jojo_game_backend_tests PRIVATE jojo_core)
 add_test(NAME jojo_game_backend_tests COMMAND jojo_game_backend_tests)
 ```
 
-- [ ] **Step 4: Run the test and confirm RED**
-
-Run:
+- [ ] **Step 4: Run RED**
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -193,46 +193,37 @@ cmake --build build --target jojo_game_backend_tests --parallel 2
 ctest --test-dir build -R jojo_game_backend_tests --output-on-failure
 ```
 
-Expected: build/test fails because `core/game_backend.h` and the new API do not exist yet. Do not weaken the test.
+Expected: compile failure because `core/game_backend.h`/API do not exist.
 
-- [ ] **Step 5: Implement the minimal game-backend component**
+- [ ] **Step 5: Implement minimal `game_backend`**
 
-`src/core/game_backend.cpp` must follow this order:
+`src/core/game_backend.cpp` must perform this exact sequence:
 
 ```cpp
-if (!supports_game_native_backend(revision_id))
-    return failure(ErrorCode::backend_unavailable, ...);
+if (!supports_game_native_backend(revision_id)) {
+    return Result<GameNativeBackendSummary>::failure(
+        ErrorCode::backend_unavailable,
+        "no game-specific native backend is enabled for this revision");
+}
 
 auto boot = read_dreamcast_boot_program(image);
-if (!boot) return failure(boot.error, boot.detail);
+if (!boot) return Result<GameNativeBackendSummary>::failure(boot.error, boot.detail);
 
 auto analysis = analyze_dreamcast_boot_program(boot.value);
-if (!analysis) return failure(analysis.error, analysis.detail);
+if (!analysis) return Result<GameNativeBackendSummary>::failure(analysis.error, analysis.detail);
 if (on_progress) on_progress(GameBackendStage::boot_analyzed);
 
 auto cache = ensure_native_backend_cache(boot.value, install_dir);
-if (!cache) return failure(cache.error, cache.detail);
+if (!cache) return Result<GameNativeBackendSummary>::failure(cache.error, cache.detail);
 if (on_progress) on_progress(GameBackendStage::cache_ready);
 
 auto loaded = load_native_backend_cache(cache.value.plan_path);
-if (!loaded) return failure(loaded.error, loaded.detail);
-
-if (loaded.value.abi_version != native_backend_abi_version() ||
-    loaded.value.abi_version != cache.value.abi_version ||
-    loaded.value.program_hash != cache.value.program_hash ||
-    loaded.value.ir.blocks.size() != cache.value.block_count) {
-    return failure(ErrorCode::invalid_installation,
-                   "native backend cache reload verification failed");
-}
+if (!loaded) return Result<GameNativeBackendSummary>::failure(loaded.error, loaded.detail);
 ```
 
-Compute `native_code_bytes` from the loaded blocks and require it to equal `cache.value.native_code_bytes`. Populate the summary from `boot.value.hash_hex`, loaded backend counts, current ABI, and `cache.value.program_hash`. Emit `cache_verified` only after every comparison succeeds.
+Then require loaded ABI to equal both `native_backend_abi_version()` and the cache ABI, loaded `program_hash` to equal the cache program hash, and loaded IR block count to equal cache block count. Sum every `compiled.native_code.size()` and require equality with `cache.value.native_code_bytes`. On mismatch return `ErrorCode::invalid_installation`. Populate the summary from `boot.value.hash_hex`, loaded counts, current ABI, cache program hash and verified native-code byte total. Emit `cache_verified` only after all comparisons succeed. Do not write `game_manifest.ini`.
 
-Do not write `game_manifest.ini` here.
-
-- [ ] **Step 6: Re-run focused and native-backend tests**
-
-Run:
+- [ ] **Step 6: Run GREEN**
 
 ```bash
 cmake --build build --target jojo_game_backend_tests jojo_native_backend_tests --parallel 2
@@ -250,7 +241,7 @@ git commit -m "feat: add USA game backend preparation boundary"
 
 ---
 
-### Task 2: Extend the manifest with verifiable native-backend metadata
+### Task 2: Extend the manifest with verifiable backend metadata
 
 **Files:**
 - Modify: `src/core/conversion.h`
@@ -258,8 +249,8 @@ git commit -m "feat: add USA game backend preparation boundary"
 - Modify: `tests/test_main.cpp`
 
 **Interfaces:**
-- Consumes: `GameNativeBackendSummary` values from Task 1.
-- Produces these additional `ConversionManifest` fields:
+
+Add to `ConversionManifest`:
 
 ```cpp
 std::string boot_program_hash_hex;
@@ -271,107 +262,100 @@ std::optional<std::uint64_t> backend_fallback_block_count;
 std::optional<std::uint64_t> backend_native_code_bytes;
 ```
 
-- Produces:
+Add:
 
 ```cpp
 [[nodiscard]] bool has_complete_native_backend_metadata(
     const ConversionManifest& manifest) noexcept;
 ```
 
-- Persistent key names are exactly:
-  - `boot_program_hash_fnv1a64`
-  - `backend_abi_version`
-  - `backend_program_hash`
-  - `backend_block_count`
-  - `backend_native_block_count`
-  - `backend_fallback_block_count`
-  - `backend_native_code_bytes`
+Persistent keys are exactly `boot_program_hash_fnv1a64`, `backend_abi_version`, `backend_program_hash`, `backend_block_count`, `backend_native_block_count`, `backend_fallback_block_count`, `backend_native_code_bytes`.
 
-- [ ] **Step 1: Write RED manifest compatibility/integrity tests**
+- [ ] **Step 1: Write RED pending-compatibility test**
 
-Add to `tests/test_main.cpp`:
+Use exactly:
 
 ```cpp
-static void test_pending_manifest_remains_backward_compatible() {
-    // Save/load an ordinary pending manifest with no backend metadata.
-    // Expect load success and has_complete_native_backend_metadata(...) == false.
-}
-
-static void test_native_ready_manifest_round_trips_complete_backend_metadata() {
-    jojo::ConversionManifest m{};
-    // Fill existing required source fields.
-    m.revision_id = std::string(jojo::kJojoUsaObservedRevisionId);
-    m.backend = "native-ready";
-    m.boot_program_hash_hex = "1111111111111111";
-    m.backend_abi_version = 0x20001u;
-    m.backend_program_hash = "2222222222222222";
-    m.backend_block_count = 4u;
-    m.backend_native_block_count = 3u;
-    m.backend_fallback_block_count = 1u;
-    m.backend_native_code_bytes = 64u;
-    CHECK(jojo::save_conversion_manifest_atomic(path, m));
-    const auto loaded = jojo::load_conversion_manifest(path);
-    CHECK(loaded);
-    if (loaded) CHECK(jojo::has_complete_native_backend_metadata(loaded.value));
-}
-
-static void test_native_ready_manifest_rejects_missing_or_malformed_backend_metadata() {
-    // Hand-write a native-ready manifest missing backend_program_hash -> invalid_installation.
-    // Hand-write backend_abi_version=not-a-number -> invalid_installation.
-}
+jojo::ConversionManifest m{};
+m.converter_version = jojo::core_version();
+m.source_name = "owned.iso";
+m.source_format = "iso";
+m.source_size = 1234u;
+m.hash_hex = "0123456789abcdef";
+m.revision_id = "synthetic-test-revision";
+CHECK(jojo::save_conversion_manifest_atomic(path, m));
+const auto loaded = jojo::load_conversion_manifest(path);
+CHECK(loaded);
+CHECK(!jojo::has_complete_native_backend_metadata(loaded.value));
+CHECK(loaded.value.backend == "pending-game-specific-recompiler");
 ```
 
-Include `core/game_backend.h` so the revision ID is not duplicated.
+- [ ] **Step 2: Write RED complete-ready round-trip test**
 
-- [ ] **Step 2: Run RED**
+Use the same ordinary source fields, then:
 
-Run:
+```cpp
+m.revision_id = std::string(jojo::kJojoUsaObservedRevisionId);
+m.backend = "native-ready";
+m.boot_program_hash_hex = "1111111111111111";
+m.backend_abi_version = 0x00020001u;
+m.backend_program_hash = "2222222222222222";
+m.backend_block_count = 4u;
+m.backend_native_block_count = 3u;
+m.backend_fallback_block_count = 1u;
+m.backend_native_code_bytes = 64u;
+```
+
+Assert save/load success, exact round-trip for all seven values, and complete metadata true.
+
+- [ ] **Step 3: Write RED malformed-ready tests**
+
+Hand-write one ready `.ini` containing all ordinary required fields plus all numeric backend fields but omitting `backend_program_hash`; assert `ErrorCode::invalid_installation`.
+
+Hand-write a second complete ready `.ini` but set `backend_abi_version=not-a-number`; assert `ErrorCode::invalid_installation`.
+
+- [ ] **Step 4: Run RED**
 
 ```bash
 cmake --build build --target jojo_tests --parallel 2
 ctest --test-dir build -R jojo_tests --output-on-failure
 ```
 
-Expected: compile failure because the manifest fields/helper do not exist.
+Expected: compile failure because metadata fields/helper do not exist.
 
-- [ ] **Step 3: Implement manifest fields and parser/writer rules**
+- [ ] **Step 5: Implement manifest parser/writer**
 
-In `conversion.h`, include `<optional>` and add the exact fields above.
+In `conversion.h`, include `<optional>` and add the fields above.
 
-In `conversion.cpp`:
-
-1. Extend `save_conversion_manifest_atomic(...)` to reject `backend == "native-ready"` when `has_complete_native_backend_metadata(m)` is false.
-2. Write optional backend keys only when they are populated; pending manifests therefore retain compatibility.
-3. Extend `load_conversion_manifest(...)` to parse the seven backend keys.
-4. Reuse `parse_u64(...)` for counts. For `backend_abi_version`, reject values greater than `std::numeric_limits<std::uint32_t>::max()`.
-5. After normal required-field validation, if `m.backend == "native-ready"` and metadata is incomplete, return `ErrorCode::invalid_installation`.
-
-`has_complete_native_backend_metadata(...)` must require:
+Implement completeness without overflow:
 
 ```cpp
-return !m.boot_program_hash_hex.empty() &&
-       m.backend_abi_version.has_value() &&
-       !m.backend_program_hash.empty() &&
-       m.backend_block_count.has_value() &&
-       m.backend_native_block_count.has_value() &&
-       m.backend_fallback_block_count.has_value() &&
-       m.backend_native_code_bytes.has_value() &&
-       *m.backend_native_block_count + *m.backend_fallback_block_count ==
-           *m.backend_block_count;
+if (m.boot_program_hash_hex.empty() ||
+    !m.backend_abi_version.has_value() ||
+    m.backend_program_hash.empty() ||
+    !m.backend_block_count.has_value() ||
+    !m.backend_native_block_count.has_value() ||
+    !m.backend_fallback_block_count.has_value() ||
+    !m.backend_native_code_bytes.has_value()) {
+    return false;
+}
+return *m.backend_native_block_count <= *m.backend_block_count &&
+       *m.backend_fallback_block_count ==
+           *m.backend_block_count - *m.backend_native_block_count;
 ```
 
-- [ ] **Step 4: Run focused tests**
+`save_conversion_manifest_atomic(...)` rejects incomplete `native-ready`; optional backend keys are omitted for pending manifests. `load_conversion_manifest(...)` parses all seven keys, reuses `parse_u64(...)`, rejects ABI values above `UINT32_MAX`, and rejects incomplete `native-ready` after ordinary required-field validation. Existing version-1 pending manifests remain loadable.
 
-Run:
+- [ ] **Step 6: Run GREEN**
 
 ```bash
 cmake --build build --target jojo_tests --parallel 2
 ctest --test-dir build -R jojo_tests --output-on-failure
 ```
 
-Expected: PASS, including all old pending-manifest tests.
+Expected: PASS.
 
-- [ ] **Step 5: Commit Task 2**
+- [ ] **Step 7: Commit Task 2**
 
 ```bash
 git add src/core/conversion.h src/core/conversion.cpp tests/test_main.cpp
@@ -380,7 +364,7 @@ git commit -m "feat: persist native backend manifest metadata"
 
 ---
 
-### Task 3: Make runtime bootstrap independently verify the native cache
+### Task 3: Harden runtime bootstrap against forged or stale readiness
 
 **Files:**
 - Create: `tests/test_runtime_native_backend.cpp`
@@ -388,35 +372,80 @@ git commit -m "feat: persist native backend manifest metadata"
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `ConversionManifest` backend metadata from Task 2, `kJojoUsaObservedRevisionId`, `load_native_backend_cache(...)`, `native_backend_abi_version()`.
-- Produces no new public runtime API; `bootstrap_runtime(const std::filesystem::path&)` becomes strict.
+- Consumes Task 1 summary/cache and Task 2 manifest metadata.
+- No new public runtime API.
 
-- [ ] **Step 1: Write RED forged-manifest/runtime tests**
+- [ ] **Step 1: Add a valid synthetic ready-install helper**
 
-Create `tests/test_runtime_native_backend.cpp`. Build a synthetic valid Dreamcast image with `kValidBoot`, call `prepare_game_native_backend(...)` directly to create the local cache, then create a matching `native-ready` manifest.
+The helper creates a temp root, synthetic ISO, GD-ROM IP metadata and `kValidBoot`; opens it; calls `prepare_game_native_backend(kJojoUsaObservedRevisionId, ...)`; creates `data/`; fills a manifest with ordinary source fields plus every returned summary value; sets the USA revision and `native-ready`; saves atomically; returns root and summary.
 
-The success case must assert:
+- [ ] **Step 2: Write RED strict-bootstrap cases**
+
+Success:
 
 ```cpp
 CHECK(jojo::bootstrap_runtime(install));
 ```
 
-Then create independent negative cases, restoring the valid installation between cases:
+Wrong revision:
 
 ```cpp
-// wrong revision_id -> backend_unavailable
-// remove cache/native/compiled_plan.bin -> invalid_installation or file_not_found
-// manifest.backend_program_hash = "ffffffffffffffff" -> invalid_installation
-// manifest.backend_abi_version = 0 -> invalid_installation
-// manifest.backend_block_count += 1 -> invalid_installation
-// manifest.backend_native_block_count += 1 while keeping total inconsistent -> manifest save/load rejection
+auto m = jojo::load_conversion_manifest(install / "game_manifest.ini").value;
+m.revision_id = "other-revision";
+CHECK(jojo::save_conversion_manifest_atomic(install / "game_manifest.ini", m));
+const auto wrong = jojo::bootstrap_runtime(install);
+CHECK(!wrong);
+CHECK(wrong.error == jojo::ErrorCode::backend_unavailable);
 ```
 
-For tamper tests that intentionally need an invalid on-disk manifest, hand-write the `.ini` instead of using `save_conversion_manifest_atomic(...)`, because Task 2 correctly refuses malformed ready manifests.
+Missing plan:
 
-- [ ] **Step 2: Register and run RED**
+```cpp
+std::filesystem::remove(install / "cache/native/compiled_plan.bin");
+const auto missing = jojo::bootstrap_runtime(install);
+CHECK(!missing);
+CHECK(missing.error == jojo::ErrorCode::file_not_found);
+```
 
-Add:
+Program hash mismatch:
+
+```cpp
+m.backend_program_hash = "ffffffffffffffff";
+CHECK(jojo::save_conversion_manifest_atomic(install / "game_manifest.ini", m));
+CHECK(!jojo::bootstrap_runtime(install));
+```
+
+ABI mismatch:
+
+```cpp
+m.backend_abi_version = 0u;
+CHECK(jojo::save_conversion_manifest_atomic(install / "game_manifest.ini", m));
+CHECK(!jojo::bootstrap_runtime(install));
+```
+
+Block-count mismatch while metadata stays internally complete:
+
+```cpp
+m.backend_block_count = *m.backend_block_count + 1u;
+m.backend_fallback_block_count = *m.backend_fallback_block_count + 1u;
+CHECK(jojo::save_conversion_manifest_atomic(install / "game_manifest.ini", m));
+CHECK(!jojo::bootstrap_runtime(install));
+```
+
+Truncated plan:
+
+```cpp
+{
+    std::ofstream out(install / "cache/native/compiled_plan.bin",
+                      std::ios::binary | std::ios::trunc);
+    out.write("JOJO", 4);
+}
+const auto truncated = jojo::bootstrap_runtime(install);
+CHECK(!truncated);
+CHECK(truncated.error == jojo::ErrorCode::invalid_installation);
+```
+
+- [ ] **Step 3: Register and run RED**
 
 ```cmake
 add_executable(jojo_runtime_native_backend_tests tests/test_runtime_native_backend.cpp)
@@ -424,53 +453,18 @@ target_link_libraries(jojo_runtime_native_backend_tests PRIVATE jojo_core)
 add_test(NAME jojo_runtime_native_backend_tests COMMAND jojo_runtime_native_backend_tests)
 ```
 
-Run:
-
 ```bash
 cmake --build build --target jojo_runtime_native_backend_tests --parallel 2
 ctest --test-dir build -R jojo_runtime_native_backend_tests --output-on-failure
 ```
 
-Expected: at least the forged/missing-cache cases fail because current `bootstrap_runtime()` trusts only the string `native-ready`.
+Expected: forged/missing-cache cases fail because current bootstrap trusts only `native-ready`.
 
-- [ ] **Step 3: Harden `bootstrap_runtime()`**
+- [ ] **Step 4: Harden `bootstrap_runtime()`**
 
-In `src/core/runtime.cpp`, after installation validation:
+After `validate_installation(...)`, require `backend=native-ready`, exact USA revision, and complete metadata. Load `cache/native/compiled_plan.bin`; propagate load errors. Require loaded ABI equals both current ABI and manifest ABI; program hash equals manifest hash; loaded block/native/fallback counts equal manifest counts; summed native-code bytes equal manifest bytes. Any mismatch returns `ErrorCode::invalid_installation`. Do not rebuild from bootstrap.
 
-```cpp
-if (manifest.backend != "native-ready")
-    return backend_unavailable(...);
-
-if (manifest.revision_id != kJojoUsaObservedRevisionId)
-    return backend_unavailable(...);
-
-if (!has_complete_native_backend_metadata(manifest))
-    return invalid_installation(...);
-
-auto loaded = load_native_backend_cache(
-    install_dir / "cache" / "native" / "compiled_plan.bin");
-if (!loaded)
-    return Result<void>::failure(loaded.error, loaded.detail);
-```
-
-Then require all of:
-
-```cpp
-loaded.value.abi_version == native_backend_abi_version();
-loaded.value.abi_version == *manifest.backend_abi_version;
-loaded.value.program_hash == manifest.backend_program_hash;
-loaded.value.blocks.size() == *manifest.backend_block_count;
-loaded.value.native_block_count == *manifest.backend_native_block_count;
-loaded.value.fallback_block_count == *manifest.backend_fallback_block_count;
-```
-
-Sum `compiled.native_code.size()` over `loaded.value.blocks` and compare with `backend_native_code_bytes`.
-
-Any mismatch returns `ErrorCode::invalid_installation`; do not rebuild the cache from runtime bootstrap because bootstrap has no access to the source image.
-
-- [ ] **Step 4: Run runtime + existing tests**
-
-Run:
+- [ ] **Step 5: Run GREEN**
 
 ```bash
 cmake --build build --target jojo_runtime_native_backend_tests jojo_tests jojo_native_backend_tests --parallel 2
@@ -479,7 +473,7 @@ ctest --test-dir build -R "jojo_(runtime_native_backend|tests|native_backend_tes
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 3**
+- [ ] **Step 6: Commit Task 3**
 
 ```bash
 git add CMakeLists.txt src/core/runtime.cpp tests/test_runtime_native_backend.cpp
@@ -488,7 +482,7 @@ git commit -m "feat: verify native backend cache during bootstrap"
 
 ---
 
-### Task 4: Promote the supported revision during conversion with atomic pending-first semantics
+### Task 4: Promote the supported revision during conversion with pending-first atomicity
 
 **Files:**
 - Modify: `src/core/conversion.h`
@@ -496,8 +490,8 @@ git commit -m "feat: verify native backend cache during bootstrap"
 - Modify: `tests/test_main.cpp`
 
 **Interfaces:**
-- Consumes: `supports_game_native_backend(...)`, `prepare_game_native_backend(...)`, `GameNativeBackendSummary`.
-- Adds `ConversionStage` values:
+
+Add:
 
 ```cpp
 preparing_game_backend,
@@ -506,16 +500,19 @@ verifying_native_backend,
 promoting_native_backend,
 ```
 
-- The existing explicit `convert_image(..., ConversionOptions, ...)` remains strict about revision identification; the default UI overload still permits unverified **base** conversion only.
+to `ConversionStage`. Explicit conversion remains strict about revision identity; default UI conversion still permits only unverified base preparation.
 
-- [ ] **Step 1: Add test helpers for synthetic revision profiles**
+- [ ] **Step 1: Add exact synthetic-profile helpers**
 
-In `tests/test_main.cpp`, add a local FNV-1a helper and allow the synthetic revision profile to be built from arbitrary 12-byte boot content and an arbitrary revision ID:
+Add `<array>` and `<span>` to `tests/test_main.cpp` and implement:
 
 ```cpp
-static std::uint64_t fnv1a64(std::span<const std::uint8_t> bytes) {
+static std::uint64_t test_fnv1a64(std::span<const std::uint8_t> bytes) {
     std::uint64_t hash = 14695981039346656037ull;
-    for (auto byte : bytes) { hash ^= byte; hash *= 1099511628211ull; }
+    for (const auto byte : bytes) {
+        hash ^= byte;
+        hash *= 1099511628211ull;
+    }
     return hash;
 }
 
@@ -525,77 +522,70 @@ static jojo::GameRevisionProfile profile_for_boot(
     return {
         std::move(revision_id),
         {
-            {"/1ST_READ.BIN", 12, fnv1a64(boot)},
-            {"/DATA/ASSET.DAT", 5, 0x65f9a54a4f1d65c8ull},
+            {"/1ST_READ.BIN", 12u, test_fnv1a64(boot)},
+            {"/DATA/ASSET.DAT", 5u, 0x65f9a54a4f1d65c8ull},
         }
     };
 }
 ```
 
-Add `<array>` and `<span>` includes.
+Use the same `kValidBoot` and `kUnsupportedBoot` bytes as Task 1. This test seam changes only the explicit revision profile; production default conversion still reaches the commercial USA ID through the observed whole-disc fingerprint.
 
-This is the legal test seam: a synthetic ISO is identified by an explicit synthetic profile whose **revision ID string** is the supported USA ID. Production default conversion still obtains that ID only from the observed commercial disc fingerprint.
+- [ ] **Step 2: Write RED successful-promotion test**
 
-- [ ] **Step 2: Write the RED successful-promotion test**
-
-Add:
+Build synthetic GD-ROM image with `kValidBoot` and use:
 
 ```cpp
-static void test_supported_revision_promotes_only_after_native_backend_verification() {
-    // Build synthetic ISO, install Dreamcast metadata, overwrite boot with kValidBoot.
-    // ConversionOptions contains profile_for_boot(string(kJojoUsaObservedRevisionId), kValidBoot).
-    // Capture progress events.
-    const auto converted = jojo::convert_image(source, install, options, callback);
-    CHECK(converted);
-    if (converted) {
-        CHECK(converted.value.backend == "native-ready");
-        CHECK(jojo::has_complete_native_backend_metadata(converted.value));
-        CHECK(converted.value.revision_id == jojo::kJojoUsaObservedRevisionId);
-    }
-    CHECK(jojo::bootstrap_runtime(install));
-    // Assert progress is monotonic and includes all four new backend stages.
-}
+jojo::ConversionOptions options{};
+options.revision_profiles.push_back(
+    profile_for_boot(std::string(jojo::kJojoUsaObservedRevisionId), kValidBoot));
+std::vector<jojo::ConversionProgress> events;
+const auto converted = jojo::convert_image(
+    source, install, options,
+    [&](const jojo::ConversionProgress& e) { events.push_back(e); });
+CHECK(converted);
+CHECK(converted.value.revision_id == jojo::kJojoUsaObservedRevisionId);
+CHECK(converted.value.backend == "native-ready");
+CHECK(jojo::has_complete_native_backend_metadata(converted.value));
+CHECK(jojo::bootstrap_runtime(install));
 ```
 
-Expected current behavior: converted manifest remains pending, so RED.
+Walk `events`; require nondecreasing percentages and presence of all four new backend stages.
 
-- [ ] **Step 3: Write the RED atomic re-prepare test**
+- [ ] **Step 3: Write RED failed-reprepare atomicity test**
 
-Add:
+First run the exact successful conversion above. Then overwrite the same source with `kUnsupportedBoot`, use a new explicit revision profile matching those bytes but retaining the USA revision ID, and run:
 
 ```cpp
-static void test_failed_reprepare_cannot_preserve_stale_native_ready_state() {
-    // 1. Convert kValidBoot with supported USA revision profile -> expect native-ready.
-    // 2. Rewrite the same synthetic source with kUnsupportedBoot whose first opcode is 0xFFFF.
-    // 3. Use a new explicit revision profile matching kUnsupportedBoot but with the same supported USA revision ID.
-    // 4. Run conversion again -> expect failure from backend analysis/compile.
-    // 5. Load game_manifest.ini and assert backend == "pending-game-specific-recompiler".
-    // 6. bootstrap_runtime(install) must return backend_unavailable.
-}
+const auto failed = jojo::convert_image(source, install, bad_options);
+CHECK(!failed);
+CHECK(failed.error == jojo::ErrorCode::backend_unavailable);
+const auto pending = jojo::load_conversion_manifest(install / "game_manifest.ini");
+CHECK(pending);
+CHECK(pending.value.backend == "pending-game-specific-recompiler");
+const auto boot = jojo::bootstrap_runtime(install);
+CHECK(!boot);
+CHECK(boot.error == jojo::ErrorCode::backend_unavailable);
 ```
 
-Also retain/add a control assertion that ordinary `synthetic-test-revision` conversion still succeeds as pending and never emits a backend-preparation stage.
+Retain the current ordinary `synthetic-test-revision` conversion and assert it still ends pending.
 
 - [ ] **Step 4: Run RED**
-
-Run:
 
 ```bash
 cmake --build build --target jojo_tests --parallel 2
 ctest --test-dir build -R jojo_tests --output-on-failure
 ```
 
-Expected: successful-promotion and stale-readiness tests fail.
+Expected: promotion/stale-readiness assertions fail.
 
-- [ ] **Step 5: Implement pending-first conversion orchestration**
+- [ ] **Step 5: Implement pending-first orchestration**
 
-In `conversion.cpp`, after revision identification and directory creation:
+After revision identification, create `data/`, `cache/`, `logs/`; construct the ordinary pending manifest; report preparation around 55%; atomically save pending **before** backend work.
 
-1. Build the normal `ConversionManifest` with source + revision data and `backend="pending-game-specific-recompiler"`.
-2. Report installation preparation around 55%.
-3. Atomically write this pending manifest **before** any game-backend call.
-4. If `!supports_game_native_backend(manifest.revision_id)`, report base completion and return the pending manifest exactly as today.
-5. For the supported revision, call `prepare_game_native_backend(...)` and map semantic callbacks to conversion progress:
+If `supports_game_native_backend(manifest.revision_id)` is false, report base completion and return pending unchanged.
+
+For the supported revision map semantic callbacks exactly:
 
 ```cpp
 GameBackendProgressCallback backend_progress = [&](GameBackendStage stage) {
@@ -619,27 +609,9 @@ GameBackendProgressCallback backend_progress = [&](GameBackendStage stage) {
 };
 ```
 
-6. If preparation fails, return that error immediately. Do **not** restore or rewrite an older ready manifest.
-7. Copy the summary into the manifest fields:
+On preparation failure return its exact error and leave pending on disk. On success copy all summary fields into the manifest, then set `backend="native-ready"`; report `promoting_native_backend` at 97%; atomically save final ready manifest; report 100%. Never persist boot-program bytes.
 
-```cpp
-manifest.boot_program_hash_hex = summary.boot_program_hash_hex;
-manifest.backend_abi_version = summary.abi_version;
-manifest.backend_program_hash = summary.program_hash;
-manifest.backend_block_count = summary.block_count;
-manifest.backend_native_block_count = summary.native_block_count;
-manifest.backend_fallback_block_count = summary.fallback_block_count;
-manifest.backend_native_code_bytes = summary.native_code_bytes;
-manifest.backend = "native-ready";
-```
-
-8. Report `promoting_native_backend` at 97%, atomically save the final manifest, then report 100% completion.
-
-Do not persist the boot-program bytes themselves.
-
-- [ ] **Step 6: Run conversion/runtime regression suite**
-
-Run:
+- [ ] **Step 6: Run GREEN**
 
 ```bash
 cmake --build build --target jojo_tests jojo_game_backend_tests jojo_runtime_native_backend_tests --parallel 2
@@ -663,35 +635,34 @@ git commit -m "feat: promote verified USA backend during conversion"
 - Modify: `src/app_win32/main.cpp`
 - Modify: `.github/workflows/build.yml`
 
-**Interfaces:**
-- Consumes strict `bootstrap_runtime(...)` behavior and final conversion manifest from Tasks 2-4.
-- No new public C++ interfaces.
+- [ ] **Step 1: Change ready-state copy without claiming gameplay completion**
 
-- [ ] **Step 1: Update UI wording without claiming gameplay readiness**
-
-In `refresh_install()` replace the current ready copy with wording equivalent to:
+In both `refresh_install()` and successful `WM_FINISHED` bootstrap path use:
 
 ```cpp
 status = L"Backend nativo da revisão USA preparado. Validação fim a fim é o próximo marco.";
+```
+
+In `refresh_install()` log:
+
+```cpp
 add_log(L"Backend nativo verificado e cache carregável detectado.");
 ```
 
-In `WM_FINISHED`, when `bootstrap_runtime(game_dir)` succeeds, use the same bounded statement rather than `Instalação nativa pronta.`.
+Keep the existing pending wording for `backend_unavailable`.
 
-Keep the pending message unchanged for `backend_unavailable`.
+- [ ] **Step 2: Add explicit Linux CI contract**
 
-- [ ] **Step 2: Add explicit CI promotion-contract steps**
-
-After normal CTest in both jobs, add a named contract step.
-
-Linux:
+After CTest:
 
 ```yaml
 - name: USA native backend promotion contract
   run: ./build/jojo_game_backend_tests && ./build/jojo_runtime_native_backend_tests
 ```
 
-Windows:
+- [ ] **Step 3: Add explicit Windows CI contract**
+
+After `Test Release`:
 
 ```yaml
 - name: USA native backend promotion contract
@@ -701,11 +672,7 @@ Windows:
     build\Release\jojo_runtime_native_backend_tests.exe
 ```
 
-Do not compile or upload any commercial fixture. These executables use only synthetic data created at runtime in the runner temp directory.
-
-- [ ] **Step 3: Run the complete local portable suite**
-
-Run:
+- [ ] **Step 4: Run complete portable verification**
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -713,20 +680,11 @@ cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure
 ./build/jojo_game_backend_tests
 ./build/jojo_runtime_native_backend_tests
-```
-
-Expected: all tests PASS.
-
-- [ ] **Step 4: Run production-readiness scripts**
-
-Run:
-
-```bash
 cmake -DJOJO_SOURCE_DIR="$PWD" -P cmake/CheckProductionReadiness.cmake
 cmake -DJOJO_SOURCE_DIR="$PWD" -P cmake/CheckProductionReadinessNegative.cmake
 ```
 
-Expected: PASS. The readiness scan must not detect any proprietary game file or newly forbidden binary fixture.
+Expected: PASS with no proprietary-content readiness violation.
 
 - [ ] **Step 5: Commit Task 5**
 
@@ -737,19 +695,13 @@ git commit -m "ci: verify USA native backend promotion contract"
 
 ---
 
-### Task 6: Final branch verification, review, PR, and Windows artifact handoff
+### Task 6: Final review, PR, merge, and Windows artifact handoff
 
 **Files:**
-- Review only unless a defect is found.
+- Review all files changed in Tasks 1-5.
 - PR target: `main`.
 
-**Interfaces:**
-- Consumes every task above.
-- Produces one reviewed PR and a Windows x64 artifact from post-merge `main` if all gates remain green.
-
-- [ ] **Step 1: Run full verification from a clean build**
-
-Run:
+- [ ] **Step 1: Clean full verification**
 
 ```bash
 rm -rf build
@@ -762,9 +714,7 @@ cmake -DJOJO_SOURCE_DIR="$PWD" -P cmake/CheckProductionReadinessNegative.cmake
 
 Expected: zero failures.
 
-- [ ] **Step 2: Review the complete diff against the design base**
-
-Run:
+- [ ] **Step 2: Review complete diff**
 
 ```bash
 git diff --check main...HEAD
@@ -784,41 +734,33 @@ git diff main...HEAD -- \
   tests/test_main.cpp
 ```
 
-Review specifically for:
+Reject the diff unless all are true: no game bytes/assets added; exact USA eligibility gate preserved; pending manifest written before backend work; `native-ready` set only after cache reload verification; runtime revalidates persisted cache; generic unverified/pending conversion remains; UI does not claim complete gameplay readiness.
 
-- no game bytes/assets added;
-- exact USA eligibility gate preserved;
-- pending manifest written before backend work;
-- no path sets `native-ready` before cache reload verification;
-- runtime does not trust the manifest string alone;
-- old unverified/pending conversion behavior remains intact;
-- UI does not claim complete gameplay readiness.
+- [ ] **Step 3: Open PR and require both CI jobs**
 
-- [ ] **Step 3: Push/open PR and require CI**
-
-PR summary must state:
+PR summary:
 
 ```text
-- recognizes the already-observed USA revision as the only v0 game-backend candidate
-- analyzes the local Dreamcast boot program and builds/reloads the existing native backend cache
+- keeps the observed USA revision as the only commercial v0 backend candidate
+- analyzes the user's local Dreamcast boot program and builds/reloads the existing native backend cache
 - promotes to native-ready only after derived cache metadata is verified
 - hardens bootstrap against forged/stale ready manifests
-- contains no commercial game content; tests are synthetic only
+- contains no commercial game content; all automated fixtures are synthetic
 ```
 
-Do not merge until both `Portable core / Linux` and `Windows x64 / MSVC 2022` are green, including the explicit `USA native backend promotion contract` step.
+Do not merge until Linux and Windows both pass, including `USA native backend promotion contract`.
 
-- [ ] **Step 4: Merge with expected head SHA and validate post-merge `main`**
+- [ ] **Step 4: Merge with expected head SHA and verify post-merge `main`**
 
-Use the exact PR head SHA as the merge precondition. After merge, require the `main` workflow to pass the same Linux + Windows gates.
+Merge only with the exact CI-validated PR head SHA as precondition. Require the new `main` workflow to pass the same Linux/Windows gates.
 
-- [ ] **Step 5: Download and verify the post-merge Windows artifact**
+- [ ] **Step 5: Download and verify post-merge Windows artifact**
 
-Download `JOJO-Recompiled-Windows-x64` from the post-merge `main` workflow. Confirm the ZIP contains only `JOJO-Recompiled.exe` and verify the local SHA-256 equals the GitHub artifact digest.
+Download `JOJO-Recompiled-Windows-x64`; confirm the ZIP contains only `JOJO-Recompiled.exe`; compute ZIP SHA-256 and require exact equality with GitHub artifact digest.
 
-The user-local commercial validation after this task is:
+Next user-local commercial test:
 
-1. run that exact `main` executable;
+1. run that exact post-merge executable;
 2. select the same recognized USA BIN;
-3. if conversion reaches `native-ready`, inspect the new derived backend metadata and then test the next runtime/game-boot milestone;
-4. if conversion fails in boot analysis/backend generation, use `%LOCALAPPDATA%\JOJO Recompiled\game\logs\conversion.log` to identify the first real unsupported SH-4/backend blocker.
+3. if conversion reaches `native-ready`, inspect only the derived backend metadata and move to the next runtime/game-boot milestone;
+4. if conversion stops during boot analysis/backend generation, use `%LOCALAPPDATA%\JOJO Recompiled\game\logs\conversion.log` to identify the first real unsupported SH-4/backend blocker.
