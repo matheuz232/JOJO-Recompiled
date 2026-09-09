@@ -6,8 +6,9 @@
 namespace jojo {
 namespace {
 
+constexpr std::uint32_t kInterruptStatusAddress = 0x1F801070u;
 constexpr std::uint32_t kInterruptMaskAddress = 0x1F801074u;
-constexpr std::uint16_t kInterruptMaskValidBits = 0x07FFu;
+constexpr std::uint16_t kInterruptValidBits = 0x07FFu;
 
 std::uint8_t* mapped_bytes(std::uint32_t physical,
                            std::size_t width,
@@ -113,8 +114,12 @@ R3000aBusResult Ps1MemoryBus::write8(std::uint32_t address, std::uint8_t value) 
 R3000aBusResult Ps1MemoryBus::write16(std::uint32_t address, std::uint16_t value) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (*physical == kInterruptStatusAddress) {
+            interrupt_status_ = static_cast<std::uint16_t>(interrupt_status_ & value & kInterruptValidBits);
+            return {R3000aBusStatus::ok, 0u};
+        }
         if (*physical == kInterruptMaskAddress) {
-            interrupt_mask_ = static_cast<std::uint16_t>(value & kInterruptMaskValidBits);
+            interrupt_mask_ = static_cast<std::uint16_t>(value & kInterruptValidBits);
             return {R3000aBusStatus::ok, 0u};
         }
         if (auto* p = mapped_bytes(*physical, 2u, main_ram_, scratchpad_)) {
