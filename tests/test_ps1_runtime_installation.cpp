@@ -1,4 +1,5 @@
 #include "core/runtime.h"
+#include "core/ps1_installation.h"
 #include "ps1_fixture.h"
 
 #include <filesystem>
