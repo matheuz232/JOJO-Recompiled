@@ -60,10 +60,11 @@ static void test_supported_usa_revision_builds_and_reloads_native_cache() {
             CHECK(supported.value.block_count > 0u);
             CHECK(supported.value.native_block_count + supported.value.fallback_block_count ==
                   supported.value.block_count);
-            CHECK(stages == std::vector<jojo::GameBackendStage>{
+            const std::vector<jojo::GameBackendStage> expected_stages{
                 jojo::GameBackendStage::boot_analyzed,
                 jojo::GameBackendStage::cache_ready,
-                jojo::GameBackendStage::cache_verified});
+                jojo::GameBackendStage::cache_verified};
+            CHECK(stages == expected_stages);
             CHECK(fs::is_regular_file(root / "cache/native/compiled_plan.bin"));
         }
     }
