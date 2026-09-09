@@ -71,13 +71,13 @@ int main() {
     if (checkpoint) {
         CHECK(checkpoint.value.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
         CHECK(checkpoint.value.instructions_retired == 1000000u);
-        CHECK(checkpoint.value.recent_trace.size() == 8u);
+        CHECK(checkpoint.value.recent_trace.size() == 16u);
     }
 
     CHECK(fs::is_regular_file(report_path));
     const auto report = read_text(report_path);
     CHECK(report.find("instructions_retired=1000000\n") != std::string::npos);
-    CHECK(report.find("trace_sample_count=8\n") != std::string::npos);
+    CHECK(report.find("trace_sample_count=16\n") != std::string::npos);
     CHECK(report.find("PS-X EXE") == std::string::npos);
     CHECK(read_text(manifest_path) == manifest_before);
     CHECK(regular_files_under(resolved.value.generation_dir) == files_before);
