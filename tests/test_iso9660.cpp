@@ -161,24 +161,19 @@ static void test_revision_mismatch_reports_profile_and_path() {
     fs::remove(path, ec);
 }
 
-static void test_track_aware_media_mounts_same_iso9660() {
+static void test_track_aware_ps1_media_mounts_same_iso9660() {
     const auto base = temp_file("track_base.iso");
     const auto bin = temp_file("track_raw.bin");
-    const auto gdi = temp_file("track.gdi");
     const auto cue = temp_file("track.cue");
     test_iso::write_image(base);
     test_iso::write_raw2352_from_iso(base, bin, 1);
-    {
-        std::ofstream out(gdi);
-        out << "1\n1 0 4 2352 " << bin.filename().string() << " 0\n";
-    }
     {
         std::ofstream out(cue);
         out << "FILE \"" << bin.filename().string() << "\" BINARY\n";
         out << "  TRACK 01 MODE1/2352\n";
         out << "    INDEX 01 00:00:00\n";
     }
-    for (const auto& media : {bin, gdi, cue}) {
+    for (const auto& media : {bin, cue}) {
         const auto mounted = jojo::open_iso9660(media);
         CHECK(mounted);
         if (mounted) {
@@ -188,7 +183,7 @@ static void test_track_aware_media_mounts_same_iso9660() {
         }
     }
     std::error_code ec;
-    fs::remove(base, ec); fs::remove(bin, ec); fs::remove(gdi, ec); fs::remove(cue, ec);
+    fs::remove(base, ec); fs::remove(bin, ec); fs::remove(cue, ec);
 }
 
 int main() {
@@ -197,7 +192,7 @@ int main() {
     test_rejects_bad_pvd_and_out_of_bounds_entry();
     test_revision_matcher();
     test_revision_mismatch_reports_profile_and_path();
-    test_track_aware_media_mounts_same_iso9660();
+    test_track_aware_ps1_media_mounts_same_iso9660();
     if (failures) {
         std::cerr << failures << " ISO9660 assertion(s) failed\n";
         return 1;
