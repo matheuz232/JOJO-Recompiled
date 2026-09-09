@@ -1,6 +1,9 @@
 #pragma once
+
 #include "core/conversion.h"
+#include "core/ps1_boot_report.h"
 #include "core/result.h"
+
 #include <filesystem>
 
 namespace jojo {
@@ -21,7 +24,10 @@ struct InstallationInfo {
     const std::filesystem::path& install_root);
 [[nodiscard]] Result<InstallationInfo> validate_installation(
     const std::filesystem::path& install_root);
+[[nodiscard]] Result<Ps1BootReport> bootstrap_runtime_checkpoint(
+    const std::filesystem::path& install_root,
+    const Ps1BootOptions& options = {});
 [[nodiscard]] Result<void> bootstrap_runtime(
     const std::filesystem::path& install_root);
 
-}
+} // namespace jojo

@@ -1,11 +1,14 @@
 #include "core/runtime.h"
 
+#include "core/ps1_boot_runtime.h"
 #include "core/ps1_exe.h"
 #include "core/ps1_installation.h"
 
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace jojo {
@@ -69,6 +72,23 @@ bool executable_metadata_matches(const ConversionManifest& manifest,
            *manifest.psx_exe_stack_base == metadata.stack_base &&
            manifest.psx_exe_stack_size.has_value() &&
            *manifest.psx_exe_stack_size == metadata.stack_size;
+}
+
+std::string_view stop_reason_name(Ps1BootStopReason reason) noexcept {
+    switch (reason) {
+        case Ps1BootStopReason::none: return "none";
+        case Ps1BootStopReason::execution_budget_exhausted: return "execution_budget_exhausted";
+        case Ps1BootStopReason::cpu_boundary: return "cpu_boundary";
+        case Ps1BootStopReason::bios_call_unimplemented: return "bios_call_unimplemented";
+        case Ps1BootStopReason::bios_call_unknown: return "bios_call_unknown";
+        case Ps1BootStopReason::mmio_unimplemented: return "mmio_unimplemented";
+        case Ps1BootStopReason::installed_media_missing: return "installed_media_missing";
+        case Ps1BootStopReason::device_command_unimplemented: return "device_command_unimplemented";
+        case Ps1BootStopReason::gpu_command_unimplemented: return "gpu_command_unimplemented";
+        case Ps1BootStopReason::commercial_frame_presented: return "commercial_frame_presented";
+        case Ps1BootStopReason::fatal_runtime_error: return "fatal_runtime_error";
+    }
+    return "unknown";
 }
 
 } // namespace
@@ -209,15 +229,55 @@ Result<InstallationInfo> validate_installation(
     });
 }
 
-Result<void> bootstrap_runtime(const std::filesystem::path& install_root) {
+Result<Ps1BootReport> bootstrap_runtime_checkpoint(
+    const std::filesystem::path& install_root,
+    const Ps1BootOptions& options) {
     auto install = validate_installation(install_root);
     if (!install) {
-        return Result<void>::failure(install.error, install.detail);
+        return Result<Ps1BootReport>::failure(install.error, install.detail);
+    }
+
+    const auto executable_path = install.value.generation_dir / "data" / "boot.psxexe";
+    auto bytes = read_local_file(executable_path);
+    if (!bytes) {
+        return Result<Ps1BootReport>::failure(bytes.error, bytes.detail);
+    }
+    auto executable = parse_ps1_executable(bytes.value);
+    if (!executable) {
+        return Result<Ps1BootReport>::failure(
+            ErrorCode::invalid_installation,
+            "installed PS-X EXE is invalid: " + executable.detail);
+    }
+    if (!executable_metadata_matches(install.value.manifest, executable.value.metadata)) {
+        return Result<Ps1BootReport>::failure(
+            ErrorCode::invalid_installation,
+            "installed PS-X EXE does not match the verified manifest metadata");
+    }
+
+    auto runtime = Ps1BootRuntime::create(executable.value);
+    if (!runtime) {
+        return Result<Ps1BootReport>::failure(runtime.error, runtime.detail);
+    }
+    return Result<Ps1BootReport>::success(runtime.value.run(options));
+}
+
+Result<void> bootstrap_runtime(const std::filesystem::path& install_root) {
+    Ps1BootOptions options{};
+    options.instruction_budget = 10000u;
+    auto checkpoint = bootstrap_runtime_checkpoint(install_root, options);
+    if (!checkpoint) {
+        return Result<void>::failure(checkpoint.error, checkpoint.detail);
+    }
+
+    if (checkpoint.value.stop_reason == Ps1BootStopReason::commercial_frame_presented) {
+        return Result<void>::success();
     }
 
     return Result<void>::failure(
         ErrorCode::backend_unavailable,
-        "R3000A execution is not implemented for the validated PS1 M1 installation");
+        "JoJo PS1 reference checkpoint stopped at " +
+            std::string(stop_reason_name(checkpoint.value.stop_reason)) +
+            "; commercial JoJo boot is not verified");
 }
 
 } // namespace jojo
