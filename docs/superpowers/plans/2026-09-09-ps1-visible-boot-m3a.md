@@ -6,7 +6,7 @@
 
 **Architecture:** M3A plugs a concrete `Ps1MemoryBus` into the verified M2 `R3000a` reference executor, loads only the already-validated installed `boot.psxexe`, and runs it through a `Ps1BootRuntime`. The runtime emits a derived `Ps1BootReport`; it does not implement BIOS services or devices yet and must stop explicitly when JoJo reaches them.
 
-**Tech Stack:** C++20, CMake 3.20+, CTest, GCC/Clang-compatible portable core on Linux, MSVC 2022 on Windows, existing `jojo_core` static library and GitHub Actions workflow.
+**Tech Stack:** C++20, CMake 3.20+, CTest, portable core on Linux, MSVC 2022 on Windows, existing `jojo_core` static library and GitHub Actions workflow.
 
 **Spec:** `docs/superpowers/specs/2026-09-09-ps1-visible-boot-m3-design.md`
 
@@ -16,7 +16,7 @@
 - M3A uses the M2 R3000A reference executor. Do not add CFG/IR or Windows x64 native R3000A code generation.
 - Main RAM is exactly 2 MiB; scratchpad is exactly 1 KiB.
 - Initial accepted RAM aliases are `0x00000000..0x001FFFFF`, `0x80000000..0x801FFFFF`, and `0xA0000000..0xA01FFFFF`. Do not silently add additional RAM mirrors.
-- Scratchpad physical range is `0x1F800000..0x1F8003FF`, with KSEG0/KSEG1 aliases resolving through the same architectural physical mask.
+- Scratchpad physical range is `0x1F800000..0x1F8003FF`, with KSEG0/KSEG1 aliases resolving through the architectural physical mask.
 - Unknown/not-yet-implemented addresses return explicit unsupported results. Reads must not fabricate zero and writes must not fabricate success.
 - The PS-X EXE payload source is exactly offset `0x800`, length `metadata.text_size`, destination `metadata.text_load_address` after supported address translation.
 - No proprietary PlayStation BIOS bytes, commercial JoJo bytes, raw sectors, or unrestricted guest-memory dumps may enter Git or CI.
@@ -30,29 +30,23 @@
 
 ## File Structure
 
-Create these focused production files:
+Create:
 
-- `src/core/ps1_memory_bus.h/.cpp` — 2 MiB RAM, 1 KiB scratchpad, JoJo-required initial address translation, little-endian bus operations, unsupported-access evidence, loader block copy.
-- `src/core/ps1_executable_loader.h/.cpp` — validates and copies the PS-X EXE payload to main RAM and returns the initialized M2 `R3000aState`.
-- `src/core/ps1_boot_report.h` — stable M3 boot stop reasons and derived report structures.
-- `src/core/ps1_boot_runtime.h/.cpp` — owns `Ps1MemoryBus`, R3000A state and instruction-budget loop; classifies BIOS-entry and MMIO boundaries.
-
-Modify:
-
-- `src/core/runtime.h/.cpp` — add installation-backed checkpoint entry point while preserving the existing product `bootstrap_runtime` wrapper and non-mutation contract.
-- `CMakeLists.txt` — compile new core sources and register new synthetic tests.
-- `PROJECT-STATE.md`, `docs/NEXT-MILESTONES.md`, `docs/architecture/PRODUCTION-READINESS.tsv` — update truth only after code-head Linux+Windows CI succeeds.
-
-Create tests:
-
+- `src/core/ps1_memory_bus.h/.cpp` — heap-backed 2 MiB RAM, 1 KiB scratchpad, address translation, little-endian bus operations, unsupported-access evidence, loader block copy.
+- `src/core/ps1_executable_loader.h/.cpp` — exact PS-X EXE payload validation/copy and M2 CPU-state initialization.
+- `src/core/ps1_boot_report.h` — stable M3 stop reasons and bounded derived diagnostic structures.
+- `src/core/ps1_boot_runtime.h/.cpp` — owns bus and R3000A state, instruction-budget loop, BIOS-entry recognition, MMIO-boundary classification.
 - `tests/test_ps1_memory_bus.cpp`
 - `tests/test_ps1_executable_loader.cpp`
 - `tests/test_ps1_boot_runtime.cpp`
 
-Modify test support only where needed:
+Modify:
 
-- `tests/test_ps1_runtime_installation.cpp`
-- `tests/ps1_fixture.h`
+- `src/core/runtime.h/.cpp` — installation-backed checkpoint API plus conservative product wrapper.
+- `tests/ps1_fixture.h` — synthetic PS-X EXE builder from instruction words.
+- `tests/test_ps1_runtime_installation.cpp` — replace the obsolete “R3000A not implemented” expectation with M3A checkpoint truth.
+- `CMakeLists.txt` — add sources and tests.
+- `PROJECT-STATE.md`, `docs/NEXT-MILESTONES.md`, `docs/architecture/PRODUCTION-READINESS.tsv` — update only after code-head Linux+Windows CI is green.
 
 ---
 
@@ -85,6 +79,7 @@ public:
     static constexpr std::uint32_t scratchpad_base = 0x1F800000u;
     static constexpr std::uint32_t scratchpad_size = 1024u;
 
+    Ps1MemoryBus();
     static std::optional<std::uint32_t> guest_to_physical(std::uint32_t guest) noexcept;
 
     R3000aBusResult read8(std::uint32_t address) noexcept override;
@@ -100,7 +95,7 @@ public:
     void clear_last_unsupported_access() noexcept;
 
 private:
-    std::array<std::uint8_t, main_ram_size> main_ram_{};
+    std::vector<std::uint8_t> main_ram_;
     std::array<std::uint8_t, scratchpad_size> scratchpad_{};
     std::optional<Ps1UnsupportedAccess> last_unsupported_{};
 };
@@ -108,9 +103,11 @@ private:
 }
 ```
 
+The 2 MiB RAM is heap-backed deliberately; do not place a 2 MiB `std::array` inside a stack-created bus object on Windows.
+
 - [ ] **Step 1: Write the failing memory-bus contract**
 
-Add `tests/test_ps1_memory_bus.cpp` with explicit checks for alias coherence, little-endian access, scratchpad isolation, KSEG scratchpad aliases, and unsupported addresses:
+Create `tests/test_ps1_memory_bus.cpp`:
 
 ```cpp
 #include "core/ps1_memory_bus.h"
@@ -143,14 +140,16 @@ int main() {
         CHECK(!bus.last_unsupported_access()->write);
     }
 
-    CHECK(bus.read32(0x00200000u).status == jojo::R3000aBusStatus::unsupported);
+    CHECK(bus.read8(0x00200000u).status == jojo::R3000aBusStatus::unsupported);
+    CHECK(bus.read8(0x80200000u).status == jojo::R3000aBusStatus::unsupported);
+    CHECK(bus.read8(0xA0200000u).status == jojo::R3000aBusStatus::unsupported);
     CHECK(bus.read32(0xC0000000u).status == jojo::R3000aBusStatus::unsupported);
 
     return failures ? 1 : 0;
 }
 ```
 
-Add to `CMakeLists.txt`:
+Register:
 
 ```cmake
 add_jojo_test(jojo_ps1_memory_bus_tests tests/test_ps1_memory_bus.cpp)
@@ -158,20 +157,20 @@ add_jojo_test(jojo_ps1_memory_bus_tests tests/test_ps1_memory_bus.cpp)
 
 - [ ] **Step 2: Run RED**
 
-Run:
-
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target jojo_ps1_memory_bus_tests --config Release
 ```
 
-Expected: build fails because `core/ps1_memory_bus.h` does not exist yet.
+Expected: build fails because `core/ps1_memory_bus.h` does not exist.
 
-- [ ] **Step 3: Implement address normalization and storage**
+- [ ] **Step 3: Implement translation and memory operations**
 
-Implement `guest_to_physical` with these exact rules:
+Constructor and translation:
 
 ```cpp
+Ps1MemoryBus::Ps1MemoryBus() : main_ram_(main_ram_size, 0u) {}
+
 std::optional<std::uint32_t> Ps1MemoryBus::guest_to_physical(std::uint32_t guest) noexcept {
     if (guest < 0x80000000u) return guest;
     if (guest < 0xC0000000u) return guest & 0x1FFFFFFFu;
@@ -179,9 +178,22 @@ std::optional<std::uint32_t> Ps1MemoryBus::guest_to_physical(std::uint32_t guest
 }
 ```
 
-For each read/write, resolve the guest address, accept only a range wholly inside main RAM or scratchpad, and encode/decode little-endian bytes explicitly. On failure set `last_unsupported_` using the original guest address, translated physical address when translation exists, requested width, write flag and write value; return `{R3000aBusStatus::unsupported, 0}`.
+Implement a private source-level helper in `ps1_memory_bus.cpp` that accepts a physical address and width and returns either a pointer into `main_ram_`, a pointer into `scratchpad_`, or no range. A multi-byte request is accepted only if the complete requested width remains in one mapped storage range.
 
-Implement loader block copy so the entire translated range must fit main RAM before any byte changes:
+Little-endian reads must assemble values exactly as:
+
+```cpp
+value = std::uint32_t(p[0]);
+if (width >= 2u) value |= std::uint32_t(p[1]) << 8;
+if (width == 4u) {
+    value |= std::uint32_t(p[2]) << 16;
+    value |= std::uint32_t(p[3]) << 24;
+}
+```
+
+Writes must split the low 8/16/32 bits in the reverse direction. On any unmapped access set `last_unsupported_` with the original guest address, the translated physical address if available (otherwise the original address), requested width, write flag, and write value; return `R3000aBusStatus::unsupported`.
+
+`load_main_ram` must validate the whole destination before copying:
 
 ```cpp
 Result<void> Ps1MemoryBus::load_main_ram(
@@ -200,9 +212,7 @@ Result<void> Ps1MemoryBus::load_main_ram(
 
 Add `src/core/ps1_memory_bus.cpp` to `jojo_core`.
 
-- [ ] **Step 4: Run GREEN and regression suite**
-
-Run:
+- [ ] **Step 4: Run GREEN**
 
 ```bash
 cmake --build build --target jojo_ps1_memory_bus_tests --config Release
@@ -229,8 +239,6 @@ git commit -m "feat: add JoJo PS1 memory bus"
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `Ps1Executable`, `Ps1MemoryBus`, `initialize_r3000a_for_psx_exe(const Ps1ExeMetadata&)`.
-- Produces:
 
 ```cpp
 [[nodiscard]] Result<R3000aState> load_ps1_executable_into_bus(
@@ -240,7 +248,7 @@ git commit -m "feat: add JoJo PS1 memory bus"
 
 - [ ] **Step 1: Write failing loader tests**
 
-Create tests that parse `test_ps1::make_psx_exe()`, load it, then assert payload bytes and CPU initialization:
+Create a test that parses `test_ps1::make_psx_exe()`, loads it, and checks exact state/payload:
 
 ```cpp
 auto parsed = jojo::parse_ps1_executable(test_ps1::make_psx_exe());
@@ -259,7 +267,7 @@ if (loaded) {
 }
 ```
 
-Add explicit rejection cases by copying a valid `Ps1Executable` and modifying only metadata/file size:
+Add rejection cases:
 
 ```cpp
 auto truncated = parsed.value;
@@ -287,17 +295,13 @@ add_jojo_test(jojo_ps1_executable_loader_tests tests/test_ps1_executable_loader.
 
 - [ ] **Step 2: Run RED**
 
-Run:
-
 ```bash
 cmake --build build --target jojo_ps1_executable_loader_tests --config Release
 ```
 
-Expected: build fails because `load_ps1_executable_into_bus` is absent.
+Expected: build fails because the loader interface is absent.
 
-- [ ] **Step 3: Implement exact, transactional payload placement**
-
-Implement the pre-copy checks before calling `load_main_ram`:
+- [ ] **Step 3: Implement transactional placement**
 
 ```cpp
 Result<R3000aState> load_ps1_executable_into_bus(
@@ -329,11 +333,9 @@ Result<R3000aState> load_ps1_executable_into_bus(
 }
 ```
 
-Add the source to `jojo_core`.
+Add `src/core/ps1_executable_loader.cpp` to `jojo_core`.
 
 - [ ] **Step 4: Run GREEN**
-
-Run:
 
 ```bash
 cmake --build build --target jojo_ps1_executable_loader_tests --config Release
@@ -358,11 +360,10 @@ git commit -m "feat: load JoJo PS-X EXE into PS1 RAM"
 - Create: `src/core/ps1_boot_runtime.h`
 - Create: `src/core/ps1_boot_runtime.cpp`
 - Create: `tests/test_ps1_boot_runtime.cpp`
+- Modify: `tests/ps1_fixture.h`
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `Ps1MemoryBus`, `load_ps1_executable_into_bus`, `step_r3000a`.
-- Produces:
 
 ```cpp
 enum class Ps1BootStopReason : std::uint8_t {
@@ -424,9 +425,11 @@ struct Ps1BootOptions {
 
 class Ps1BootRuntime {
 public:
+    Ps1BootRuntime() = default;
     static Result<Ps1BootRuntime> create(const Ps1Executable& executable);
     Ps1BootReport run(const Ps1BootOptions& options) noexcept;
     const R3000aState& cpu_state() const noexcept { return cpu_; }
+    Ps1MemoryBus& bus() noexcept { return bus_; }
     const Ps1MemoryBus& bus() const noexcept { return bus_; }
 
 private:
@@ -435,9 +438,9 @@ private:
 };
 ```
 
-- [ ] **Step 1: Add a test helper for synthetic instruction payloads**
+- [ ] **Step 1: Add synthetic PS-X EXE builder**
 
-Extend `tests/ps1_fixture.h` with a JoJo-labelled synthetic helper that writes instruction words little-endian into an otherwise valid PS-X EXE:
+In `tests/ps1_fixture.h`:
 
 ```cpp
 inline std::vector<std::uint8_t> make_psx_exe_from_words(
@@ -455,9 +458,9 @@ inline std::vector<std::uint8_t> make_psx_exe_from_words(
 }
 ```
 
-- [ ] **Step 2: Write RED contracts for budget, BIOS stop, and MMIO stop**
+- [ ] **Step 2: Write RED contracts**
 
-In `tests/test_ps1_boot_runtime.cpp`, build three synthetic programs:
+Budget exhaustion:
 
 ```cpp
 const auto loop_exe = jojo::parse_ps1_executable(test_ps1::make_psx_exe_from_words({
@@ -472,7 +475,11 @@ if (loop_runtime) {
     CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
     CHECK(report.instructions_retired == 10u);
 }
+```
 
+BIOS boundary:
+
+```cpp
 const auto bios_exe = jojo::parse_ps1_executable(test_ps1::make_psx_exe_from_words({
     test_mips::j(0x02u, 0x800000A0u >> 2),
     0x00000000u,
@@ -486,7 +493,11 @@ if (bios_runtime) {
     CHECK(report.last_pc == 0x800000A0u);
     CHECK(report.bios_call_count == 1u);
 }
+```
 
+MMIO boundary:
+
+```cpp
 const auto mmio_exe = jojo::parse_ps1_executable(test_ps1::make_psx_exe_from_words({
     test_mips::i(0x0Fu, 0u, 8u, 0x1F80u),
     test_mips::i(0x0Du, 8u, 8u, 0x1070u),
@@ -514,17 +525,15 @@ add_jojo_test(jojo_ps1_boot_runtime_tests tests/test_ps1_boot_runtime.cpp)
 
 - [ ] **Step 3: Run RED**
 
-Run:
-
 ```bash
 cmake --build build --target jojo_ps1_boot_runtime_tests --config Release
 ```
 
-Expected: build fails because the boot report/runtime types do not exist.
+Expected: build fails because the boot report/runtime interfaces do not exist.
 
-- [ ] **Step 4: Implement runtime creation and stop classification**
+- [ ] **Step 4: Implement runtime creation and loop**
 
-`Ps1BootRuntime::create` must call the loader and retain its state:
+Creation:
 
 ```cpp
 Result<Ps1BootRuntime> Ps1BootRuntime::create(const Ps1Executable& executable) {
@@ -538,22 +547,23 @@ Result<Ps1BootRuntime> Ps1BootRuntime::create(const Ps1Executable& executable) {
 }
 ```
 
-Before each CPU step, normalize `cpu_.pc`. If physical PC equals `0xA0`, `0xB0`, or `0xC0`, stop as `bios_call_unimplemented`, increment `bios_call_count`, and append exactly one `Ps1BiosCallSummary` using selector `cpu_.gpr[9]`.
+At the top of each iteration, resolve `cpu_.pc` with `Ps1MemoryBus::guest_to_physical`. If the resolved physical PC is `0xA0`, `0xB0`, or `0xC0`, set `last_pc`, `bios_call_unimplemented`, increment `bios_call_count`, and append `{cpu_.pc, physical_pc, cpu_.gpr[9]}`. Do not execute the instruction at that BIOS entry in M3A.
 
-For an ordinary step:
+Before `step_r3000a`, read the current opcode for derived reporting, then clear any unsupported marker created by that observational read. After the real step:
 
 ```cpp
 const auto pc_before = cpu_.pc;
 const auto opcode = bus_.read32(pc_before);
 report.last_pc = pc_before;
 if (opcode.status == R3000aBusStatus::ok) report.last_opcode = opcode.value;
-
 bus_.clear_last_unsupported_access();
+
 const auto step = step_r3000a(cpu_, bus_);
 if (step.status == R3000aStepStatus::retired) {
     ++report.instructions_retired;
     continue;
 }
+
 report.cpu_diagnostic = step.diagnostic;
 report.unsupported_access = bus_.last_unsupported_access();
 if (report.unsupported_access &&
@@ -573,13 +583,11 @@ if (report.unsupported_access &&
 return report;
 ```
 
-If the loop consumes exactly `instruction_budget` retired instructions without another stop, set `execution_budget_exhausted` and return. No success state is inferred.
+After exactly `options.instruction_budget` retired instructions without another stop, return `execution_budget_exhausted`. A zero budget returns immediate `execution_budget_exhausted` with zero retired instructions.
 
 Add `src/core/ps1_boot_runtime.cpp` to `jojo_core`.
 
 - [ ] **Step 5: Run GREEN**
-
-Run:
 
 ```bash
 cmake --build build --target jojo_ps1_boot_runtime_tests --config Release
@@ -604,9 +612,7 @@ git commit -m "feat: add deterministic JoJo PS1 boot checkpoint"
 - Modify: `src/core/runtime.cpp`
 - Modify: `tests/test_ps1_runtime_installation.cpp`
 
-**Interfaces:**
-- Consumes: existing `validate_installation`, installed `data/boot.psxexe`, `Ps1BootRuntime`.
-- Produces:
+**Interface produced:**
 
 ```cpp
 [[nodiscard]] Result<Ps1BootReport> bootstrap_runtime_checkpoint(
@@ -614,18 +620,11 @@ git commit -m "feat: add deterministic JoJo PS1 boot checkpoint"
     const Ps1BootOptions& options = {});
 ```
 
-Existing interface remains:
+Keep the existing `Result<void> bootstrap_runtime(const std::filesystem::path&)` API.
 
-```cpp
-[[nodiscard]] Result<void> bootstrap_runtime(
-    const std::filesystem::path& install_root);
-```
+- [ ] **Step 1: Replace the obsolete RED expectation**
 
-- [ ] **Step 1: Replace the obsolete runtime-installation RED expectation**
-
-Replace `test_bootstrap_reports_r3000a_not_implemented_without_mutation` with two tests.
-
-Checkpoint test:
+Add checkpoint truth test:
 
 ```cpp
 static void test_bootstrap_checkpoint_executes_installed_psx_exe_without_mutation() {
@@ -647,7 +646,7 @@ static void test_bootstrap_checkpoint_executes_installed_psx_exe_without_mutatio
 }
 ```
 
-Product-wrapper truth test:
+Add wrapper truth test:
 
 ```cpp
 static void test_bootstrap_runtime_does_not_claim_boot_from_checkpoint() {
@@ -663,20 +662,20 @@ static void test_bootstrap_runtime_does_not_claim_boot_from_checkpoint() {
 }
 ```
 
-- [ ] **Step 2: Run RED**
+Remove the old assertion that says R3000A execution itself is not implemented.
 
-Run:
+- [ ] **Step 2: Run RED**
 
 ```bash
 cmake --build build --target jojo_ps1_runtime_installation_tests --config Release
 ctest --test-dir build -C Release --output-on-failure -R jojo_ps1_runtime_installation_tests
 ```
 
-Expected: build fails because `bootstrap_runtime_checkpoint` is not declared.
+Expected: build fails because `bootstrap_runtime_checkpoint` is absent.
 
 - [ ] **Step 3: Implement installation-backed checkpoint**
 
-Move/reuse the existing private `read_local_file` helper; do not add a second parser. The implementation sequence is exact:
+Reuse the existing `read_local_file` and `executable_metadata_matches` helpers; do not create a second installation validator.
 
 ```cpp
 Result<Ps1BootReport> bootstrap_runtime_checkpoint(
@@ -692,8 +691,9 @@ Result<Ps1BootReport> bootstrap_runtime_checkpoint(
     }
     auto executable = parse_ps1_executable(bytes.value);
     if (!executable) {
-        return Result<Ps1BootReport>::failure(ErrorCode::invalid_installation,
-                                              "installed PS-X EXE is invalid: " + executable.detail);
+        return Result<Ps1BootReport>::failure(
+            ErrorCode::invalid_installation,
+            "installed PS-X EXE is invalid: " + executable.detail);
     }
     if (!executable_metadata_matches(install.value.manifest, executable.value.metadata)) {
         return Result<Ps1BootReport>::failure(
@@ -708,13 +708,9 @@ Result<Ps1BootReport> bootstrap_runtime_checkpoint(
 }
 ```
 
-Keep `bootstrap_runtime` conservative. Run a finite checkpoint and return `Result<void>::failure(ErrorCode::backend_unavailable, ...)` unless the report stop reason is `commercial_frame_presented`. M3A cannot produce that reason, so no M3A path claims boot success.
+`bootstrap_runtime` must run a fixed 10,000-instruction checkpoint and return `backend_unavailable` with a detail string naming the checkpoint stop reason and stating that commercial JoJo boot is not verified. Only a future `commercial_frame_presented` stop reason may allow that wrapper to return success; M3A contains no path that emits it.
 
-Use a fixed wrapper budget of `10000` retired instructions so the GUI cannot hang indefinitely during this milestone.
-
-- [ ] **Step 4: Run GREEN and full portable core suite**
-
-Run:
+- [ ] **Step 4: Run GREEN and full suite**
 
 ```bash
 cmake --build build --config Release
@@ -732,19 +728,14 @@ git commit -m "feat: execute installed JoJo boot checkpoint"
 
 ---
 
-### Task 5: Deterministic Replay and Exact M3A Boundary Evidence
+### Task 5: Deterministic Replay and Code-Head Verification
 
 **Files:**
 - Modify: `tests/test_ps1_boot_runtime.cpp`
-- Modify: `tests/test_ps1_memory_bus.cpp`
 
-**Interfaces:**
-- Consumes: finalized M3A public interfaces from Tasks 1–4.
-- Produces: regression evidence that identical synthetic JoJo-labelled inputs produce identical CPU state, memory observations and boot report; confirms no extra RAM mirrors are accepted.
+- [ ] **Step 1: Add deterministic replay regression**
 
-- [ ] **Step 1: Add deterministic replay RED/GREEN regression**
-
-Add a helper in `tests/test_ps1_boot_runtime.cpp` that creates two independent runtimes from the same synthetic loop executable, runs both for 32 retired instructions, and compares every M3A-relevant state field:
+Create two independent runtimes from the same synthetic loop executable and compare all M3A architectural state:
 
 ```cpp
 auto a = jojo::Ps1BootRuntime::create(loop_exe.value);
@@ -777,50 +768,32 @@ if (a && b) {
     CHECK(sa.cop0.epc == sb.cop0.epc);
     CHECK(sa.cop0.bad_vaddr == sb.cop0.bad_vaddr);
     CHECK(sa.cop0.target_address == sb.cop0.target_address);
-    CHECK(a.value.bus().read32(0x80010000u).value == b.value.bus().read32(0x80010000u).value);
+    CHECK(a.value.bus().read32(0x80010000u).value ==
+          b.value.bus().read32(0x80010000u).value);
 }
 ```
 
-In `tests/test_ps1_memory_bus.cpp`, lock the JoJo-only initial alias policy:
-
-```cpp
-CHECK(bus.read8(0x00200000u).status == jojo::R3000aBusStatus::unsupported);
-CHECK(bus.read8(0x80200000u).status == jojo::R3000aBusStatus::unsupported);
-CHECK(bus.read8(0xA0200000u).status == jojo::R3000aBusStatus::unsupported);
-```
-
-- [ ] **Step 2: Run focused suite**
-
-Run:
+- [ ] **Step 2: Run focused and full suites**
 
 ```bash
-cmake --build build --target jojo_ps1_boot_runtime_tests jojo_ps1_memory_bus_tests --config Release
-ctest --test-dir build -C Release --output-on-failure -R "jojo_ps1_boot_runtime_tests|jojo_ps1_memory_bus_tests"
-```
-
-Expected: all tests pass. If the replay test exposes nondeterministic state, stop and use `superpowers:systematic-debugging` before changing semantics.
-
-- [ ] **Step 3: Run full suite before code-head CI**
-
-Run:
-
-```bash
+cmake --build build --target jojo_ps1_boot_runtime_tests --config Release
+ctest --test-dir build -C Release --output-on-failure -R jojo_ps1_boot_runtime_tests
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Expected: zero failed tests.
+Expected: zero failed tests. If replay differs, stop and invoke `superpowers:systematic-debugging`; do not weaken the test.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add tests/test_ps1_boot_runtime.cpp tests/test_ps1_memory_bus.cpp
+git add tests/test_ps1_boot_runtime.cpp
 git commit -m "test: verify deterministic JoJo M3A boot replay"
 ```
 
-- [ ] **Step 5: Push code head and require GitHub Actions Linux + Windows success**
+- [ ] **Step 4: Push code head and capture immutable CI evidence**
 
-Push the implementation branch and record the exact numeric GitHub Actions run ID whose `head_sha` equals the Task 5 commit. Both `Portable core / Linux` and `Windows x64 / MSVC 2022` must complete with `conclusion=success`. Do not update readiness evidence from a run attached to any other SHA.
+Push the implementation branch. Find the GitHub Actions run whose `head_sha` is exactly the Task 5 commit. Record its decimal run ID in the execution notes. Both `Portable core / Linux` and `Windows x64 / MSVC 2022` must finish with `conclusion=success`. Do not use a run from another SHA as readiness evidence.
 
 ---
 
@@ -831,51 +804,49 @@ Push the implementation branch and record the exact numeric GitHub Actions run I
 - Modify: `docs/NEXT-MILESTONES.md`
 - Modify: `docs/architecture/PRODUCTION-READINESS.tsv`
 
-**Interfaces:**
-- Consumes: exact successful code-head GitHub Actions run ID from Task 5.
-- Produces: repository truth that M3A is synthetically verified while JoJo commercial boot remains unverified and M3B BIOS/HLE is next.
+**Consumes:** the exact decimal GitHub Actions run ID recorded in Task 5.
 
 - [ ] **Step 1: Update R2.3 evidence without promoting R2.4**
 
-Change only the R2.3 line to:
+In `PRODUCTION-READINESS.tsv`, keep R2.3 status `implemented-unverified`. Set its evidence field to the literal prefix `github-actions:run-` followed immediately by the exact decimal run ID from Task 5, and set its blocker exactly to:
 
 ```text
-R2.3	implemented-unverified	github-actions:run-<CODE_HEAD_RUN_ID>	jojo-bios-hle-and-device-runtime-not-implemented
+jojo-bios-hle-and-device-runtime-not-implemented
 ```
 
-Replace `<CODE_HEAD_RUN_ID>` with the numeric run ID verified in Task 5 before committing. Leave R2.4 exactly `not-started` unless separate commercial evidence exists; M3A alone is not such evidence.
+Leave R2.4 `not-started` unless independent commercial evidence exists. M3A is not that evidence.
 
-- [ ] **Step 2: Update `PROJECT-STATE.md` with exact M3A truth**
+- [ ] **Step 2: Update `PROJECT-STATE.md` truth**
 
-Add these statements verbatim to the active PS1 status section:
+Add these two sentences verbatim:
 
 ```text
 JoJo PS1 M3A memory/bus, PS-X EXE payload loading, and bounded R3000A boot checkpoints are implemented and verified by synthetic Linux/Windows contracts.
 Commercial JoJo boot, BIOS/HLE progress, device progress, rendering, audio, input and gameplay are not verified by M3A.
 ```
 
-Remove any stale statement claiming R3000A execution itself is not implemented. Do not add a claim that the commercial JoJo executable has booted.
+Remove stale text claiming R3000A instruction execution itself is unimplemented. Do not claim that the commercial JoJo executable has booted.
 
-- [ ] **Step 3: Make M3B the next milestone**
+- [ ] **Step 3: Make M3B the immediate next milestone**
 
-Update `docs/NEXT-MILESTONES.md` so the immediate engineering target is:
+Add this exact next-step statement to `docs/NEXT-MILESTONES.md`:
 
 ```text
 M3B — JoJo-observed BIOS/HLE: run the supported local JoJo installation through the M3A checkpoint, capture only bounded derived diagnostics at the first A0/B0/C0 or kernel boundary, reproduce the required contract synthetically, and implement only the JoJo-required service.
 ```
 
-Keep CFG/IR/x64 downstream of visible boot and explicitly retain the JoJo-only product boundary.
+Keep CFG/IR/x64 downstream of visible boot and retain the JoJo-only product boundary.
 
-- [ ] **Step 4: Commit documentation**
+- [ ] **Step 4: Commit docs**
 
 ```bash
 git add PROJECT-STATE.md docs/NEXT-MILESTONES.md docs/architecture/PRODUCTION-READINESS.tsv
 git commit -m "docs: record JoJo PS1 M3A checkpoint readiness"
 ```
 
-- [ ] **Step 5: Verify the final docs head independently**
+- [ ] **Step 5: Verify final docs head independently**
 
-Push the docs commit. Require a fresh GitHub Actions run whose `head_sha` equals the docs commit, with both Linux and Windows jobs successful. The R2.3 evidence field remains the Task 5 code-head run ID because that run is the immutable implementation evidence; the final docs-head run verifies repository consistency after the status update.
+Push the docs commit and require a new GitHub Actions run whose `head_sha` is exactly that docs commit. Linux and Windows jobs must both succeed. Keep the R2.3 evidence field pointing at the Task 5 code-head run because it is the immutable implementation evidence; the docs-head run verifies final repository consistency.
 
 - [ ] **Step 6: Completion boundary**
 
@@ -885,15 +856,17 @@ Only after Step 5 succeeds may M3A be called complete. The maximum allowed claim
 M3A synthetic reference-execution checkpoint ready for a local JoJo boundary run.
 ```
 
-Do not claim `commercial boot verified`, `rendering verified`, `playable`, or `native recompilation verified`.
+Do not claim commercial boot, rendering, playability, audio, input, gameplay, or native recompilation.
 
 ---
 
 ## Self-Review Result
 
-- Spec coverage: M3A sections 5, 6, 11, 12, 13, 14, 15 and the M3A portion of section 16 are covered by Tasks 1–6.
-- M3B–M3E are intentionally not implemented by this plan; each receives a separate plan after the preceding JoJo checkpoint provides evidence.
-- JoJo-only scope is locked by Global Constraints and Task 5 alias tests; no other-game compatibility work is authorized.
-- No proprietary or commercial bytes are introduced into tests or CI.
-- Public names are consistent across tasks: `Ps1MemoryBus`, `Ps1UnsupportedAccess`, `load_ps1_executable_into_bus`, `Ps1BootStopReason`, `Ps1BootReport`, `Ps1BootOptions`, `Ps1BootRuntime`, and `bootstrap_runtime_checkpoint`.
-- No M3A task promotes commercial boot or rendering status.
+- Spec coverage: M3A component ownership, address mapping, loader, boot loop, reporting, synthetic tests, CI evidence and truth boundaries are covered by Tasks 1–6.
+- M3B–M3E are intentionally separate plans. Their implementation must be driven by the preceding JoJo checkpoint, not guessed in advance.
+- JoJo-only scope is explicit and no other-game compatibility work is authorized.
+- The 2 MiB RAM is heap-backed, avoiding a Windows stack-allocation hazard.
+- Public names are consistent: `Ps1MemoryBus`, `Ps1UnsupportedAccess`, `load_ps1_executable_into_bus`, `Ps1BootStopReason`, `Ps1BootReport`, `Ps1BootOptions`, `Ps1BootRuntime`, `bootstrap_runtime_checkpoint`.
+- The plan contains no unresolved implementation placeholders; the CI run ID is deliberately captured from the exact future code-head run and inserted as concrete evidence during Task 6.
+- No commercial or proprietary bytes are introduced into Git or CI.
+- No task promotes commercial boot or rendering status.
