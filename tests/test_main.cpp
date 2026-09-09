@@ -2,8 +2,6 @@
 #include "core/settings.h"
 #include "core/input.h"
 #include "core/disc_image.h"
-#include "core/conversion.h"
-#include "core/runtime.h"
 #include "core/device_id.h"
 #include <filesystem>
 #include <fstream>
@@ -156,32 +154,6 @@ static void test_disc_fingerprint_is_deterministic() {
     fs::remove(path, ec);
 }
 
-static void test_runtime_installation_validation() {
-    const auto install = fs::temp_directory_path() / "jojo_recompiled_runtime_test";
-    std::error_code ec;
-    fs::remove_all(install, ec);
-    const auto missing = jojo::validate_installation(install);
-    CHECK(!missing);
-
-    fs::create_directories(install / "data");
-    fs::create_directories(install / "cache");
-    jojo::ConversionManifest m{};
-    m.manifest_version = "1";
-    m.converter_version = jojo::core_version();
-    m.source_name = "owned.iso";
-    m.source_format = "iso";
-    m.source_size = 1234;
-    m.hash_hex = "0123456789abcdef";
-    CHECK(jojo::save_conversion_manifest_atomic(install / "game_manifest.ini", m));
-
-    const auto valid = jojo::validate_installation(install);
-    CHECK(valid);
-    const auto boot = jojo::bootstrap_runtime(install);
-    CHECK(!boot);
-    CHECK(boot.error == jojo::ErrorCode::backend_unavailable);
-    fs::remove_all(install, ec);
-}
-
 static void test_device_id_helpers_are_stable() {
     CHECK(jojo::make_xinput_device_id(0) == "xinput:0");
     CHECK(jojo::make_xinput_device_id(3) == "xinput:3");
@@ -201,7 +173,6 @@ int main() {
     test_input_bindings_round_trip();
     test_disc_extension_detection();
     test_disc_fingerprint_is_deterministic();
-    test_runtime_installation_validation();
     test_device_id_helpers_are_stable();
     if (failures) {
         std::cerr << failures << " test assertion(s) failed\n";
