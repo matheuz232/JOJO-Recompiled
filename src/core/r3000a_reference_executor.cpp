@@ -389,6 +389,68 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
             if (out.status == R3000aBusStatus::bus_error) return data_bus_error(address, 4u, rt);
             break;
         }
+        case MipsOp::lwl:
+        case MipsOp::lwr: {
+            const auto effective = rs + sign_extend16(instruction.immediate);
+            const auto aligned = effective & ~3u;
+            const auto in = bus.read32(aligned);
+            if (in.status == R3000aBusStatus::unsupported) return data_boundary(effective, 4u);
+            if (in.status == R3000aBusStatus::bus_error) return data_bus_error(effective, 4u);
+
+            const std::uint32_t base = prior_pending.valid && prior_pending.reg == instruction.rt
+                ? prior_pending.value
+                : rt;
+            const auto lane = effective & 3u;
+            std::uint32_t value = base;
+            if (instruction.op == MipsOp::lwl) {
+                switch (lane) {
+                    case 0u: value = (base & 0x00FFFFFFu) | (in.value << 24); break;
+                    case 1u: value = (base & 0x0000FFFFu) | (in.value << 16); break;
+                    case 2u: value = (base & 0x000000FFu) | (in.value << 8); break;
+                    case 3u: value = in.value; break;
+                }
+            } else {
+                switch (lane) {
+                    case 0u: value = in.value; break;
+                    case 1u: value = (base & 0xFF000000u) | (in.value >> 8); break;
+                    case 2u: value = (base & 0xFFFF0000u) | (in.value >> 16); break;
+                    case 3u: value = (base & 0xFFFFFF00u) | (in.value >> 24); break;
+                }
+            }
+            queue_load(instruction.rt, value);
+            break;
+        }
+        case MipsOp::swl:
+        case MipsOp::swr: {
+            const auto effective = rs + sign_extend16(instruction.immediate);
+            const auto aligned = effective & ~3u;
+            const auto in = bus.read32(aligned);
+            if (in.status == R3000aBusStatus::unsupported) return data_boundary(effective, 4u, rt);
+            if (in.status == R3000aBusStatus::bus_error) return data_bus_error(effective, 4u, rt);
+
+            const auto lane = effective & 3u;
+            std::uint32_t merged = in.value;
+            if (instruction.op == MipsOp::swl) {
+                switch (lane) {
+                    case 0u: merged = (in.value & 0xFFFFFF00u) | (rt >> 24); break;
+                    case 1u: merged = (in.value & 0xFFFF0000u) | (rt >> 16); break;
+                    case 2u: merged = (in.value & 0xFF000000u) | (rt >> 8); break;
+                    case 3u: merged = rt; break;
+                }
+            } else {
+                switch (lane) {
+                    case 0u: merged = rt; break;
+                    case 1u: merged = (in.value & 0x000000FFu) | (rt << 8); break;
+                    case 2u: merged = (in.value & 0x0000FFFFu) | (rt << 16); break;
+                    case 3u: merged = (in.value & 0x00FFFFFFu) | (rt << 24); break;
+                }
+            }
+
+            const auto out = bus.write32(aligned, merged);
+            if (out.status == R3000aBusStatus::unsupported) return data_boundary(effective, 4u, merged);
+            if (out.status == R3000aBusStatus::bus_error) return data_bus_error(effective, 4u, merged);
+            break;
+        }
         case MipsOp::syscall:
             return enter_exception(state, R3000aExceptionCode::syscall, R3000aStage::execute,
                                    instruction_pc, current_delay, instruction.raw);
@@ -407,8 +469,6 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
         return boundary(state, R3000aBoundaryCode::architectural_operation_unimplemented,
                         R3000aStage::execute, instruction_pc, instruction.raw);
 
-    // `prior_pending` is retained for Task 7 LWL/LWR forwarding; ordinary instructions use the stale captures above.
-    (void)prior_pending;
     if (direct_write_valid) write_gpr(state, direct_write_reg, direct_write_value);
     state.pending_load = new_pending;
 
