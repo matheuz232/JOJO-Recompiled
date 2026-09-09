@@ -29,6 +29,8 @@ static jojo::Ps1BootReport make_report(std::uint64_t retired) {
     report.gpu_gp1_command_count = 4u;
     report.vram_write_count = 5u;
     report.presented_frames = 0u;
+    report.recent_trace.push_back({0x80010018u, 0x24420004u});
+    report.recent_trace.push_back({0x8001001Cu, 0xAC400000u});
     return report;
 }
 
@@ -47,6 +49,11 @@ int main() {
     CHECK(text.find("gpu_gp1_command_count=4\n") != std::string::npos);
     CHECK(text.find("vram_write_count=5\n") != std::string::npos);
     CHECK(text.find("presented_frames=0\n") != std::string::npos);
+    CHECK(text.find("trace_sample_count=2\n") != std::string::npos);
+    CHECK(text.find("trace_0_pc=0x80010018\n") != std::string::npos);
+    CHECK(text.find("trace_0_opcode=0x24420004\n") != std::string::npos);
+    CHECK(text.find("trace_1_pc=0x8001001c\n") != std::string::npos);
+    CHECK(text.find("trace_1_opcode=0xac400000\n") != std::string::npos);
     CHECK(text.find("PS-X EXE") == std::string::npos);
 
     const auto root = fs::temp_directory_path() / "jojo-m3a-report-io";
