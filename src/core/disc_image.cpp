@@ -18,13 +18,13 @@ std::string lower_ext(std::string_view filename) {
 
 bool supported_disc_extension(std::string_view filename) {
     const auto ext = lower_ext(filename);
-    return ext == "iso" || ext == "bin" || ext == "cue" || ext == "gdi";
+    return ext == "iso" || ext == "bin" || ext == "cue";
 }
 
 Result<DiscFingerprint> fingerprint_disc_image(const std::filesystem::path& path) {
     if (!supported_disc_extension(path.filename().string())) {
         return Result<DiscFingerprint>::failure(ErrorCode::unsupported_format,
-                                                "supported formats: .iso, .bin, .cue, .gdi");
+                                                "supported PS1 formats: .iso, .bin, .cue");
     }
     std::error_code ec;
     if (!std::filesystem::is_regular_file(path, ec) || ec) {
