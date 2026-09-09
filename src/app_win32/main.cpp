@@ -229,15 +229,13 @@ void set_enabled(bool on){
 void run_checkpoint(){
     if(!converted||running) return;
 
-    jojo::Ps1BootOptions options{};
-    options.instruction_budget=10000u;
     const auto report_path=app_root()/L"diagnostics"/L"m3a-checkpoint.txt";
-    const auto result=jojo::bootstrap_runtime_checkpoint_to_file(game_dir,report_path,options);
+    const auto result=jojo::bootstrap_runtime_local_evidence_to_file(game_dir,report_path);
     if(!result){
-        status=L"Checkpoint M3A falhou: "+wide(result.detail);
+        status=L"Checkpoint profundo falhou: "+wide(result.detail);
         add_log(L"Falha ao gerar diagnóstico derivado do checkpoint.");
     }else{
-        status=L"Checkpoint M3A concluído. Relatório: "+report_path.wstring();
+        status=L"Checkpoint profundo concluído. Relatório: "+report_path.wstring();
         add_log(L"Parada: "+wide(jojo::ps1_boot_stop_reason_name(result.value.stop_reason)));
     }
     InvalidateRect(win,nullptr,FALSE);
