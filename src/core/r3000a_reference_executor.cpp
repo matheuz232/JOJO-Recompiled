@@ -13,8 +13,12 @@ constexpr std::uint32_t kCauseExcCodeMask = 0x0000007cu;
 constexpr std::uint32_t kCauseContextMask = 0xF0000000u; // BD, BT, CE
 constexpr std::uint32_t kCauseBd = 1u << 31;
 constexpr std::uint32_t kCauseBt = 1u << 30;
+constexpr std::uint32_t kCauseSwMask = 0x00000300u;
+constexpr std::uint32_t kCauseExternalMask = 0x0000FC00u;
+constexpr std::uint32_t kCauseInterruptMask = 0x0000FF00u;
 constexpr std::uint32_t kStatusModeStackMask = 0x0000003fu;
 constexpr std::uint32_t kStatusBev = 1u << 22;
+constexpr std::uint32_t kStatusWritableMask = 0xF27FFF3Fu;
 
 std::uint32_t sign_extend8(std::uint8_t value) noexcept {
     return (value & 0x80u) != 0u ? (0xffffff00u | static_cast<std::uint32_t>(value))
@@ -44,6 +48,10 @@ bool add_overflow(std::uint32_t lhs, std::uint32_t rhs, std::uint32_t result) no
 
 bool sub_overflow(std::uint32_t lhs, std::uint32_t rhs, std::uint32_t result) noexcept {
     return (((lhs ^ rhs) & (lhs ^ result)) & 0x80000000u) != 0u;
+}
+
+bool cop0_register_is_ri(std::uint8_t rd) noexcept {
+    return rd == 0u || rd == 1u || rd == 2u || rd == 4u || rd == 10u;
 }
 
 void write_gpr(R3000aState& state, std::uint8_t reg, std::uint32_t value) noexcept {
@@ -85,10 +93,12 @@ R3000aStepResult enter_exception(
     std::uint32_t fault_pc,
     const R3000aDelaySlot& current_delay,
     std::optional<std::uint32_t> opcode = std::nullopt,
-    std::optional<std::uint32_t> bad_vaddr = std::nullopt) noexcept {
+    std::optional<std::uint32_t> bad_vaddr = std::nullopt,
+    std::optional<std::uint8_t> coprocessor = std::nullopt) noexcept {
     const auto status_before = state.cop0.status;
     state.cop0.cause &= ~(kCauseExcCodeMask | kCauseContextMask);
     state.cop0.cause |= static_cast<std::uint32_t>(code) << 2;
+    if (coprocessor) state.cop0.cause |= (static_cast<std::uint32_t>(*coprocessor & 3u) << 28);
 
     if (current_delay.active) {
         state.cop0.cause |= kCauseBd;
@@ -123,6 +133,7 @@ R3000aStepResult enter_exception(
     result.diagnostic.pc = fault_pc;
     result.diagnostic.opcode = opcode;
     result.diagnostic.exception_code = code;
+    result.diagnostic.coprocessor = coprocessor;
     if (bad_vaddr) result.diagnostic.address = *bad_vaddr;
     return result;
 }
@@ -133,6 +144,17 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
     state.gpr[0] = 0u;
     const std::uint32_t instruction_pc = state.pc;
     const R3000aDelaySlot current_delay = state.delay_slot;
+
+    state.cop0.cause = (state.cop0.cause & ~kCauseExternalMask) |
+                       (static_cast<std::uint32_t>(state.external_interrupt_pending & 0xFCu) << 8);
+    const bool interrupt_enabled = (state.cop0.status & 1u) != 0u;
+    const bool masked_interrupt_pending =
+        (state.cop0.cause & state.cop0.status & kCauseInterruptMask) != 0u;
+    if (!current_delay.active && interrupt_enabled && masked_interrupt_pending) {
+        retire_pending_load(state);
+        return enter_exception(state, R3000aExceptionCode::interrupt, R3000aStage::interrupt,
+                               instruction_pc, current_delay);
+    }
 
     if ((instruction_pc & 3u) != 0u) {
         retire_pending_load(state);
@@ -166,7 +188,6 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
                         R3000aStage::execute, instruction_pc, instruction.raw);
     }
 
-    // Source operands observe the pre-retirement register file, which is the R3000A load-delay rule.
     const std::uint32_t rs = state.gpr[instruction.rs];
     const std::uint32_t rt = state.gpr[instruction.rt];
     const R3000aDelayedLoad prior_pending = state.pending_load;
@@ -220,6 +241,14 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
                                       current_delay, instruction.raw, address);
         result.diagnostic.access_width = width;
         return result;
+    };
+    const auto cop0_ri = [&]() noexcept {
+        return enter_exception(state, R3000aExceptionCode::reserved_instruction, R3000aStage::cop0,
+                               instruction_pc, current_delay, instruction.raw);
+    };
+    const auto cop0_boundary = [&]() noexcept {
+        return boundary(state, R3000aBoundaryCode::architectural_operation_unimplemented,
+                        R3000aStage::cop0, instruction_pc, instruction.raw);
     };
 
     switch (instruction.op) {
@@ -396,10 +425,8 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
             const auto in = bus.read32(aligned);
             if (in.status == R3000aBusStatus::unsupported) return data_boundary(effective, 4u);
             if (in.status == R3000aBusStatus::bus_error) return data_bus_error(effective, 4u);
-
             const std::uint32_t base = prior_pending.valid && prior_pending.reg == instruction.rt
-                ? prior_pending.value
-                : rt;
+                ? prior_pending.value : rt;
             const auto lane = effective & 3u;
             std::uint32_t value = base;
             if (instruction.op == MipsOp::lwl) {
@@ -427,7 +454,6 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
             const auto in = bus.read32(aligned);
             if (in.status == R3000aBusStatus::unsupported) return data_boundary(effective, 4u, rt);
             if (in.status == R3000aBusStatus::bus_error) return data_bus_error(effective, 4u, rt);
-
             const auto lane = effective & 3u;
             std::uint32_t merged = in.value;
             if (instruction.op == MipsOp::swl) {
@@ -445,10 +471,50 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
                     case 3u: merged = (in.value & 0x00FFFFFFu) | (rt << 24); break;
                 }
             }
-
             const auto out = bus.write32(aligned, merged);
             if (out.status == R3000aBusStatus::unsupported) return data_boundary(effective, 4u, merged);
             if (out.status == R3000aBusStatus::bus_error) return data_bus_error(effective, 4u, merged);
+            break;
+        }
+        case MipsOp::mfc0: {
+            std::optional<std::uint32_t> value;
+            switch (instruction.rd) {
+                case 6u: value = state.cop0.target_address; break;
+                case 8u: value = state.cop0.bad_vaddr; break;
+                case 12u: value = state.cop0.status; break;
+                case 13u: value = state.cop0.cause; break;
+                case 14u: value = state.cop0.epc; break;
+                default: break;
+            }
+            if (!value) {
+                if (cop0_register_is_ri(instruction.rd)) return cop0_ri();
+                return cop0_boundary();
+            }
+            queue_load(instruction.rt, *value);
+            break;
+        }
+        case MipsOp::mtc0:
+            switch (instruction.rd) {
+                case 12u:
+                    state.cop0.status = (state.cop0.status & ~kStatusWritableMask) |
+                                        (rt & kStatusWritableMask);
+                    break;
+                case 13u:
+                    state.cop0.cause = (state.cop0.cause & ~kCauseSwMask) | (rt & kCauseSwMask);
+                    break;
+                case 6u:
+                case 8u:
+                case 14u:
+                    return cop0_boundary();
+                default:
+                    if (cop0_register_is_ri(instruction.rd)) return cop0_ri();
+                    return cop0_boundary();
+            }
+            break;
+        case MipsOp::rfe: {
+            const auto low = state.cop0.status & kStatusModeStackMask;
+            const auto restored = (low & 0x30u) | ((low >> 2) & 0x0Fu);
+            state.cop0.status = (state.cop0.status & ~kStatusModeStackMask) | restored;
             break;
         }
         case MipsOp::syscall:
