@@ -218,20 +218,6 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
         case MipsOp::sltu:
             write_gpr(state, instruction.rd, rs < rt ? 1u : 0u);
             break;
-        case MipsOp::addi: {
-            const auto immediate = sign_extend16(instruction.immediate);
-            const auto value = rs + immediate;
-            if (add_overflow(rs, immediate, value)) {
-                return enter_exception(
-                    state,
-                    R3000aExceptionCode::overflow,
-                    R3000aStage::execute,
-                    instruction_pc,
-                    instruction.raw);
-            }
-            write_gpr(state, instruction.rt, value);
-            break;
-        }
         case MipsOp::addiu:
             write_gpr(state, instruction.rt, rs + sign_extend16(instruction.immediate));
             break;
@@ -255,6 +241,70 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
         case MipsOp::sltiu:
             write_gpr(state, instruction.rt, rs < sign_extend16(instruction.immediate) ? 1u : 0u);
             break;
+        case MipsOp::mfhi:
+            write_gpr(state, instruction.rd, state.hi);
+            break;
+        case MipsOp::mthi:
+            state.hi = rs;
+            break;
+        case MipsOp::mflo:
+            write_gpr(state, instruction.rd, state.lo);
+            break;
+        case MipsOp::mtlo:
+            state.lo = rs;
+            break;
+        case MipsOp::mult: {
+            const auto lhs = static_cast<std::int64_t>(signed_view(rs));
+            const auto rhs = static_cast<std::int64_t>(signed_view(rt));
+            const auto product = lhs * rhs;
+            const auto bits = static_cast<std::uint64_t>(product);
+            state.lo = static_cast<std::uint32_t>(bits);
+            state.hi = static_cast<std::uint32_t>(bits >> 32);
+            break;
+        }
+        case MipsOp::multu: {
+            const auto product = static_cast<std::uint64_t>(rs) * static_cast<std::uint64_t>(rt);
+            state.lo = static_cast<std::uint32_t>(product);
+            state.hi = static_cast<std::uint32_t>(product >> 32);
+            break;
+        }
+        case MipsOp::div:
+            if (rt == 0u) {
+                state.hi = rs;
+                state.lo = signed_view(rs) < 0 ? 1u : 0xFFFFFFFFu;
+            } else if (rs == 0x80000000u && rt == 0xFFFFFFFFu) {
+                state.hi = 0u;
+                state.lo = 0x80000000u;
+            } else {
+                const auto lhs = static_cast<std::int64_t>(signed_view(rs));
+                const auto rhs = static_cast<std::int64_t>(signed_view(rt));
+                state.lo = static_cast<std::uint32_t>(lhs / rhs);
+                state.hi = static_cast<std::uint32_t>(lhs % rhs);
+            }
+            break;
+        case MipsOp::divu:
+            if (rt == 0u) {
+                state.hi = rs;
+                state.lo = 0xFFFFFFFFu;
+            } else {
+                state.lo = rs / rt;
+                state.hi = rs % rt;
+            }
+            break;
+        case MipsOp::addi: {
+            const auto immediate = sign_extend16(instruction.immediate);
+            const auto value = rs + immediate;
+            if (add_overflow(rs, immediate, value)) {
+                return enter_exception(
+                    state,
+                    R3000aExceptionCode::overflow,
+                    R3000aStage::execute,
+                    instruction_pc,
+                    instruction.raw);
+            }
+            write_gpr(state, instruction.rt, value);
+            break;
+        }
         case MipsOp::syscall:
             return enter_exception(
                 state,
