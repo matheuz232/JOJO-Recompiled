@@ -18,6 +18,7 @@ constexpr std::uint32_t kCauseExternalMask = 0x0000FC00u;
 constexpr std::uint32_t kCauseInterruptMask = 0x0000FF00u;
 constexpr std::uint32_t kStatusModeStackMask = 0x0000003fu;
 constexpr std::uint32_t kStatusBev = 1u << 22;
+constexpr std::uint32_t kStatusCu2 = 1u << 30;
 constexpr std::uint32_t kStatusWritableMask = 0xF27FFF3Fu;
 
 std::uint32_t sign_extend8(std::uint8_t value) noexcept {
@@ -517,6 +518,21 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
             state.cop0.status = (state.cop0.status & ~kStatusModeStackMask) | restored;
             break;
         }
+        case MipsOp::mfc2:
+        case MipsOp::cfc2:
+        case MipsOp::mtc2:
+        case MipsOp::ctc2:
+        case MipsOp::cop2_command:
+            if ((state.cop0.status & kStatusCu2) == 0u) {
+                return enter_exception(state, R3000aExceptionCode::coprocessor_unusable,
+                                       R3000aStage::cop2, instruction_pc, current_delay,
+                                       instruction.raw, std::nullopt, 2u);
+            } else {
+                auto result = boundary(state, R3000aBoundaryCode::cop2_unimplemented,
+                                       R3000aStage::cop2, instruction_pc, instruction.raw);
+                result.diagnostic.coprocessor = 2u;
+                return result;
+            }
         case MipsOp::syscall:
             return enter_exception(state, R3000aExceptionCode::syscall, R3000aStage::execute,
                                    instruction_pc, current_delay, instruction.raw);
@@ -544,6 +560,18 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
     }
     state.gpr[0] = 0u;
     return {};
+}
+
+R3000aState initialize_r3000a_for_psx_exe(const Ps1ExeMetadata& metadata) noexcept {
+    R3000aState state{};
+    state.pc = metadata.entry_pc;
+    state.next_pc = metadata.entry_pc + 4u;
+    state.gpr[28] = metadata.initial_gp;
+    if (metadata.stack_base != 0u || metadata.stack_size != 0u) {
+        state.gpr[29] = metadata.stack_base + metadata.stack_size;
+    }
+    state.gpr[0] = 0u;
+    return state;
 }
 
 } // namespace jojo
