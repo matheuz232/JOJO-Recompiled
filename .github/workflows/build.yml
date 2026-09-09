@@ -22,6 +22,8 @@ jobs:
         run: |
           cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadiness.cmake
           cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadinessNegative.cmake
+      - name: PS1 active architecture gate
+        run: cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckPs1ActiveArchitecture.cmake
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: Native backend manifest contract
@@ -60,6 +62,8 @@ jobs:
         run: |
           cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadiness.cmake
           cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadinessNegative.cmake
+      - name: PS1 active architecture gate
+        run: cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckPs1ActiveArchitecture.cmake
       - name: Test Release
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Native backend manifest contract
