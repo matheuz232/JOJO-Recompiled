@@ -192,7 +192,7 @@ static void test_disc_extension_detection() {
     CHECK(jojo::supported_disc_extension("game.ISO"));
     CHECK(jojo::supported_disc_extension("game.bin"));
     CHECK(jojo::supported_disc_extension("game.cue"));
-    CHECK(jojo::supported_disc_extension("game.gdi"));
+    CHECK(!jojo::supported_disc_extension("game.gdi"));
     CHECK(!jojo::supported_disc_extension("game.zip"));
 }
 
@@ -381,11 +381,10 @@ static void test_failed_reprepare_leaves_pending_manifest() {
     fs::remove_all(install, ec);
 }
 
-static void test_conversion_accepts_bin_cue_and_gdi_media() {
+static void test_conversion_accepts_bin_and_cue_media() {
     const auto iso = temp_file("multi_media_source.iso");
     const auto raw = temp_file("multi_media_track.bin");
     const auto cue = temp_file("multi_media.cue");
-    const auto gdi = temp_file("multi_media.gdi");
     test_iso::write_image(iso);
     test_iso::write_raw2352_from_iso(iso, raw, 1);
 
@@ -395,14 +394,9 @@ static void test_conversion_accepts_bin_cue_and_gdi_media() {
         out << "  TRACK 01 MODE1/2352\n";
         out << "    INDEX 01 00:00:00\n";
     }
-    {
-        std::ofstream out(gdi);
-        out << "1\n";
-        out << "3 45000 4 2352 " << raw.filename().string() << " 0\n";
-    }
 
     const std::vector<std::pair<fs::path, std::string>> media = {
-        {raw, "bin"}, {cue, "cue"}, {gdi, "gdi"}
+        {raw, "bin"}, {cue, "cue"}
     };
     std::error_code ec;
     for (const auto& [source_path, expected_format] : media) {
@@ -429,7 +423,6 @@ static void test_conversion_accepts_bin_cue_and_gdi_media() {
     fs::remove(iso, ec);
     fs::remove(raw, ec);
     fs::remove(cue, ec);
-    fs::remove(gdi, ec);
 }
 
 static void test_runtime_installation_validation() {
@@ -481,7 +474,7 @@ int main() {
     test_conversion_reports_real_monotonic_progress();
     test_supported_revision_promotes_native_backend();
     test_failed_reprepare_leaves_pending_manifest();
-    test_conversion_accepts_bin_cue_and_gdi_media();
+    test_conversion_accepts_bin_and_cue_media();
     test_runtime_installation_validation();
     test_device_id_helpers_are_stable();
     if (failures) {
