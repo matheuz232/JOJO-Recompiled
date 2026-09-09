@@ -67,7 +67,7 @@ if(WIN32)
 
   add_executable(jojo_win32_input_tests tests/test_win32_input.cpp)
   target_compile_definitions(jojo_win32_input_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
-  target_link_libraries(jojo_win32_input_tests PUBLIC jojo_win32_input_host)
+  target_link_libraries(jojo_win32_input_tests PRIVATE jojo_win32_input_host)
   add_test(NAME jojo_win32_input_tests COMMAND jojo_win32_input_tests)
 endif()
 
