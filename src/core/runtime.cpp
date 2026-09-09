@@ -258,6 +258,13 @@ Result<Ps1BootReport> bootstrap_runtime_checkpoint_to_file(
     return report;
 }
 
+Result<Ps1BootReport> bootstrap_runtime_local_evidence_to_file(
+    const std::filesystem::path& install_root,
+    const std::filesystem::path& report_path) {
+    return bootstrap_runtime_checkpoint_to_file(
+        install_root, report_path, ps1_local_evidence_options());
+}
+
 Result<void> bootstrap_runtime(const std::filesystem::path& install_root) {
     Ps1BootOptions options{};
     options.instruction_budget = 10000u;
