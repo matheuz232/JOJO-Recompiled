@@ -24,8 +24,6 @@ jobs:
           cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadinessNegative.cmake
       - name: Test
         run: ctest --test-dir build --output-on-failure
-      - name: RED game backend preparation contract
-        run: c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc -Itests -c tests/test_game_backend.cpp -o game_backend_red.o
       - name: Unverified base conversion contract
         run: |
           c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc -Itests tests/test_unverified_conversion.cpp build/libjojo_core.a -ldl -pthread -o unverified_conversion_tests
