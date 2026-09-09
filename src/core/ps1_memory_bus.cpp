@@ -6,6 +6,9 @@
 namespace jojo {
 namespace {
 
+constexpr std::uint32_t kInterruptMaskAddress = 0x1F801074u;
+constexpr std::uint16_t kInterruptMaskValidBits = 0x07FFu;
+
 std::uint8_t* mapped_bytes(std::uint32_t physical,
                            std::size_t width,
                            std::span<std::uint8_t> main_ram,
@@ -107,6 +110,10 @@ R3000aBusResult Ps1MemoryBus::write8(std::uint32_t address, std::uint8_t value) 
 R3000aBusResult Ps1MemoryBus::write16(std::uint32_t address, std::uint16_t value) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (*physical == kInterruptMaskAddress) {
+            interrupt_mask_ = static_cast<std::uint16_t>(value & kInterruptMaskValidBits);
+            return {R3000aBusStatus::ok, 0u};
+        }
         if (auto* p = mapped_bytes(*physical, 2u, main_ram_, scratchpad_)) {
             write_little_endian(p, 2u, value);
             return {R3000aBusStatus::ok, 0u};
@@ -142,6 +149,10 @@ Result<void> Ps1MemoryBus::load_main_ram(
     }
     std::copy(bytes.begin(), bytes.end(), main_ram_.begin() + *physical);
     return Result<void>::success();
+}
+
+std::uint16_t Ps1MemoryBus::interrupt_mask() const noexcept {
+    return interrupt_mask_;
 }
 
 const std::optional<Ps1UnsupportedAccess>&
