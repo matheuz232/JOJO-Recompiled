@@ -17,6 +17,10 @@ enum class ConversionStage {
     discovering_filesystem,
     identifying_revision,
     preparing_installation,
+    preparing_game_backend,
+    building_native_backend,
+    verifying_native_backend,
+    promoting_native_backend,
     writing_manifest,
     completed
 };
