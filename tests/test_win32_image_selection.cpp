@@ -28,6 +28,7 @@ constexpr int ID_SELECT_SOURCE = 1002;
 constexpr int ID_PREPARE = 1003;
 constexpr int ID_INSTALL_PATH = 1004;
 constexpr int ID_SELECT_INSTALL = 1005;
+constexpr int ID_RUN_CHECKPOINT = 1006;
 
 bool check(bool condition, const char* message) {
     if (!condition) {
@@ -142,6 +143,7 @@ void inspect_application(DWORD ui_thread) {
     const auto prepare_button = GetDlgItem(window, ID_PREPARE);
     const auto install_box = GetDlgItem(window, ID_INSTALL_PATH);
     const auto install_button = GetDlgItem(window, ID_SELECT_INSTALL);
+    const auto checkpoint_button = GetDlgItem(window, ID_RUN_CHECKPOINT);
 
     check(usable_control(window, source_box), "source-image path field is visible and usable");
     const bool can_select_source = check(usable_control(window, source_button),
@@ -150,6 +152,24 @@ void inspect_application(DWORD ui_thread) {
     check(usable_control(window, install_box), "install-root path field is visible and usable");
     const bool can_select_install = check(usable_control(window, install_button),
                                           "install-root chooser button is visible and usable");
+    const bool checkpoint_exists = check(checkpoint_button != nullptr,
+                                         "checkpoint button control 1006 exists");
+    if (checkpoint_exists) {
+        check(GetParent(checkpoint_button) == window && IsWindowVisible(checkpoint_button),
+              "checkpoint button is a visible child of the application window");
+        RECT bounds{}, client{};
+        GetWindowRect(checkpoint_button, &bounds);
+        MapWindowPoints(nullptr, window, reinterpret_cast<POINT*>(&bounds), 2);
+        GetClientRect(window, &client);
+        check(bounds.right > bounds.left && bounds.bottom > bounds.top &&
+                  bounds.left >= 0 && bounds.top >= 0 &&
+                  bounds.right <= client.right && bounds.bottom <= client.bottom,
+              "checkpoint button lies inside the application client area");
+        check(window_text(checkpoint_button) == L"EXECUTAR CHECKPOINT",
+              "checkpoint button text is exactly EXECUTAR CHECKPOINT");
+        check(!IsWindowEnabled(checkpoint_button),
+              "checkpoint button is disabled while the initial installation is absent");
+    }
     const bool can_drop = check((GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_ACCEPTFILES) != 0,
                                "application accepts files dropped from Explorer");
 
