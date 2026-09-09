@@ -4,9 +4,15 @@
 
 #include <bit>
 #include <cstdint>
+#include <optional>
 
 namespace jojo {
 namespace {
+
+constexpr std::uint32_t kCauseExcCodeMask = 0x0000007cu;
+constexpr std::uint32_t kCauseContextMask = 0xF0000000u; // BD, BT, CE
+constexpr std::uint32_t kStatusModeStackMask = 0x0000003fu;
+constexpr std::uint32_t kStatusBev = 1u << 22;
 
 std::uint32_t sign_extend16(std::uint16_t value) noexcept {
     return (value & 0x8000u) != 0u ? (0xffff0000u | static_cast<std::uint32_t>(value))
@@ -23,6 +29,14 @@ std::uint32_t arithmetic_shift_right(std::uint32_t value, std::uint32_t amount) 
     const auto shifted = value >> amount;
     if ((value & 0x80000000u) == 0u) return shifted;
     return shifted | (0xffffffffu << (32u - amount));
+}
+
+bool add_overflow(std::uint32_t lhs, std::uint32_t rhs, std::uint32_t result) noexcept {
+    return ((~(lhs ^ rhs) & (lhs ^ result)) & 0x80000000u) != 0u;
+}
+
+bool sub_overflow(std::uint32_t lhs, std::uint32_t rhs, std::uint32_t result) noexcept {
+    return (((lhs ^ rhs) & (lhs ^ result)) & 0x80000000u) != 0u;
 }
 
 void write_gpr(R3000aState& state, std::uint8_t reg, std::uint32_t value) noexcept {
@@ -50,6 +64,46 @@ R3000aStepResult boundary(
     return result;
 }
 
+R3000aStepResult enter_exception(
+    R3000aState& state,
+    R3000aExceptionCode code,
+    R3000aStage stage,
+    std::uint32_t fault_pc,
+    std::optional<std::uint32_t> opcode = std::nullopt,
+    std::optional<std::uint32_t> bad_vaddr = std::nullopt) noexcept {
+    const auto status_before = state.cop0.status;
+    state.cop0.cause &= ~(kCauseExcCodeMask | kCauseContextMask);
+    state.cop0.cause |= static_cast<std::uint32_t>(code) << 2;
+    state.cop0.epc = fault_pc;
+
+    if (code == R3000aExceptionCode::adel || code == R3000aExceptionCode::ades) {
+        if (bad_vaddr) state.cop0.bad_vaddr = *bad_vaddr;
+    }
+
+    const auto low_stack = status_before & kStatusModeStackMask;
+    state.cop0.status = (status_before & ~kStatusModeStackMask) |
+                        ((low_stack << 2) & kStatusModeStackMask);
+
+    const std::uint32_t vector = (status_before & kStatusBev) != 0u
+        ? 0xBFC00180u
+        : 0x80000080u;
+    state.pc = vector;
+    state.next_pc = vector + 4u;
+    state.delay_slot = {};
+    state.gpr[0] = 0u;
+
+    R3000aStepResult result{};
+    result.status = R3000aStepStatus::exception;
+    result.diagnostic.stage = stage;
+    result.diagnostic.pc = fault_pc;
+    result.diagnostic.opcode = opcode;
+    result.diagnostic.exception_code = code;
+    if (bad_vaddr) {
+        result.diagnostic.address = *bad_vaddr;
+    }
+    return result;
+}
+
 } // namespace
 
 R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
@@ -57,12 +111,13 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
     const std::uint32_t instruction_pc = state.pc;
 
     if ((instruction_pc & 3u) != 0u) {
-        auto result = boundary(
+        auto result = enter_exception(
             state,
-            R3000aBoundaryCode::architectural_operation_unimplemented,
+            R3000aExceptionCode::adel,
             R3000aStage::fetch,
+            instruction_pc,
+            std::nullopt,
             instruction_pc);
-        result.diagnostic.address = instruction_pc;
         result.diagnostic.access_width = 4u;
         return result;
     }
@@ -79,9 +134,9 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
         return result;
     }
     if (fetched.status == R3000aBusStatus::bus_error) {
-        auto result = boundary(
+        auto result = enter_exception(
             state,
-            R3000aBoundaryCode::architectural_operation_unimplemented,
+            R3000aExceptionCode::ibe,
             R3000aStage::fetch,
             instruction_pc);
         result.diagnostic.address = instruction_pc;
@@ -113,9 +168,35 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
         case MipsOp::srav:
             write_gpr(state, instruction.rd, arithmetic_shift_right(rt, rs));
             break;
+        case MipsOp::add: {
+            const auto value = rs + rt;
+            if (add_overflow(rs, rt, value)) {
+                return enter_exception(
+                    state,
+                    R3000aExceptionCode::overflow,
+                    R3000aStage::execute,
+                    instruction_pc,
+                    instruction.raw);
+            }
+            write_gpr(state, instruction.rd, value);
+            break;
+        }
         case MipsOp::addu:
             write_gpr(state, instruction.rd, rs + rt);
             break;
+        case MipsOp::sub: {
+            const auto value = rs - rt;
+            if (sub_overflow(rs, rt, value)) {
+                return enter_exception(
+                    state,
+                    R3000aExceptionCode::overflow,
+                    R3000aStage::execute,
+                    instruction_pc,
+                    instruction.raw);
+            }
+            write_gpr(state, instruction.rd, value);
+            break;
+        }
         case MipsOp::subu:
             write_gpr(state, instruction.rd, rs - rt);
             break;
@@ -137,6 +218,20 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
         case MipsOp::sltu:
             write_gpr(state, instruction.rd, rs < rt ? 1u : 0u);
             break;
+        case MipsOp::addi: {
+            const auto immediate = sign_extend16(instruction.immediate);
+            const auto value = rs + immediate;
+            if (add_overflow(rs, immediate, value)) {
+                return enter_exception(
+                    state,
+                    R3000aExceptionCode::overflow,
+                    R3000aStage::execute,
+                    instruction_pc,
+                    instruction.raw);
+            }
+            write_gpr(state, instruction.rt, value);
+            break;
+        }
         case MipsOp::addiu:
             write_gpr(state, instruction.rt, rs + sign_extend16(instruction.immediate));
             break;
@@ -160,6 +255,27 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
         case MipsOp::sltiu:
             write_gpr(state, instruction.rt, rs < sign_extend16(instruction.immediate) ? 1u : 0u);
             break;
+        case MipsOp::syscall:
+            return enter_exception(
+                state,
+                R3000aExceptionCode::syscall,
+                R3000aStage::execute,
+                instruction_pc,
+                instruction.raw);
+        case MipsOp::break_:
+            return enter_exception(
+                state,
+                R3000aExceptionCode::breakpoint,
+                R3000aStage::execute,
+                instruction_pc,
+                instruction.raw);
+        case MipsOp::reserved:
+            return enter_exception(
+                state,
+                R3000aExceptionCode::reserved_instruction,
+                R3000aStage::decode,
+                instruction_pc,
+                instruction.raw);
         default:
             supported = false;
             break;
