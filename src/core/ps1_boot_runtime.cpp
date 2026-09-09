@@ -27,7 +27,7 @@ void record_recent_trace(Ps1BootReport& report,
                          std::size_t capacity) {
     if (capacity == 0u) return;
     if (report.recent_trace.size() == capacity) {
-        report.recent_trace.erase(report.recent_trace.begin());
+        report.recent_trace.pop_front();
     }
     report.recent_trace.push_back(Ps1TraceSample{pc, opcode});
 }

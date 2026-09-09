@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <optional>
 #include <vector>
 
@@ -67,7 +68,7 @@ struct Ps1BootReport {
     std::uint64_t gpu_gp1_command_count{};
     std::uint64_t vram_write_count{};
     std::uint64_t presented_frames{};
-    std::vector<Ps1TraceSample> recent_trace;
+    std::deque<Ps1TraceSample> recent_trace;
     std::optional<R3000aDiagnostic> cpu_diagnostic{};
     std::optional<Ps1UnsupportedAccess> unsupported_access{};
 };
