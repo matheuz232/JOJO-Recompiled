@@ -5,10 +5,13 @@
 #include "core/conversion.h"
 #include "core/runtime.h"
 #include "core/device_id.h"
+#include "core/game_backend.h"
 #include "iso_fixture.h"
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -24,6 +27,45 @@ static fs::path temp_file(std::string_view name) {
     fs::remove(p, ec);
     fs::remove(p.string() + ".tmp", ec);
     return p;
+}
+
+static constexpr std::array<std::uint8_t, 12> kValidBoot{{
+    0x01, 0xE0,
+    0x02, 0x70,
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
+}};
+
+static constexpr std::array<std::uint8_t, 12> kUnsupportedBoot{{
+    0xFF, 0xFF,
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
+}};
+
+static std::uint64_t test_fnv1a64(std::span<const std::uint8_t> bytes) {
+    std::uint64_t hash = 14695981039346656037ull;
+    for (const auto byte : bytes) {
+        hash ^= byte;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+static jojo::GameRevisionProfile profile_for_boot(
+    std::string revision_id,
+    const std::array<std::uint8_t, 12>& boot) {
+    return {
+        std::move(revision_id),
+        {
+            {"/1ST_READ.BIN", 12u, test_fnv1a64(boot)},
+            {"/DATA/ASSET.DAT", 5u, 0x65f9a54a4f1d65c8ull},
+        }
+    };
 }
 
 static jojo::GameRevisionProfile synthetic_revision_profile() {
@@ -253,6 +295,92 @@ static void test_conversion_reports_real_monotonic_progress() {
     fs::remove_all(install, ec);
 }
 
+static void test_supported_revision_promotes_native_backend() {
+    const auto source = temp_file("usa_promotion.iso");
+    const auto install = fs::temp_directory_path() / "jojo_recompiled_usa_promotion_test";
+    std::error_code ec;
+    fs::remove_all(install, ec);
+    test_iso::write_image(source);
+    test_iso::install_dreamcast_ip_metadata(source);
+    test_iso::overwrite_boot_program_12(source, kValidBoot);
+
+    jojo::ConversionOptions options{};
+    options.revision_profiles.push_back(
+        profile_for_boot(std::string(jojo::kJojoUsaObservedRevisionId), kValidBoot));
+    std::vector<jojo::ConversionProgress> events;
+    const auto converted = jojo::convert_image(
+        source, install, options,
+        [&](const jojo::ConversionProgress& event) { events.push_back(event); });
+    CHECK(converted);
+    if (converted) {
+        CHECK(converted.value.revision_id == jojo::kJojoUsaObservedRevisionId);
+        CHECK(converted.value.backend == "native-ready");
+        CHECK(jojo::has_complete_native_backend_metadata(converted.value));
+    }
+    CHECK(jojo::bootstrap_runtime(install));
+
+    bool saw_preparing_backend = false;
+    bool saw_building_backend = false;
+    bool saw_verifying_backend = false;
+    bool saw_promoting_backend = false;
+    int previous = -1;
+    for (const auto& event : events) {
+        CHECK(event.percent >= previous);
+        previous = event.percent;
+        saw_preparing_backend = saw_preparing_backend ||
+            event.stage == jojo::ConversionStage::preparing_game_backend;
+        saw_building_backend = saw_building_backend ||
+            event.stage == jojo::ConversionStage::building_native_backend;
+        saw_verifying_backend = saw_verifying_backend ||
+            event.stage == jojo::ConversionStage::verifying_native_backend;
+        saw_promoting_backend = saw_promoting_backend ||
+            event.stage == jojo::ConversionStage::promoting_native_backend;
+    }
+    CHECK(saw_preparing_backend);
+    CHECK(saw_building_backend);
+    CHECK(saw_verifying_backend);
+    CHECK(saw_promoting_backend);
+
+    fs::remove(source, ec);
+    fs::remove_all(install, ec);
+}
+
+static void test_failed_reprepare_leaves_pending_manifest() {
+    const auto source = temp_file("usa_reprepare.iso");
+    const auto install = fs::temp_directory_path() / "jojo_recompiled_usa_reprepare_test";
+    std::error_code ec;
+    fs::remove_all(install, ec);
+    test_iso::write_image(source);
+    test_iso::install_dreamcast_ip_metadata(source);
+    test_iso::overwrite_boot_program_12(source, kValidBoot);
+
+    jojo::ConversionOptions good_options{};
+    good_options.revision_profiles.push_back(
+        profile_for_boot(std::string(jojo::kJojoUsaObservedRevisionId), kValidBoot));
+    const auto first = jojo::convert_image(source, install, good_options);
+    CHECK(first);
+    if (first) CHECK(first.value.backend == "native-ready");
+    CHECK(jojo::bootstrap_runtime(install));
+
+    test_iso::overwrite_boot_program_12(source, kUnsupportedBoot);
+    jojo::ConversionOptions bad_options{};
+    bad_options.revision_profiles.push_back(
+        profile_for_boot(std::string(jojo::kJojoUsaObservedRevisionId), kUnsupportedBoot));
+    const auto failed = jojo::convert_image(source, install, bad_options);
+    CHECK(!failed);
+    CHECK(failed.error == jojo::ErrorCode::backend_unavailable);
+
+    const auto pending = jojo::load_conversion_manifest(install / "game_manifest.ini");
+    CHECK(pending);
+    if (pending) CHECK(pending.value.backend == "pending-game-specific-recompiler");
+    const auto boot = jojo::bootstrap_runtime(install);
+    CHECK(!boot);
+    CHECK(boot.error == jojo::ErrorCode::backend_unavailable);
+
+    fs::remove(source, ec);
+    fs::remove_all(install, ec);
+}
+
 static void test_conversion_accepts_bin_cue_and_gdi_media() {
     const auto iso = temp_file("multi_media_source.iso");
     const auto raw = temp_file("multi_media_track.bin");
@@ -277,21 +405,23 @@ static void test_conversion_accepts_bin_cue_and_gdi_media() {
         {raw, "bin"}, {cue, "cue"}, {gdi, "gdi"}
     };
     std::error_code ec;
-    for (const auto& [source, expected_format] : media) {
+    for (const auto& [source_path, expected_format] : media) {
         const auto install = fs::temp_directory_path() /
             ("jojo_recompiled_track_conversion_" + expected_format);
         fs::remove_all(install, ec);
-        const auto converted = jojo::convert_image(source, install, synthetic_conversion_options());
+        const auto converted = jojo::convert_image(source_path, install, synthetic_conversion_options());
         CHECK(converted);
         if (converted) {
             CHECK(converted.value.source_format == expected_format);
             CHECK(converted.value.revision_id == "synthetic-test-revision");
+            CHECK(converted.value.backend == "pending-game-specific-recompiler");
         }
         const auto manifest = jojo::load_conversion_manifest(install / "game_manifest.ini");
         CHECK(manifest);
         if (manifest) {
             CHECK(manifest.value.source_format == expected_format);
             CHECK(manifest.value.revision_id == "synthetic-test-revision");
+            CHECK(manifest.value.backend == "pending-game-specific-recompiler");
         }
         fs::remove_all(install, ec);
     }
@@ -349,6 +479,8 @@ int main() {
     test_conversion_creates_source_independent_installation();
     test_conversion_rejects_unknown_revision_before_installation();
     test_conversion_reports_real_monotonic_progress();
+    test_supported_revision_promotes_native_backend();
+    test_failed_reprepare_leaves_pending_manifest();
     test_conversion_accepts_bin_cue_and_gdi_media();
     test_runtime_installation_validation();
     test_device_id_helpers_are_stable();
