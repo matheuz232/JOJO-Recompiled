@@ -40,7 +40,7 @@ static void test_mount_and_root_listing() {
         CHECK(entries);
         if (entries) {
             CHECK(entries.value.size() == 2);
-            CHECK(entries.value[0].name == "1ST_READ.BIN");
+            CHECK(entries.value[0].name == "BOOT.BIN");
             CHECK(!entries.value[0].is_directory);
             CHECK(entries.value[1].name == "DATA");
             CHECK(entries.value[1].is_directory);
@@ -62,13 +62,13 @@ static void test_nested_lookup_and_bounded_read() {
             CHECK(data.value.size() == 1);
             CHECK(data.value[0].name == "ASSET.DAT");
         }
-        const auto boot = jojo::read_iso9660_file(mounted.value, "/1st_read.bin");
+        const auto boot = jojo::read_iso9660_file(mounted.value, "/boot.bin");
         CHECK(boot);
-        if (boot) CHECK(std::string(boot.value.begin(), boot.value.end()) == "HELLO-SH4!!!");
+        if (boot) CHECK(std::string(boot.value.begin(), boot.value.end()) == "HELLO-ISO!!!");
         const auto asset = jojo::read_iso9660_file(mounted.value, "DATA/asset.dat");
         CHECK(asset);
         if (asset) CHECK(std::string(asset.value.begin(), asset.value.end()) == "ABCDE");
-        CHECK(!jojo::read_iso9660_file(mounted.value, "/DATA/../1ST_READ.BIN"));
+        CHECK(!jojo::read_iso9660_file(mounted.value, "/DATA/../BOOT.BIN"));
     }
     std::error_code ec;
     fs::remove(path, ec);
@@ -90,7 +90,7 @@ static void test_rejects_bad_pvd_and_out_of_bounds_entry() {
         std::fstream io(bad_extent, std::ios::in | std::ios::out | std::ios::binary);
         std::vector<char> bytes(24 * test_iso::sector);
         io.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-        const std::string needle = "1ST_READ.BIN;1";
+        const std::string needle = "BOOT.BIN;1";
         const auto it = std::search(bytes.begin(), bytes.end(), needle.begin(), needle.end());
         CHECK(it != bytes.end());
         if (it != bytes.end()) {
@@ -120,7 +120,7 @@ static void test_revision_matcher() {
         jojo::GameRevisionProfile profile{
             "synthetic-test-revision",
             {
-                {"/1ST_READ.BIN", 12, test_fnv1a64("HELLO-SH4!!!")},
+                {"/BOOT.BIN", 12, test_fnv1a64("HELLO-ISO!!!")},
                 {"/DATA/ASSET.DAT", 5, test_fnv1a64("ABCDE")},
             }
         };
@@ -146,7 +146,7 @@ static void test_revision_mismatch_reports_profile_and_path() {
         jojo::GameRevisionProfile profile{
             "synthetic-test-revision",
             {
-                {"/1ST_READ.BIN", 12, test_fnv1a64("HELLO-SH4!!!")},
+                {"/BOOT.BIN", 12, test_fnv1a64("HELLO-ISO!!!")},
                 {"/DATA/ASSET.DAT", 5, test_fnv1a64("ABCDE") ^ 1ull},
             }
         };
@@ -177,9 +177,9 @@ static void test_track_aware_ps1_media_mounts_same_iso9660() {
         const auto mounted = jojo::open_iso9660(media);
         CHECK(mounted);
         if (mounted) {
-            const auto boot = jojo::read_iso9660_file(mounted.value, "/1ST_READ.BIN");
+            const auto boot = jojo::read_iso9660_file(mounted.value, "/BOOT.BIN");
             CHECK(boot);
-            if (boot) CHECK(std::string(boot.value.begin(), boot.value.end()) == "HELLO-SH4!!!");
+            if (boot) CHECK(std::string(boot.value.begin(), boot.value.end()) == "HELLO-ISO!!!");
         }
     }
     std::error_code ec;

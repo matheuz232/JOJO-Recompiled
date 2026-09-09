@@ -1,6 +1,5 @@
 #pragma once
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -60,10 +59,10 @@ inline std::filesystem::path write_image(const std::filesystem::path& path) {
     std::size_t root = 20 * sector;
     root += dir_record(image, root, 20, static_cast<std::uint32_t>(sector), 2, {}, 0);
     root += dir_record(image, root, 20, static_cast<std::uint32_t>(sector), 2, {}, 1);
-    root += dir_record(image, root, 21, 12, 0, "1ST_READ.BIN;1");
+    root += dir_record(image, root, 21, 12, 0, "BOOT.BIN;1");
     root += dir_record(image, root, 22, static_cast<std::uint32_t>(sector), 2, "DATA");
 
-    const std::string_view boot = "HELLO-SH4!!!";
+    const std::string_view boot = "HELLO-ISO!!!";
     std::copy(boot.begin(), boot.end(), image.begin() + static_cast<std::ptrdiff_t>(21 * sector));
 
     std::size_t data = 22 * sector;
@@ -100,42 +99,5 @@ inline std::filesystem::path write_raw2352_from_iso(
     std::ofstream out(raw_path, std::ios::binary | std::ios::trunc);
     out.write(reinterpret_cast<const char*>(raw.data()), static_cast<std::streamsize>(raw.size()));
     return raw_path;
-}
-
-inline void write_ascii_field(const std::filesystem::path& path,
-                              std::streamoff offset,
-                              std::size_t width,
-                              std::string_view text) {
-    std::fstream io(path, std::ios::in | std::ios::out | std::ios::binary);
-    std::string field(width, ' ');
-    std::copy_n(text.begin(), std::min(width, text.size()), field.begin());
-    io.seekp(offset);
-    io.write(field.data(), static_cast<std::streamsize>(field.size()));
-}
-
-inline void install_dreamcast_ip_metadata(
-    const std::filesystem::path& path,
-    std::string_view device_info = "GD-ROM1/1",
-    std::string_view boot_filename = "1ST_READ.BIN") {
-    write_ascii_field(path, 0x000, 16, "SEGA SEGAKATANA ");
-    write_ascii_field(path, 0x010, 16, "SEGA ENTERPRISES");
-    write_ascii_field(path, 0x020, 16, device_info);
-    write_ascii_field(path, 0x030, 8, "JUE");
-    write_ascii_field(path, 0x038, 8, "E000F10");
-    write_ascii_field(path, 0x040, 10, "T-TEST0001");
-    write_ascii_field(path, 0x04A, 6, "V1.001");
-    write_ascii_field(path, 0x050, 16, "20000101");
-    write_ascii_field(path, 0x060, 16, boot_filename);
-    write_ascii_field(path, 0x070, 16, "OPENAI TEST");
-    write_ascii_field(path, 0x080, 128, "JOJO RECOMPILED SYNTHETIC");
-}
-
-inline void overwrite_boot_program_12(
-    const std::filesystem::path& path,
-    const std::array<std::uint8_t, 12>& bytes) {
-    std::fstream io(path, std::ios::in | std::ios::out | std::ios::binary);
-    io.seekp(static_cast<std::streamoff>(21 * sector));
-    io.write(reinterpret_cast<const char*>(bytes.data()),
-             static_cast<std::streamsize>(bytes.size()));
 }
 }

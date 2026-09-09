@@ -9,6 +9,7 @@ else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 enable_testing()
+
 add_library(jojo_core STATIC
   src/core/version.cpp
   src/core/settings.cpp
@@ -25,28 +26,9 @@ add_library(jojo_core STATIC
   src/core/ps1_system_cnf.cpp
   src/core/ps1_exe.cpp
   src/core/ps1_installation.cpp
-  src/core/dreamcast_boot.cpp
-  src/core/dreamcast_analysis.cpp
-  src/core/dreamcast_memory.cpp
-  src/core/dreamcast_bus.cpp
-  src/core/dreamcast_system_asic.cpp
-  src/core/dreamcast_interrupts.cpp
-  src/core/dreamcast_pvr2.cpp
-  src/core/dreamcast_boot_runner.cpp
-  src/core/sh4_decoder.cpp
-  src/core/sh4_opcode_census.cpp
-  src/core/sh4_cfg.cpp
-  src/core/sh4_ir.cpp
-  src/core/sh4_reference_executor.cpp
-  src/core/sh4_reference_boundary.cpp
-  src/core/sh4_reference_bus.cpp
-  src/core/sh4_interrupt_entry.cpp
   src/core/revision.cpp
   src/core/conversion.cpp
   src/core/runtime.cpp
-  src/core/native_backend.cpp
-  src/core/native_x64.cpp
-  src/core/game_backend.cpp
   src/core/device_id.cpp
   src/core/semver.cpp
   src/core/sha256.cpp
@@ -60,33 +42,40 @@ target_include_directories(jojo_core PUBLIC src)
 if(CMAKE_DL_LIBS)
   target_link_libraries(jojo_core PUBLIC ${CMAKE_DL_LIBS})
 endif()
+
 if(WIN32)
   add_library(jojo_win32_input_host STATIC src/platform/windows/controller_win32.cpp)
   target_compile_definitions(jojo_win32_input_host PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
   target_link_libraries(jojo_win32_input_host PUBLIC jojo_core setupapi hid user32)
+
   add_executable(jojo_recompiled WIN32 src/app_win32/main.cpp src/app_win32/presentation_host.cpp)
   set_target_properties(jojo_recompiled PROPERTIES OUTPUT_NAME "JOJO-Recompiled")
   target_compile_definitions(jojo_recompiled PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
   target_link_libraries(jojo_recompiled PRIVATE jojo_core jojo_win32_input_host shell32 ole32 uuid d3d11 dxgi)
+
   add_executable(jojo_win32_image_selection_tests tests/test_win32_image_selection.cpp src/app_win32/main.cpp)
   target_compile_definitions(jojo_win32_image_selection_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
   target_link_libraries(jojo_win32_image_selection_tests PRIVATE jojo_core shell32 ole32 uuid)
   add_test(NAME jojo_win32_image_selection_tests COMMAND jojo_win32_image_selection_tests)
   set_tests_properties(jojo_win32_image_selection_tests PROPERTIES TIMEOUT 45)
+
   add_executable(jojo_win32_presentation_tests tests/test_win32_presentation.cpp src/app_win32/presentation_host.cpp)
   target_compile_definitions(jojo_win32_presentation_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
   target_link_libraries(jojo_win32_presentation_tests PRIVATE jojo_core d3d11 dxgi)
   add_test(NAME jojo_win32_presentation_tests COMMAND jojo_win32_presentation_tests)
+
   add_executable(jojo_win32_input_tests tests/test_win32_input.cpp)
   target_compile_definitions(jojo_win32_input_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
   target_link_libraries(jojo_win32_input_tests PRIVATE jojo_win32_input_host)
   add_test(NAME jojo_win32_input_tests COMMAND jojo_win32_input_tests)
 endif()
+
 function(add_jojo_test target source)
   add_executable(${target} ${source})
   target_link_libraries(${target} PRIVATE jojo_core)
   add_test(NAME ${target} COMMAND ${target})
 endfunction()
+
 add_jojo_test(jojo_tests tests/test_main.cpp)
 add_jojo_test(jojo_iso_tests tests/test_iso9660.cpp)
 add_jojo_test(jojo_media_tests tests/test_disc_media.cpp)
@@ -96,47 +85,6 @@ add_jojo_test(jojo_ps1_manifest_tests tests/test_ps1_manifest.cpp)
 add_jojo_test(jojo_ps1_installation_tests tests/test_ps1_installation.cpp)
 add_jojo_test(jojo_ps1_conversion_tests tests/test_ps1_conversion.cpp)
 add_jojo_test(jojo_ps1_runtime_installation_tests tests/test_ps1_runtime_installation.cpp)
-add_jojo_test(jojo_boot_tests tests/test_dreamcast_boot.cpp)
-add_jojo_test(jojo_sh4_tests tests/test_sh4_decoder.cpp)
-add_jojo_test(jojo_sh4_cfg_tests tests/test_sh4_cfg.cpp)
-add_jojo_test(jojo_analysis_tests tests/test_dreamcast_analysis.cpp)
-add_jojo_test(jojo_sh4_ir_tests tests/test_sh4_ir.cpp)
-add_jojo_test(jojo_sh4_reference_tests tests/test_sh4_reference_executor.cpp)
-add_jojo_test(jojo_sh4_integer_pipeline_tests tests/test_sh4_integer_pipeline.cpp)
-add_jojo_test(jojo_sh4_memory_pipeline_tests tests/test_sh4_memory_pipeline.cpp)
-add_jojo_test(jojo_sh4_addressing_pipeline_tests tests/test_sh4_addressing_pipeline.cpp)
-add_jojo_test(jojo_sh4_gbr_memory_tests tests/test_sh4_gbr_memory.cpp)
-add_jojo_test(jojo_sh4_gbr_register_transfer_tests tests/test_sh4_gbr_register_transfer.cpp)
-add_jojo_test(jojo_sh4_pr_mac_register_transfer_tests tests/test_sh4_pr_mac_register_transfer.cpp)
-add_jojo_test(jojo_sh4_multiply_tests tests/test_sh4_multiply.cpp)
-add_jojo_test(jojo_sh4_data_manipulation_tests tests/test_sh4_data_manipulation.cpp)
-add_jojo_test(jojo_sh4_carry_overflow_tests tests/test_sh4_carry_overflow.cpp)
-add_jojo_test(jojo_sh4_opcode_census_tests tests/test_sh4_opcode_census.cpp)
-add_jojo_test(jojo_dreamcast_executable_memory_tests tests/test_dreamcast_executable_memory.cpp)
-add_jojo_test(jojo_dreamcast_boot_runner_tests tests/test_dreamcast_boot_runner.cpp)
-add_jojo_test(jojo_sh4_memory_bus_tests tests/test_sh4_memory_bus.cpp)
-add_jojo_test(jojo_dreamcast_bus_diagnostics_tests tests/test_dreamcast_bus_diagnostics.cpp)
-add_jojo_test(jojo_dreamcast_system_asic_tests tests/test_dreamcast_system_asic.cpp)
-add_jojo_test(jojo_dreamcast_maple_tests tests/test_dreamcast_maple.cpp)
-add_jojo_test(jojo_sh4_interrupt_entry_tests tests/test_sh4_interrupt_entry.cpp)
-add_jojo_test(jojo_dreamcast_irq_delivery_tests tests/test_dreamcast_irq_delivery.cpp)
-add_jojo_test(jojo_sh4_block_boundary_tests tests/test_sh4_block_boundary.cpp)
-add_jojo_test(jojo_dreamcast_pvr2_vblank_tests tests/test_dreamcast_pvr2_vblank.cpp)
-add_jojo_test(jojo_sh4_fpu_constant_tests tests/test_sh4_fpu_constants.cpp)
-add_jojo_test(jojo_sh4_fpul_transfer_tests tests/test_sh4_fpul_transfers.cpp)
-add_jojo_test(jojo_sh4_fpscr_bank_tests tests/test_sh4_fpscr_banks.cpp)
-add_jojo_test(jojo_sh4_flds_fsts_tests tests/test_sh4_flds_fsts.cpp)
-add_jojo_test(jojo_sh4_fpu_mode_switch_tests tests/test_sh4_fpu_mode_switches.cpp)
-add_jojo_test(jojo_sh4_float_ftrc_tests tests/test_sh4_float_ftrc.cpp)
-add_jojo_test(jojo_sh4_fmov_register_tests tests/test_sh4_fmov_registers.cpp)
-add_jojo_test(jojo_sh4_fmov_memory_tests tests/test_sh4_fmov_memory.cpp)
-add_jojo_test(jojo_sh4_fpu_arithmetic_tests tests/test_sh4_fpu_arithmetic.cpp)
-add_jojo_test(jojo_sh4_fpu_compare_tests tests/test_sh4_fpu_compare.cpp)
-add_jojo_test(jojo_sh4_fpu_unary_tests tests/test_sh4_fpu_unary.cpp)
-add_jojo_test(jojo_sh4_fpu_completion_tests tests/test_sh4_fpu_completion.cpp)
-add_jojo_test(jojo_sh4_fpu_disable_tests tests/test_sh4_fpu_disable.cpp)
-add_jojo_test(jojo_native_backend_tests tests/test_native_backend.cpp)
-add_jojo_test(jojo_game_backend_tests tests/test_game_backend.cpp)
 add_jojo_test(jojo_presentation_tests tests/test_presentation.cpp)
 add_jojo_test(jojo_semver_tests tests/test_semver.cpp)
 add_jojo_test(jojo_sha256_tests tests/test_sha256.cpp)
@@ -146,11 +94,13 @@ add_jojo_test(jojo_training_tests tests/test_training.cpp)
 add_jojo_test(jojo_rollback_tests tests/test_rollback.cpp)
 add_jojo_test(jojo_online_session_tests tests/test_online_session.cpp)
 add_jojo_test(jojo_mod_policy_tests tests/test_mod_policy.cpp)
+
 function(add_jojo_native_mod_fixture target mod_id)
   add_library(${target} SHARED tests/fixtures/test_native_mod.cpp)
   target_include_directories(${target} PRIVATE src)
   target_compile_definitions(${target} PRIVATE JOJO_TEST_NATIVE_MOD_ID=\"${mod_id}\")
 endfunction()
+
 add_jojo_native_mod_fixture(jojo_native_mod_fixture_first native.first)
 add_jojo_native_mod_fixture(jojo_native_mod_fixture_second native.second)
 add_jojo_native_mod_fixture(jojo_native_mod_fixture_failure native.failure)
@@ -159,7 +109,18 @@ add_jojo_native_mod_fixture(jojo_native_mod_fixture_bad_abi native.badabi)
 target_compile_definitions(jojo_native_mod_fixture_bad_abi PRIVATE JOJO_TEST_NATIVE_MOD_ABI=2)
 add_jojo_native_mod_fixture(jojo_native_mod_fixture_no_export native.noexport)
 target_compile_definitions(jojo_native_mod_fixture_no_export PRIVATE JOJO_TEST_NATIVE_MOD_NO_EXPORT=1)
+
 add_executable(jojo_native_mod_loader_tests tests/test_native_mod_loader.cpp)
 target_link_libraries(jojo_native_mod_loader_tests PRIVATE jojo_core)
-add_dependencies(jojo_native_mod_loader_tests jojo_native_mod_fixture_first jojo_native_mod_fixture_second jojo_native_mod_fixture_failure jojo_native_mod_fixture_bad_abi jojo_native_mod_fixture_no_export)
-add_test(NAME jojo_native_mod_loader_tests COMMAND jojo_native_mod_loader_tests "$<TARGET_FILE:jojo_native_mod_fixture_first>" "$<TARGET_FILE:jojo_native_mod_fixture_second>" "$<TARGET_FILE:jojo_native_mod_fixture_failure>" "$<TARGET_FILE:jojo_native_mod_fixture_bad_abi>" "$<TARGET_FILE:jojo_native_mod_fixture_no_export>")
+add_dependencies(jojo_native_mod_loader_tests
+  jojo_native_mod_fixture_first
+  jojo_native_mod_fixture_second
+  jojo_native_mod_fixture_failure
+  jojo_native_mod_fixture_bad_abi
+  jojo_native_mod_fixture_no_export)
+add_test(NAME jojo_native_mod_loader_tests COMMAND jojo_native_mod_loader_tests
+  "$<TARGET_FILE:jojo_native_mod_fixture_first>"
+  "$<TARGET_FILE:jojo_native_mod_fixture_second>"
+  "$<TARGET_FILE:jojo_native_mod_fixture_failure>"
+  "$<TARGET_FILE:jojo_native_mod_fixture_bad_abi>"
+  "$<TARGET_FILE:jojo_native_mod_fixture_no_export>")
