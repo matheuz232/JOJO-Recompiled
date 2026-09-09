@@ -8,7 +8,7 @@
 namespace jojo {
 namespace {
 
-constexpr std::size_t kRecentTraceCapacity = 8u;
+constexpr std::size_t kRecentTraceCapacity = 16u;
 
 bool is_bios_table(std::uint32_t physical) noexcept {
     return physical == 0x000000A0u ||
