@@ -6,7 +6,15 @@
 #include "core/r3000a_state.h"
 #include "core/result.h"
 
+#include <cstdint>
+#include <optional>
+
 namespace jojo {
+
+struct Ps1BiosHeapState {
+    std::uint32_t base{};
+    std::uint32_t size{};
+};
 
 class Ps1BootRuntime {
 public:
@@ -18,12 +26,14 @@ public:
     [[nodiscard]] Ps1BootReport run(const Ps1BootOptions& options) noexcept;
 
     [[nodiscard]] const R3000aState& cpu_state() const noexcept;
+    [[nodiscard]] const std::optional<Ps1BiosHeapState>& bios_heap_state() const noexcept;
     [[nodiscard]] Ps1MemoryBus& bus() noexcept;
     [[nodiscard]] const Ps1MemoryBus& bus() const noexcept;
 
 private:
     Ps1MemoryBus bus_{};
     R3000aState cpu_{};
+    std::optional<Ps1BiosHeapState> bios_heap_state_{};
 };
 
 } // namespace jojo
