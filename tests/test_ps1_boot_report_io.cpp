@@ -22,7 +22,7 @@ static jojo::Ps1BootReport make_report(std::uint64_t retired) {
     report.last_pc = 0x800000A0u;
     report.bios_call_count = 1u;
     report.recent_bios_calls.push_back({0x800000A0u, 0x000000A0u, 0x0000003Fu});
-    report.recent_mmio.push_back({0x80010100u, 0x1F801070u, 4u, false, 0u});
+    report.recent_mmio.push_back({0x80010100u, 0x1F801070u, 4u, false, 0u, false});
     report.interrupts_accepted = 1u;
     report.dma_transfer_count = 2u;
     report.gpu_gp0_command_count = 3u;
@@ -55,6 +55,21 @@ int main() {
     CHECK(text.find("trace_1_pc=0x8001001c\n") != std::string::npos);
     CHECK(text.find("trace_1_opcode=0xac400000\n") != std::string::npos);
     CHECK(text.find("PS-X EXE") == std::string::npos);
+
+    auto mega = make_report(77u);
+    mega.diagnostic_probe_mode = true;
+    mega.speculative_mmio_count = 2u;
+    mega.recent_mmio.clear();
+    mega.recent_mmio.push_back({0x80020000u, 0x1F801080u, 4u, true, 0x12345678u, true});
+    mega.recent_mmio.push_back({0x80020004u, 0x1F801080u, 4u, false, 0x12345678u, true});
+    const auto mega_text = jojo::format_ps1_boot_report(mega);
+    CHECK(mega_text.find("format=jojo-mega-checkpoint-v1\n") == 0u);
+    CHECK(mega_text.find("diagnostic_probe_mode=1\n") != std::string::npos);
+    CHECK(mega_text.find("speculative_mmio_count=2\n") != std::string::npos);
+    CHECK(mega_text.find("mmio_event_count=2\n") != std::string::npos);
+    CHECK(mega_text.find("mmio_event_0_address=0x1f801080\n") != std::string::npos);
+    CHECK(mega_text.find("mmio_event_0_speculative=1\n") != std::string::npos);
+    CHECK(mega_text.find("mmio_event_1_value=0x12345678\n") != std::string::npos);
 
     const auto root = fs::temp_directory_path() / "jojo-m3a-report-io";
     const auto path = root / "diagnostics" / "m3a-checkpoint.txt";

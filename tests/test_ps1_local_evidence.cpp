@@ -70,14 +70,19 @@ int main() {
     CHECK(checkpoint);
     if (checkpoint) {
         CHECK(checkpoint.value.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
-        CHECK(checkpoint.value.instructions_retired == 1000000u);
-        CHECK(checkpoint.value.recent_trace.size() == 16u);
+        CHECK(checkpoint.value.instructions_retired == 10000000u);
+        CHECK(checkpoint.value.recent_trace.size() == 128u);
+        CHECK(checkpoint.value.diagnostic_probe_mode);
+        CHECK(checkpoint.value.speculative_mmio_count == 0u);
     }
 
     CHECK(fs::is_regular_file(report_path));
     const auto report = read_text(report_path);
-    CHECK(report.find("instructions_retired=1000000\n") != std::string::npos);
-    CHECK(report.find("trace_sample_count=16\n") != std::string::npos);
+    CHECK(report.find("format=jojo-mega-checkpoint-v1\n") == 0u);
+    CHECK(report.find("instructions_retired=10000000\n") != std::string::npos);
+    CHECK(report.find("trace_sample_count=128\n") != std::string::npos);
+    CHECK(report.find("diagnostic_probe_mode=1\n") != std::string::npos);
+    CHECK(report.find("speculative_mmio_count=0\n") != std::string::npos);
     CHECK(report.find("PS-X EXE") == std::string::npos);
     CHECK(read_text(manifest_path) == manifest_before);
     CHECK(regular_files_under(resolved.value.generation_dir) == files_before);

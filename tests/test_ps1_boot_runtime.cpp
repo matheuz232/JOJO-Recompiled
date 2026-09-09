@@ -53,9 +53,12 @@ static void test_budget_exhaustion_keeps_bounded_recent_trace() {
     }
 }
 
-static void test_local_evidence_options_are_deep_but_bounded() {
+static void test_local_evidence_options_are_mega_but_bounded() {
     const auto options = jojo::ps1_local_evidence_options();
-    CHECK(options.instruction_budget == 1000000u);
+    CHECK(options.instruction_budget == 10000000u);
+    CHECK(options.trace_capacity == 128u);
+    CHECK(options.diagnostic_mmio_probe);
+    CHECK(options.mmio_event_capacity == 256u);
 }
 
 static void test_bios_entry_stops_before_executing_bios_bytes() {
@@ -144,6 +147,49 @@ static void test_mmio_access_stops_with_structured_evidence() {
         CHECK(!report.unsupported_access->write);
     }
     CHECK(report.recent_mmio.size() == 1u);
+    if (!report.recent_mmio.empty()) {
+        CHECK(!report.recent_mmio.back().speculative);
+    }
+}
+
+static void test_mega_probe_continues_through_unknown_mmio_and_records_events() {
+    const std::vector<std::uint32_t> words{
+        test_mips::i(0x0Fu, 0u, 8u, 0x1F80u),
+        test_mips::i(0x0Du, 8u, 8u, 0x1080u),
+        test_mips::i(0x09u, 0u, 9u, 0x1234u),
+        test_mips::i(0x2Bu, 8u, 9u, 0u),
+        test_mips::i(0x23u, 8u, 10u, 0u),
+        0x00000000u,
+        test_mips::j(0x02u, 0x80010018u >> 2),
+        0x00000000u,
+    };
+
+    auto runtime = make_runtime(words);
+    jojo::Ps1BootOptions options{};
+    options.instruction_budget = 12u;
+    options.trace_capacity = 8u;
+    options.diagnostic_mmio_probe = true;
+    options.mmio_event_capacity = 4u;
+    const auto report = runtime.run(options);
+
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(report.instructions_retired == 12u);
+    CHECK(report.diagnostic_probe_mode);
+    CHECK(report.speculative_mmio_count == 2u);
+    CHECK(report.recent_mmio.size() == 2u);
+    if (report.recent_mmio.size() == 2u) {
+        CHECK(report.recent_mmio[0].address == 0x1F801080u);
+        CHECK(report.recent_mmio[0].width == 4u);
+        CHECK(report.recent_mmio[0].write);
+        CHECK(report.recent_mmio[0].value == 0x00001234u);
+        CHECK(report.recent_mmio[0].speculative);
+        CHECK(report.recent_mmio[1].address == 0x1F801080u);
+        CHECK(!report.recent_mmio[1].write);
+        CHECK(report.recent_mmio[1].value == 0x00001234u);
+        CHECK(report.recent_mmio[1].speculative);
+    }
+    CHECK(report.recent_trace.size() == 8u);
+    CHECK(runtime.cpu_state().gpr[10] == 0x00001234u);
 }
 
 static void test_deterministic_replay_matches_full_m3a_state() {
@@ -200,11 +246,12 @@ static void test_deterministic_replay_matches_full_m3a_state() {
 int main() {
     test_instruction_budget_is_explicit_stop_reason();
     test_budget_exhaustion_keeps_bounded_recent_trace();
-    test_local_evidence_options_are_deep_but_bounded();
+    test_local_evidence_options_are_mega_but_bounded();
     test_bios_entry_stops_before_executing_bios_bytes();
     test_a0_39_initheap_returns_to_ra_and_continues();
     test_a0_33_remains_unimplemented();
     test_mmio_access_stops_with_structured_evidence();
+    test_mega_probe_continues_through_unknown_mmio_and_records_events();
     test_deterministic_replay_matches_full_m3a_state();
     return failures ? 1 : 0;
 }
