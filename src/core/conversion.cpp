@@ -4,6 +4,7 @@
 #include <array>
 #include <charconv>
 #include <fstream>
+#include <limits>
 #include <string_view>
 #include <system_error>
 #ifdef _WIN32
@@ -63,6 +64,21 @@ Result<void> replace_file(const std::filesystem::path& temp,
 }
 }
 
+bool has_complete_native_backend_metadata(const ConversionManifest& m) noexcept {
+    if (m.boot_program_hash_hex.empty() ||
+        !m.backend_abi_version.has_value() ||
+        m.backend_program_hash.empty() ||
+        !m.backend_block_count.has_value() ||
+        !m.backend_native_block_count.has_value() ||
+        !m.backend_fallback_block_count.has_value() ||
+        !m.backend_native_code_bytes.has_value()) {
+        return false;
+    }
+    return *m.backend_native_block_count <= *m.backend_block_count &&
+           *m.backend_fallback_block_count ==
+               *m.backend_block_count - *m.backend_native_block_count;
+}
+
 Result<GameRevisionMatch> identify_observed_disc_revision(
     std::string_view source_format,
     std::uint64_t source_size,
@@ -82,6 +98,12 @@ Result<GameRevisionMatch> identify_observed_disc_revision(
 
 Result<void> save_conversion_manifest_atomic(const std::filesystem::path& path,
                                              const ConversionManifest& m) {
+    if (m.backend == "native-ready" && !has_complete_native_backend_metadata(m)) {
+        return Result<void>::failure(
+            ErrorCode::invalid_installation,
+            "native-ready manifest is missing complete native backend metadata");
+    }
+
     std::error_code ec;
     if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
     if (ec) {
@@ -104,6 +126,27 @@ Result<void> save_conversion_manifest_atomic(const std::filesystem::path& path,
         out << "hash_fnv1a64=" << m.hash_hex << '\n';
         out << "revision_id=" << m.revision_id << '\n';
         out << "backend=" << m.backend << '\n';
+        if (!m.boot_program_hash_hex.empty()) {
+            out << "boot_program_hash_fnv1a64=" << m.boot_program_hash_hex << '\n';
+        }
+        if (m.backend_abi_version.has_value()) {
+            out << "backend_abi_version=" << *m.backend_abi_version << '\n';
+        }
+        if (!m.backend_program_hash.empty()) {
+            out << "backend_program_hash=" << m.backend_program_hash << '\n';
+        }
+        if (m.backend_block_count.has_value()) {
+            out << "backend_block_count=" << *m.backend_block_count << '\n';
+        }
+        if (m.backend_native_block_count.has_value()) {
+            out << "backend_native_block_count=" << *m.backend_native_block_count << '\n';
+        }
+        if (m.backend_fallback_block_count.has_value()) {
+            out << "backend_fallback_block_count=" << *m.backend_fallback_block_count << '\n';
+        }
+        if (m.backend_native_code_bytes.has_value()) {
+            out << "backend_native_code_bytes=" << *m.backend_native_code_bytes << '\n';
+        }
         out.flush();
         if (!out) {
             return Result<void>::failure(ErrorCode::io_error,
@@ -139,11 +182,44 @@ Result<ConversionManifest> load_conversion_manifest(const std::filesystem::path&
         } else if (key == "hash_fnv1a64") m.hash_hex = value;
         else if (key == "revision_id") m.revision_id = value;
         else if (key == "backend") m.backend = value;
+        else if (key == "boot_program_hash_fnv1a64") m.boot_program_hash_hex = value;
+        else if (key == "backend_abi_version") {
+            auto parsed = parse_u64(value);
+            if (!parsed) return Result<ConversionManifest>::failure(parsed.error, parsed.detail);
+            if (parsed.value > std::numeric_limits<std::uint32_t>::max()) {
+                return Result<ConversionManifest>::failure(
+                    ErrorCode::invalid_installation,
+                    "backend ABI version exceeds uint32 range");
+            }
+            m.backend_abi_version = static_cast<std::uint32_t>(parsed.value);
+        } else if (key == "backend_program_hash") m.backend_program_hash = value;
+        else if (key == "backend_block_count") {
+            auto parsed = parse_u64(value);
+            if (!parsed) return Result<ConversionManifest>::failure(parsed.error, parsed.detail);
+            m.backend_block_count = parsed.value;
+        } else if (key == "backend_native_block_count") {
+            auto parsed = parse_u64(value);
+            if (!parsed) return Result<ConversionManifest>::failure(parsed.error, parsed.detail);
+            m.backend_native_block_count = parsed.value;
+        } else if (key == "backend_fallback_block_count") {
+            auto parsed = parse_u64(value);
+            if (!parsed) return Result<ConversionManifest>::failure(parsed.error, parsed.detail);
+            m.backend_fallback_block_count = parsed.value;
+        } else if (key == "backend_native_code_bytes") {
+            auto parsed = parse_u64(value);
+            if (!parsed) return Result<ConversionManifest>::failure(parsed.error, parsed.detail);
+            m.backend_native_code_bytes = parsed.value;
+        }
     }
     if (m.manifest_version != "1" || m.converter_version.empty() || m.source_name.empty() ||
         m.source_format.empty() || m.hash_hex.empty() || m.backend.empty()) {
         return Result<ConversionManifest>::failure(ErrorCode::invalid_installation,
                                                    "manifest is missing required fields");
+    }
+    if (m.backend == "native-ready" && !has_complete_native_backend_metadata(m)) {
+        return Result<ConversionManifest>::failure(
+            ErrorCode::invalid_installation,
+            "native-ready manifest is missing complete native backend metadata");
     }
     return Result<ConversionManifest>::success(std::move(m));
 }
