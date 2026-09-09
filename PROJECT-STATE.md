@@ -10,8 +10,8 @@
 - M3A verification workflow: `34334677057` (run #1339)
 - M3B evidence-capture code-head commit: `c460d34c8e46f0fddae026fbdcf570c1e7e3bedf`
 - M3B evidence-capture verification workflow: `34404397974` (run #1349)
-- M3C deep-evidence code-head commit: `323ce3f6ec38eb142294ee0356e8e3d42517cbf6`
-- M3C verification workflow: `34409918112` (run #1361)
+- M3C deep-evidence code-head commit: `b099cc5bee6b0ab14301daa966a45b2d9409a6c2`
+- M3C verification workflow: `34411091433` (run #1367)
 - Linux job: passed configure, build, production-readiness gate, PS1 active-architecture gate, CTest, observed-disc revision contract, and UDP transport contract.
 - Windows job: passed configure, Release build, production-readiness gate, PS1 active-architecture gate, Release CTest, observed-disc revision contract, UDP transport contract, and artifact upload.
 - Shipping policy: one `JOJO-Recompiled.exe`.
@@ -73,13 +73,13 @@ That report is evidence that the commercial executable retired 10,000 instructio
 Because the first real report exhausted the 10,000-instruction budget before reaching a recognized boundary, M3C deepens evidence capture without fabricating any BIOS/device success:
 
 - the local evidence policy is explicitly bounded at **1,000,000 instructions**;
-- the report retains only the most recent **8 PC/opcode samples** as a bounded trace window;
+- the report retains only the most recent **16 PC/opcode samples** as a bounded trace window;
 - trace samples are serialized as additive `trace_*` fields in the existing derived report format;
 - the installation-backed deep-evidence API reuses validation, bounded R3000A execution and atomic report writing;
 - `EXECUTAR CHECKPOINT` now invokes that deep-evidence API directly;
 - no BIOS/HLE, MMIO device, GPU, CD-ROM, DMA, timer, SPU or GTE behavior was added by M3C.
 
-Synthetic RED→GREEN coverage proves the one-million-instruction policy with a looping PS1 fixture, bounded eight-sample trace capture, trace report serialization and no mutation of the prepared installation. GitHub Actions run `34409918112` on code-head `323ce3f6ec38eb142294ee0356e8e3d42517cbf6` passed both `Portable core / Linux` and `Windows x64 / MSVC 2022`, including the Windows executable upload.
+Synthetic RED→GREEN coverage proves the one-million-instruction policy with a looping PS1 fixture, bounded sixteen-sample trace capture, trace report serialization and no mutation of the prepared installation. GitHub Actions run `34411091433` on code-head `b099cc5bee6b0ab14301daa966a45b2d9409a6c2` passed both `Portable core / Linux` and `Windows x64 / MSVC 2022`, including the Windows executable upload.
 
 ## Truth boundary
 
@@ -122,7 +122,7 @@ Canonical status remains in `docs/architecture/PRODUCTION-READINESS.tsv`.
 
 Run the M3C Windows executable against the already prepared supported JoJo installation and click `EXECUTAR CHECKPOINT`. Inspect only the bounded derived report at `%LOCALAPPDATA%/JOJO Recompiled/diagnostics/m3a-checkpoint.txt`.
 
-If the deeper report identifies an A0/B0/C0 BIOS selector, CPU boundary or MMIO/device address, reproduce exactly that boundary with the smallest synthetic RED→GREEN contract and implement only the JoJo-required service. If it again ends by instruction-budget exhaustion, use the eight bounded `trace_*` samples to distinguish forward initialization from a repeated execution loop before increasing the budget again.
+If the deeper report identifies an A0/B0/C0 BIOS selector, CPU boundary or MMIO/device address, reproduce exactly that boundary with the smallest synthetic RED→GREEN contract and implement only the JoJo-required service. If it again ends by instruction-budget exhaustion, use the sixteen bounded `trace_*` samples to distinguish forward initialization from a repeated execution loop before increasing the budget again.
 
 Keep MIPS CFG/IR and Windows x64 lowering downstream of visible boot. This project has no compatibility target for unrelated games.
 
