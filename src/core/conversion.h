@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -16,6 +17,10 @@ enum class ConversionStage {
     discovering_filesystem,
     identifying_revision,
     preparing_installation,
+    preparing_game_backend,
+    building_native_backend,
+    verifying_native_backend,
+    promoting_native_backend,
     writing_manifest,
     completed
 };
@@ -43,8 +48,17 @@ struct ConversionManifest {
     std::string hash_hex;
     std::string revision_id;
     std::string backend{"pending-game-specific-recompiler"};
+    std::string boot_program_hash_hex;
+    std::optional<std::uint32_t> backend_abi_version;
+    std::string backend_program_hash;
+    std::optional<std::uint64_t> backend_block_count;
+    std::optional<std::uint64_t> backend_native_block_count;
+    std::optional<std::uint64_t> backend_fallback_block_count;
+    std::optional<std::uint64_t> backend_native_code_bytes;
 };
 
+[[nodiscard]] bool has_complete_native_backend_metadata(
+    const ConversionManifest& manifest) noexcept;
 [[nodiscard]] Result<GameRevisionMatch> identify_observed_disc_revision(
     std::string_view source_format,
     std::uint64_t source_size,

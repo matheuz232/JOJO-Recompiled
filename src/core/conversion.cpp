@@ -1,9 +1,11 @@
 #include "core/conversion.h"
 #include "core/disc_image.h"
+#include "core/game_backend.h"
 #include "core/version.h"
 #include <array>
 #include <charconv>
 #include <fstream>
+#include <limits>
 #include <string_view>
 #include <system_error>
 #ifdef _WIN32
@@ -63,6 +65,21 @@ Result<void> replace_file(const std::filesystem::path& temp,
 }
 }
 
+bool has_complete_native_backend_metadata(const ConversionManifest& m) noexcept {
+    if (m.boot_program_hash_hex.empty() ||
+        !m.backend_abi_version.has_value() ||
+        m.backend_program_hash.empty() ||
+        !m.backend_block_count.has_value() ||
+        !m.backend_native_block_count.has_value() ||
+        !m.backend_fallback_block_count.has_value() ||
+        !m.backend_native_code_bytes.has_value()) {
+        return false;
+    }
+    return *m.backend_native_block_count <= *m.backend_block_count &&
+           *m.backend_fallback_block_count ==
+               *m.backend_block_count - *m.backend_native_block_count;
+}
+
 Result<GameRevisionMatch> identify_observed_disc_revision(
     std::string_view source_format,
     std::uint64_t source_size,
@@ -82,6 +99,12 @@ Result<GameRevisionMatch> identify_observed_disc_revision(
 
 Result<void> save_conversion_manifest_atomic(const std::filesystem::path& path,
                                              const ConversionManifest& m) {
+    if (m.backend == "native-ready" && !has_complete_native_backend_metadata(m)) {
+        return Result<void>::failure(
+            ErrorCode::invalid_installation,
+            "native-ready manifest is missing complete native backend metadata");
+    }
+
     std::error_code ec;
     if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
     if (ec) {
@@ -104,6 +127,27 @@ Result<void> save_conversion_manifest_atomic(const std::filesystem::path& path,
         out << "hash_fnv1a64=" << m.hash_hex << '\n';
         out << "revision_id=" << m.revision_id << '\n';
         out << "backend=" << m.backend << '\n';
+        if (!m.boot_program_hash_hex.empty()) {
+            out << "boot_program_hash_fnv1a64=" << m.boot_program_hash_hex << '\n';
+        }
+        if (m.backend_abi_version.has_value()) {
+            out << "backend_abi_version=" << *m.backend_abi_version << '\n';
+        }
+        if (!m.backend_program_hash.empty()) {
+            out << "backend_program_hash=" << m.backend_program_hash << '\n';
+        }
+        if (m.backend_block_count.has_value()) {
+            out << "backend_block_count=" << *m.backend_block_count << '\n';
+        }
+        if (m.backend_native_block_count.has_value()) {
+            out << "backend_native_block_count=" << *m.backend_native_block_count << '\n';
+        }
+        if (m.backend_fallback_block_count.has_value()) {
+            out << "backend_fallback_block_count=" << *m.backend_fallback_block_count << '\n';
+        }
+        if (m.backend_native_code_bytes.has_value()) {
+            out << "backend_native_code_bytes=" << *m.backend_native_code_bytes << '\n';
+        }
         out.flush();
         if (!out) {
             return Result<void>::failure(ErrorCode::io_error,
@@ -139,11 +183,44 @@ Result<ConversionManifest> load_conversion_manifest(const std::filesystem::path&
         } else if (key == "hash_fnv1a64") m.hash_hex = value;
         else if (key == "revision_id") m.revision_id = value;
         else if (key == "backend") m.backend = value;
+        else if (key == "boot_program_hash_fnv1a64") m.boot_program_hash_hex = value;
+        else if (key == "backend_abi_version") {
+            auto parsed = parse_u64(value);
+            if (!parsed) return Result<ConversionManifest>::failure(parsed.error, parsed.detail);
+            if (parsed.value > std::numeric_limits<std::uint32_t>::max()) {
+                return Result<ConversionManifest>::failure(
+                    ErrorCode::invalid_installation,
+                    "backend ABI version exceeds uint32 range");
+            }
+            m.backend_abi_version = static_cast<std::uint32_t>(parsed.value);
+        } else if (key == "backend_program_hash") m.backend_program_hash = value;
+        else if (key == "backend_block_count") {
+            auto parsed = parse_u64(value);
+            if (!parsed) return Result<ConversionManifest>::failure(parsed.error, parsed.detail);
+            m.backend_block_count = parsed.value;
+        } else if (key == "backend_native_block_count") {
+            auto parsed = parse_u64(value);
+            if (!parsed) return Result<ConversionManifest>::failure(parsed.error, parsed.detail);
+            m.backend_native_block_count = parsed.value;
+        } else if (key == "backend_fallback_block_count") {
+            auto parsed = parse_u64(value);
+            if (!parsed) return Result<ConversionManifest>::failure(parsed.error, parsed.detail);
+            m.backend_fallback_block_count = parsed.value;
+        } else if (key == "backend_native_code_bytes") {
+            auto parsed = parse_u64(value);
+            if (!parsed) return Result<ConversionManifest>::failure(parsed.error, parsed.detail);
+            m.backend_native_code_bytes = parsed.value;
+        }
     }
     if (m.manifest_version != "1" || m.converter_version.empty() || m.source_name.empty() ||
         m.source_format.empty() || m.hash_hex.empty() || m.backend.empty()) {
         return Result<ConversionManifest>::failure(ErrorCode::invalid_installation,
                                                    "manifest is missing required fields");
+    }
+    if (m.backend == "native-ready" && !has_complete_native_backend_metadata(m)) {
+        return Result<ConversionManifest>::failure(
+            ErrorCode::invalid_installation,
+            "native-ready manifest is missing complete native backend metadata");
     }
     return Result<ConversionManifest>::success(std::move(m));
 }
@@ -208,7 +285,7 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
                "Revisão ainda não verificada; continuando somente com a preparação base.");
     }
 
-    report(ConversionStage::preparing_installation, 65, "prepare_installation",
+    report(ConversionStage::preparing_installation, 55, "prepare_installation",
            "Preparando os diretórios da instalação convertida.");
     std::error_code ec;
     std::filesystem::create_directories(install_dir / "data", ec);
@@ -226,13 +303,59 @@ Result<ConversionManifest> convert_image(const std::filesystem::path& source,
     manifest.hash_hex = fp.value.hash_hex;
     manifest.revision_id = revision.value.revision_id;
 
-    report(ConversionStage::writing_manifest, 90, "write_manifest",
-           "Gravando os metadados da instalação.");
+    report(ConversionStage::writing_manifest, 55, "write_pending_manifest",
+           "Gravando o estado pendente antes de preparar o backend específico do jogo.");
     auto saved = save_conversion_manifest_atomic(install_dir / "game_manifest.ini", manifest);
     if (!saved) return Result<ConversionManifest>::failure(saved.error, saved.detail);
 
+    if (!supports_game_native_backend(manifest.revision_id)) {
+        report(ConversionStage::completed, 100, "conversion_complete",
+               "Preparação base concluída; o backend específico do jogo ainda será adicionado.");
+        return Result<ConversionManifest>::success(std::move(manifest));
+    }
+
+    GameBackendProgressCallback backend_progress = [&](GameBackendStage stage) {
+        switch (stage) {
+            case GameBackendStage::boot_analyzed:
+                report(ConversionStage::preparing_game_backend, 65,
+                       "analyze_game_boot",
+                       "Programa de boot Dreamcast analisado para a revisão reconhecida.");
+                break;
+            case GameBackendStage::cache_ready:
+                report(ConversionStage::building_native_backend, 80,
+                       "build_native_backend",
+                       "Backend nativo gerado ou reutilizado para o programa identificado.");
+                break;
+            case GameBackendStage::cache_verified:
+                report(ConversionStage::verifying_native_backend, 92,
+                       "verify_native_backend",
+                       "Cache do backend nativo recarregado e verificado.");
+                break;
+        }
+    };
+
+    auto prepared = prepare_game_native_backend(
+        manifest.revision_id, filesystem.value, install_dir, backend_progress);
+    if (!prepared) {
+        return Result<ConversionManifest>::failure(prepared.error, prepared.detail);
+    }
+
+    manifest.boot_program_hash_hex = prepared.value.boot_program_hash_hex;
+    manifest.backend_abi_version = prepared.value.abi_version;
+    manifest.backend_program_hash = prepared.value.program_hash;
+    manifest.backend_block_count = prepared.value.block_count;
+    manifest.backend_native_block_count = prepared.value.native_block_count;
+    manifest.backend_fallback_block_count = prepared.value.fallback_block_count;
+    manifest.backend_native_code_bytes = prepared.value.native_code_bytes;
+    manifest.backend = "native-ready";
+
+    report(ConversionStage::promoting_native_backend, 97, "promote_native_backend",
+           "Promovendo a instalação após verificar o backend nativo.");
+    saved = save_conversion_manifest_atomic(install_dir / "game_manifest.ini", manifest);
+    if (!saved) return Result<ConversionManifest>::failure(saved.error, saved.detail);
+
     report(ConversionStage::completed, 100, "conversion_complete",
-           "Preparação base concluída; o backend específico do jogo ainda será adicionado.");
+           "Backend nativo da revisão reconhecida preparado; validação fim a fim é o próximo marco.");
     return Result<ConversionManifest>::success(std::move(manifest));
 }
 
