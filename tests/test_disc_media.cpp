@@ -87,42 +87,17 @@ static void test_rejects_unrecognized_bin() {
     fs::remove(bin, ec);
 }
 
-static void test_gdi_selects_iso_data_track() {
-    const auto iso = temp_path("gdi_source.iso");
-    const auto data = temp_path("gdi_track03.bin");
-    const auto audio = temp_path("gdi_track02.raw");
+static void test_gdi_is_rejected_by_ps1_media_contract() {
     const auto gdi = temp_path("disc.gdi");
-    test_iso::write_image(iso);
-    test_iso::write_raw2352_from_iso(iso, data, 1);
-    { std::ofstream out(audio, std::ios::binary); out << std::string(2352 * 2, '\0'); }
-    {
-        std::ofstream out(gdi);
-        out << "2\n";
-        out << "2 0 0 2352 " << audio.filename().string() << " 0\n";
-        out << "3 45000 4 2352 " << data.filename().string() << " 0\n";
-    }
-    const auto source = jojo::open_logical_sector_source(gdi);
-    CHECK(source);
-    if (source) {
-        CHECK(source.value.file_path.filename() == data.filename());
-        CHECK(source.value.physical_sector_size == 2352);
-        CHECK(source.value.user_data_offset == 16);
-        CHECK(source.value.source_format == "gdi");
-    }
-    std::error_code ec;
-    fs::remove(iso, ec); fs::remove(data, ec); fs::remove(audio, ec); fs::remove(gdi, ec);
-}
-
-static void test_gdi_rejects_descriptor_path_escape() {
-    const auto gdi = temp_path("unsafe.gdi");
     {
         std::ofstream out(gdi);
         out << "1\n";
-        out << "1 0 4 2352 ../outside.bin 0\n";
+        out << "1 0 4 2352 track01.bin 0\n";
     }
     const auto source = jojo::open_logical_sector_source(gdi);
     CHECK(!source);
-    CHECK(source.error == jojo::ErrorCode::invalid_argument);
+    CHECK(source.error == jojo::ErrorCode::unsupported_format);
+    CHECK(source.detail.find(".gdi") != std::string::npos);
     std::error_code ec;
     fs::remove(gdi, ec);
 }
@@ -202,8 +177,7 @@ int main() {
     test_raw_bin_mode1_source();
     test_raw_bin_mode2_form1_source();
     test_rejects_unrecognized_bin();
-    test_gdi_selects_iso_data_track();
-    test_gdi_rejects_descriptor_path_escape();
+    test_gdi_is_rejected_by_ps1_media_contract();
     test_cue_mode1_uses_index_offset();
     test_cue_mode2_form1_source();
     test_cue_rejects_descriptor_path_escape();
