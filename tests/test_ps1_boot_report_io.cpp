@@ -21,7 +21,9 @@ static jojo::Ps1BootReport make_report(std::uint64_t retired) {
     report.instructions_retired = retired;
     report.last_pc = 0x800000A0u;
     report.bios_call_count = 1u;
-    report.recent_bios_calls.push_back({0x800000A0u, 0x000000A0u, 0x0000003Fu});
+    report.recent_bios_calls.push_back({
+        0x800000A0u, 0x000000A0u, 0x0000003Fu,
+        0x11111111u, 0x22222222u, 0x33333333u, 0x44444444u, 0x80012345u});
     report.recent_mmio.push_back({0x80010100u, 0x1F801070u, 4u, false, 0u, false});
     report.interrupts_accepted = 1u;
     report.dma_transfer_count = 2u;
@@ -41,7 +43,16 @@ int main() {
     CHECK(text.find("stop_reason=bios_call_unimplemented\n") != std::string::npos);
     CHECK(text.find("instructions_retired=2\n") != std::string::npos);
     CHECK(text.find("last_pc=0x800000a0\n") != std::string::npos);
+    CHECK(text.find("bios_event_count=1\n") != std::string::npos);
+    CHECK(text.find("bios_event_0_selector=0x0000003f\n") != std::string::npos);
+    CHECK(text.find("bios_event_0_a0=0x11111111\n") != std::string::npos);
+    CHECK(text.find("bios_event_0_a1=0x22222222\n") != std::string::npos);
+    CHECK(text.find("bios_event_0_a2=0x33333333\n") != std::string::npos);
+    CHECK(text.find("bios_event_0_a3=0x44444444\n") != std::string::npos);
+    CHECK(text.find("bios_event_0_ra=0x80012345\n") != std::string::npos);
     CHECK(text.find("bios_last_selector=0x0000003f\n") != std::string::npos);
+    CHECK(text.find("bios_last_a0=0x11111111\n") != std::string::npos);
+    CHECK(text.find("bios_last_ra=0x80012345\n") != std::string::npos);
     CHECK(text.find("mmio_last_address=0x1f801070\n") != std::string::npos);
     CHECK(text.find("interrupts_accepted=1\n") != std::string::npos);
     CHECK(text.find("dma_transfer_count=2\n") != std::string::npos);

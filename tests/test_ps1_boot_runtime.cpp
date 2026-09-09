@@ -53,12 +53,12 @@ static void test_budget_exhaustion_keeps_bounded_recent_trace() {
     }
 }
 
-static void test_local_evidence_options_are_mega_but_bounded() {
+static void test_local_evidence_options_grow_monotonically() {
     const auto options = jojo::ps1_local_evidence_options();
-    CHECK(options.instruction_budget == 10000000u);
-    CHECK(options.trace_capacity == 128u);
+    CHECK(options.instruction_budget == 50000000u);
+    CHECK(options.trace_capacity == 256u);
     CHECK(options.diagnostic_mmio_probe);
-    CHECK(options.mmio_event_capacity == 256u);
+    CHECK(options.mmio_event_capacity == 512u);
 }
 
 static void test_bios_entry_stops_before_executing_bios_bytes() {
@@ -105,6 +105,44 @@ static void test_a0_39_initheap_returns_to_ra_and_continues() {
     if (heap) {
         CHECK(heap->base == 0x00004000u);
         CHECK(heap->size == 0x00001000u);
+    }
+}
+
+static void test_b0_19_hookentryint_records_pointer_args_and_returns() {
+    const std::vector<std::uint32_t> words{
+        test_mips::i(0x09u, 0u, 4u, 0x6000u),
+        test_mips::i(0x09u, 0u, 5u, 0x1111u),
+        test_mips::i(0x09u, 0u, 6u, 0x2222u),
+        test_mips::i(0x09u, 0u, 7u, 0x3333u),
+        test_mips::i(0x09u, 0u, 9u, 0x0019u),
+        test_mips::i(0x09u, 0u, 10u, 0x00B0u),
+        test_mips::r(10u, 0u, 31u, 0u, 0x09u),
+        0x00000000u,
+        test_mips::i(0x09u, 0u, 16u, 0x1234u),
+        test_mips::j(0x02u, 0x80010024u >> 2),
+        0x00000000u,
+    };
+
+    auto runtime = make_runtime(words);
+    const auto report = runtime.run({20u});
+
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(report.bios_call_count == 1u);
+    CHECK(runtime.cpu_state().gpr[16] == 0x1234u);
+    CHECK(runtime.bios_interrupt_hook_address().has_value());
+    if (runtime.bios_interrupt_hook_address()) {
+        CHECK(*runtime.bios_interrupt_hook_address() == 0x00006000u);
+    }
+    CHECK(report.recent_bios_calls.size() == 1u);
+    if (!report.recent_bios_calls.empty()) {
+        const auto& call = report.recent_bios_calls.back();
+        CHECK(call.table_physical == 0x000000B0u);
+        CHECK(call.selector == 0x00000019u);
+        CHECK(call.a0 == 0x00006000u);
+        CHECK(call.a1 == 0x00001111u);
+        CHECK(call.a2 == 0x00002222u);
+        CHECK(call.a3 == 0x00003333u);
+        CHECK(call.ra == 0x80010020u);
     }
 }
 
@@ -246,9 +284,10 @@ static void test_deterministic_replay_matches_full_m3a_state() {
 int main() {
     test_instruction_budget_is_explicit_stop_reason();
     test_budget_exhaustion_keeps_bounded_recent_trace();
-    test_local_evidence_options_are_mega_but_bounded();
+    test_local_evidence_options_grow_monotonically();
     test_bios_entry_stops_before_executing_bios_bytes();
     test_a0_39_initheap_returns_to_ra_and_continues();
+    test_b0_19_hookentryint_records_pointer_args_and_returns();
     test_a0_33_remains_unimplemented();
     test_mmio_access_stops_with_structured_evidence();
     test_mega_probe_continues_through_unknown_mmio_and_records_events();
