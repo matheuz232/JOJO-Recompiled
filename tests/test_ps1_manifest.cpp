@@ -1,7 +1,9 @@
 #include "core/conversion.h"
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -48,6 +50,24 @@ static void expect_invalid(jojo::ConversionManifest manifest) {
     std::error_code ec;
     fs::remove(path, ec);
     fs::remove(path.string() + ".tmp", ec);
+}
+
+static std::string read_text(const fs::path& path) {
+    std::ifstream in(path);
+    std::ostringstream out;
+    out << in.rdbuf();
+    return out.str();
+}
+
+static void write_text(const fs::path& path, const std::string& text) {
+    std::ofstream out(path, std::ios::trunc);
+    out << text;
+}
+
+static void expect_load_invalid(const fs::path& path) {
+    const auto loaded = jojo::load_conversion_manifest(path);
+    CHECK(!loaded);
+    if (!loaded) CHECK(loaded.error == jojo::ErrorCode::invalid_installation);
 }
 
 static void test_round_trip_all_v2_fields() {
@@ -129,8 +149,52 @@ static void test_truth_validation() {
     }
 }
 
+static void test_strict_v2_load_rejects_duplicate_malformed_overflow_and_missing_keys() {
+    const auto path = temp_manifest();
+    const auto manifest = valid_manifest();
+    CHECK(jojo::save_conversion_manifest_atomic(path, manifest));
+    const auto baseline = read_text(path);
+
+    write_text(path, baseline + "media_status=verified\n");
+    expect_load_invalid(path);
+
+    auto malformed = baseline;
+    const std::string entry_line = "psx_exe_entry=0x80010000";
+    const auto entry_pos = malformed.find(entry_line);
+    CHECK(entry_pos != std::string::npos);
+    if (entry_pos != std::string::npos) {
+        malformed.replace(entry_pos, entry_line.size(), "psx_exe_entry=0xzzzzzzzz");
+        write_text(path, malformed);
+        expect_load_invalid(path);
+    }
+
+    auto overflow = baseline;
+    const std::string size_line = "psx_exe_text_size=16";
+    const auto size_pos = overflow.find(size_line);
+    CHECK(size_pos != std::string::npos);
+    if (size_pos != std::string::npos) {
+        overflow.replace(size_pos, size_line.size(), "psx_exe_text_size=4294967296");
+        write_text(path, overflow);
+        expect_load_invalid(path);
+    }
+
+    auto missing = baseline;
+    const std::string required_line = "game_id=jojo-ps1\n";
+    const auto required_pos = missing.find(required_line);
+    CHECK(required_pos != std::string::npos);
+    if (required_pos != std::string::npos) {
+        missing.erase(required_pos, required_line.size());
+        write_text(path, missing);
+        expect_load_invalid(path);
+    }
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
 int main() {
     test_round_trip_all_v2_fields();
     test_truth_validation();
+    test_strict_v2_load_rejects_duplicate_malformed_overflow_and_missing_keys();
     return failures ? 1 : 0;
 }
