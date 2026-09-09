@@ -75,7 +75,7 @@ For `jojo-usa-observed-b8b5dbf79cdb9fcf`, the converter performs the following s
 9. Set `backend=native-ready` only in memory after every check above has passed.
 10. Atomically replace `game_manifest.ini` with the final promoted manifest.
 
-If any backend step fails, conversion returns the specific error, `conversion.log` records the failure, and the on-disk manifest remains `pending-game-specific-recompiler`. No partial cache or manually edited manifest can promote the installation by itself.
+If any backend step fails, conversion returns the specific error. The Windows application records the progress/error in `conversion.log`, and the on-disk manifest remains `pending-game-specific-recompiler`. No partial cache or manually edited manifest can promote the installation by itself.
 
 ## Manifest contract
 
@@ -141,8 +141,9 @@ Tests use only synthetic Dreamcast/ISO9660 fixtures and synthetic SH-4 programs.
 
 ## Failure and atomicity rules
 
-- Unsupported/unknown sources fail before a valid existing installation is modified.
-- After a new source is positively identified, the converter first writes a pending manifest before attempting promotion, preventing stale `native-ready` state from surviving a failed re-prepare.
+- Unsupported or malformed source media fails before a valid existing installation is modified.
+- Unknown/unverified game revisions retain the existing successful base-conversion path and remain `pending-game-specific-recompiler`.
+- After a new source is positively identified as a revision eligible for game-specific promotion, the converter first writes a pending manifest before attempting backend work, preventing stale `native-ready` state from surviving a failed re-prepare.
 - Backend cache writers retain their existing temporary-file + replace behavior.
 - Final `native-ready` promotion is a separate atomic manifest replacement after cache reload verification.
 - A backend failure never deletes the user's source image.
