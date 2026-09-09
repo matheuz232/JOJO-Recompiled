@@ -9,7 +9,9 @@ namespace jojo {
 namespace {
 
 constexpr std::uint32_t kBiosA0 = 0x000000A0u;
+constexpr std::uint32_t kBiosB0 = 0x000000B0u;
 constexpr std::uint32_t kBiosA0InitHeap = 0x00000039u;
+constexpr std::uint32_t kBiosB0HookEntryInt = 0x00000019u;
 
 bool is_bios_table(std::uint32_t physical) noexcept {
     return physical == 0x000000A0u ||
@@ -42,20 +44,31 @@ void record_recent_mmio(Ps1BootReport& report,
     report.recent_mmio.push_back(event);
 }
 
-bool handle_bios_call(R3000aState& cpu,
-                      std::optional<Ps1BiosHeapState>& heap_state,
-                      std::uint32_t table_physical,
-                      std::uint32_t selector) noexcept {
-    if (table_physical != kBiosA0 || selector != kBiosA0InitHeap) {
-        return false;
-    }
-
-    heap_state = Ps1BiosHeapState{cpu.gpr[4], cpu.gpr[5]};
+void return_from_bios_call(R3000aState& cpu) noexcept {
     cpu.pc = cpu.gpr[31];
     cpu.next_pc = cpu.pc + 4u;
     cpu.delay_slot = {};
     cpu.gpr[0] = 0u;
-    return true;
+}
+
+bool handle_bios_call(R3000aState& cpu,
+                      std::optional<Ps1BiosHeapState>& heap_state,
+                      std::optional<std::uint32_t>& interrupt_hook_address,
+                      std::uint32_t table_physical,
+                      std::uint32_t selector) noexcept {
+    if (table_physical == kBiosA0 && selector == kBiosA0InitHeap) {
+        heap_state = Ps1BiosHeapState{cpu.gpr[4], cpu.gpr[5]};
+        return_from_bios_call(cpu);
+        return true;
+    }
+
+    if (table_physical == kBiosB0 && selector == kBiosB0HookEntryInt) {
+        interrupt_hook_address = cpu.gpr[4];
+        return_from_bios_call(cpu);
+        return true;
+    }
+
+    return false;
 }
 
 } // namespace
@@ -82,9 +95,18 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
         const auto physical_pc = Ps1MemoryBus::guest_to_physical(cpu_.pc);
         if (physical_pc && is_bios_table(*physical_pc)) {
             ++report.bios_call_count;
-            report.recent_bios_calls.push_back(
-                Ps1BiosCallSummary{cpu_.pc, *physical_pc, cpu_.gpr[9]});
-            if (handle_bios_call(cpu_, bios_heap_state_, *physical_pc, cpu_.gpr[9])) {
+            report.recent_bios_calls.push_back(Ps1BiosCallSummary{
+                cpu_.pc,
+                *physical_pc,
+                cpu_.gpr[9],
+                cpu_.gpr[4],
+                cpu_.gpr[5],
+                cpu_.gpr[6],
+                cpu_.gpr[7],
+                cpu_.gpr[31],
+            });
+            if (handle_bios_call(cpu_, bios_heap_state_, bios_interrupt_hook_address_,
+                                 *physical_pc, cpu_.gpr[9])) {
                 continue;
             }
             report.stop_reason = Ps1BootStopReason::bios_call_unimplemented;
@@ -157,6 +179,11 @@ const R3000aState& Ps1BootRuntime::cpu_state() const noexcept {
 
 const std::optional<Ps1BiosHeapState>& Ps1BootRuntime::bios_heap_state() const noexcept {
     return bios_heap_state_;
+}
+
+const std::optional<std::uint32_t>&
+Ps1BootRuntime::bios_interrupt_hook_address() const noexcept {
+    return bios_interrupt_hook_address_;
 }
 
 Ps1MemoryBus& Ps1BootRuntime::bus() noexcept {

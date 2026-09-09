@@ -100,6 +100,19 @@ std::string format_ps1_boot_report(const Ps1BootReport& report) {
         out << "trace_" << i << "_opcode=" << optional_hex32(sample.opcode) << '\n';
     }
 
+    out << "bios_event_count=" << report.recent_bios_calls.size() << '\n';
+    for (std::size_t i = 0; i < report.recent_bios_calls.size(); ++i) {
+        const auto& bios = report.recent_bios_calls[i];
+        out << "bios_event_" << i << "_pc=" << hex32(bios.pc) << '\n';
+        out << "bios_event_" << i << "_table=" << hex32(bios.table_physical) << '\n';
+        out << "bios_event_" << i << "_selector=" << hex32(bios.selector) << '\n';
+        out << "bios_event_" << i << "_a0=" << hex32(bios.a0) << '\n';
+        out << "bios_event_" << i << "_a1=" << hex32(bios.a1) << '\n';
+        out << "bios_event_" << i << "_a2=" << hex32(bios.a2) << '\n';
+        out << "bios_event_" << i << "_a3=" << hex32(bios.a3) << '\n';
+        out << "bios_event_" << i << "_ra=" << hex32(bios.ra) << '\n';
+    }
+
     out << "mmio_event_count=" << report.recent_mmio.size() << '\n';
     for (std::size_t i = 0; i < report.recent_mmio.size(); ++i) {
         const auto& mmio = report.recent_mmio[i];
@@ -114,12 +127,22 @@ std::string format_ps1_boot_report(const Ps1BootReport& report) {
     if (report.recent_bios_calls.empty()) {
         out << "bios_last_pc=none\n"
             << "bios_last_table=none\n"
-            << "bios_last_selector=none\n";
+            << "bios_last_selector=none\n"
+            << "bios_last_a0=none\n"
+            << "bios_last_a1=none\n"
+            << "bios_last_a2=none\n"
+            << "bios_last_a3=none\n"
+            << "bios_last_ra=none\n";
     } else {
         const auto& bios = report.recent_bios_calls.back();
         out << "bios_last_pc=" << hex32(bios.pc) << '\n';
         out << "bios_last_table=" << hex32(bios.table_physical) << '\n';
         out << "bios_last_selector=" << hex32(bios.selector) << '\n';
+        out << "bios_last_a0=" << hex32(bios.a0) << '\n';
+        out << "bios_last_a1=" << hex32(bios.a1) << '\n';
+        out << "bios_last_a2=" << hex32(bios.a2) << '\n';
+        out << "bios_last_a3=" << hex32(bios.a3) << '\n';
+        out << "bios_last_ra=" << hex32(bios.ra) << '\n';
     }
 
     if (report.recent_mmio.empty()) {

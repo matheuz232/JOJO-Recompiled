@@ -56,6 +56,7 @@ private:
     std::array<std::uint8_t, scratchpad_size> scratchpad_{};
     std::uint16_t interrupt_status_{};
     std::uint16_t interrupt_mask_{};
+    std::uint32_t dma_control_{0x07654321u};
     bool diagnostic_mmio_probe_enabled_{};
     std::array<std::uint8_t, diagnostic_mmio_shadow_size> diagnostic_mmio_shadow_{};
     std::optional<Ps1UnsupportedAccess> last_diagnostic_mmio_probe_{};

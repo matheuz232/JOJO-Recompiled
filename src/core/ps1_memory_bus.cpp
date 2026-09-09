@@ -9,6 +9,7 @@ namespace {
 constexpr std::uint32_t kDiagnosticMmioBase = 0x1F801000u;
 constexpr std::uint32_t kInterruptStatusAddress = 0x1F801070u;
 constexpr std::uint32_t kInterruptMaskAddress = 0x1F801074u;
+constexpr std::uint32_t kDmaControlAddress = 0x1F8010F0u;
 constexpr std::uint16_t kInterruptValidBits = 0x07FFu;
 
 std::uint8_t* mapped_bytes(std::uint32_t physical,
@@ -117,6 +118,9 @@ R3000aBusResult Ps1MemoryBus::read16(std::uint32_t address) noexcept {
 R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (*physical == kDmaControlAddress) {
+            return {R3000aBusStatus::ok, dma_control_};
+        }
         if (auto* p = mapped_bytes(*physical, 4u, main_ram_, scratchpad_)) {
             return {R3000aBusStatus::ok, read_little_endian(p, 4u)};
         }
@@ -187,6 +191,10 @@ R3000aBusResult Ps1MemoryBus::write16(std::uint32_t address, std::uint16_t value
 R3000aBusResult Ps1MemoryBus::write32(std::uint32_t address, std::uint32_t value) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (*physical == kDmaControlAddress) {
+            dma_control_ = value;
+            return {R3000aBusStatus::ok, 0u};
+        }
         if (auto* p = mapped_bytes(*physical, 4u, main_ram_, scratchpad_)) {
             write_little_endian(p, 4u, value);
             return {R3000aBusStatus::ok, 0u};

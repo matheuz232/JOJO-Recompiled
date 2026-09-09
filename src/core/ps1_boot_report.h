@@ -29,6 +29,11 @@ struct Ps1BiosCallSummary {
     std::uint32_t pc{};
     std::uint32_t table_physical{};
     std::uint32_t selector{};
+    std::uint32_t a0{};
+    std::uint32_t a1{};
+    std::uint32_t a2{};
+    std::uint32_t a3{};
+    std::uint32_t ra{};
 };
 
 struct Ps1MmioSummary {
@@ -81,7 +86,7 @@ struct Ps1BootOptions {
 };
 
 [[nodiscard]] constexpr Ps1BootOptions ps1_local_evidence_options() noexcept {
-    return Ps1BootOptions{10000000u, 128u, true, 256u};
+    return Ps1BootOptions{50000000u, 256u, true, 512u};
 }
 
 } // namespace jojo
