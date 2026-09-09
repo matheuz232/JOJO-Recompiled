@@ -1,4 +1,5 @@
 #include "core/runtime.h"
+#include "core/ps1_boot_report.h"
 #include "core/ps1_installation.h"
 #include "ps1_fixture.h"
 
@@ -192,19 +193,31 @@ static void test_manifest_metadata_mismatch_is_rejected() {
     cleanup(fixture);
 }
 
-static void test_bootstrap_reports_r3000a_not_implemented_without_mutation() {
-    auto fixture = make_converted("bootstrap");
+static void test_checkpoint_executes_validated_installed_exe_without_mutation() {
+    auto fixture = make_converted("checkpoint");
     const auto generation = generation_dir(fixture);
     const auto manifest_path = generation / "game_manifest.ini";
     const auto before = read_text(manifest_path);
+
+    jojo::Ps1BootOptions options{};
+    options.instruction_budget = 4u;
+    const auto checkpoint = jojo::bootstrap_runtime_checkpoint(fixture.install, options);
+    CHECK(checkpoint);
+    if (checkpoint) {
+        CHECK(checkpoint.value.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+        CHECK(checkpoint.value.instructions_retired == 4u);
+        CHECK(checkpoint.value.last_pc == 0x8001000Cu);
+        CHECK(checkpoint.value.presented_frames == 0u);
+    }
 
     const auto boot = jojo::bootstrap_runtime(fixture.install);
     CHECK(!boot);
     if (!boot) {
         CHECK(boot.error == jojo::ErrorCode::backend_unavailable);
-        CHECK(boot.detail.find("R3000A") != std::string::npos);
-        CHECK(boot.detail.find("not implemented") != std::string::npos);
+        CHECK(boot.detail.find("checkpoint") != std::string::npos);
+        CHECK(boot.detail.find("not verified") != std::string::npos);
     }
+
     CHECK(read_text(manifest_path) == before);
     CHECK(!fs::exists(generation / "cache"));
     cleanup(fixture);
@@ -219,7 +232,7 @@ int main() {
     test_modified_local_executable_hash_is_rejected();
     test_active_pointer_to_missing_generation_is_rejected();
     test_manifest_metadata_mismatch_is_rejected();
-    test_bootstrap_reports_r3000a_not_implemented_without_mutation();
+    test_checkpoint_executes_validated_installed_exe_without_mutation();
     if (failures) {
         std::cerr << failures << " PS1 runtime-installation assertion(s) failed\n";
         return 1;
