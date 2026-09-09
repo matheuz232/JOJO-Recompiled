@@ -1,0 +1,156 @@
+#include "core/ps1_memory_bus.h"
+
+#include <algorithm>
+#include <cstddef>
+
+namespace jojo {
+namespace {
+
+std::uint8_t* mapped_bytes(std::uint32_t physical,
+                           std::size_t width,
+                           std::span<std::uint8_t> main_ram,
+                           std::span<std::uint8_t> scratchpad) noexcept {
+    if (physical < main_ram.size() &&
+        width <= main_ram.size() - static_cast<std::size_t>(physical)) {
+        return main_ram.data() + physical;
+    }
+
+    if (physical >= Ps1MemoryBus::scratchpad_base) {
+        const auto offset = static_cast<std::size_t>(physical - Ps1MemoryBus::scratchpad_base);
+        if (offset < scratchpad.size() && width <= scratchpad.size() - offset) {
+            return scratchpad.data() + offset;
+        }
+    }
+    return nullptr;
+}
+
+std::uint32_t read_little_endian(const std::uint8_t* bytes, std::uint8_t width) noexcept {
+    std::uint32_t value = std::uint32_t(bytes[0]);
+    if (width >= 2u) value |= std::uint32_t(bytes[1]) << 8;
+    if (width == 4u) {
+        value |= std::uint32_t(bytes[2]) << 16;
+        value |= std::uint32_t(bytes[3]) << 24;
+    }
+    return value;
+}
+
+void write_little_endian(std::uint8_t* bytes,
+                         std::uint8_t width,
+                         std::uint32_t value) noexcept {
+    bytes[0] = static_cast<std::uint8_t>(value);
+    if (width >= 2u) bytes[1] = static_cast<std::uint8_t>(value >> 8);
+    if (width == 4u) {
+        bytes[2] = static_cast<std::uint8_t>(value >> 16);
+        bytes[3] = static_cast<std::uint8_t>(value >> 24);
+    }
+}
+
+} // namespace
+
+Ps1MemoryBus::Ps1MemoryBus() : main_ram_(main_ram_size, 0u) {}
+
+std::optional<std::uint32_t> Ps1MemoryBus::guest_to_physical(std::uint32_t guest) noexcept {
+    if (guest < 0x80000000u) return guest;
+    if (guest < 0xC0000000u) return guest & 0x1FFFFFFFu;
+    return std::nullopt;
+}
+
+R3000aBusResult Ps1MemoryBus::read8(std::uint32_t address) noexcept {
+    const auto physical = guest_to_physical(address);
+    if (physical) {
+        if (auto* p = mapped_bytes(*physical, 1u, main_ram_, scratchpad_)) {
+            return {R3000aBusStatus::ok, read_little_endian(p, 1u)};
+        }
+    }
+    last_unsupported_ = Ps1UnsupportedAccess{
+        address, physical.value_or(address), 1u, false, 0u};
+    return {R3000aBusStatus::unsupported, 0u};
+}
+
+R3000aBusResult Ps1MemoryBus::read16(std::uint32_t address) noexcept {
+    const auto physical = guest_to_physical(address);
+    if (physical) {
+        if (auto* p = mapped_bytes(*physical, 2u, main_ram_, scratchpad_)) {
+            return {R3000aBusStatus::ok, read_little_endian(p, 2u)};
+        }
+    }
+    last_unsupported_ = Ps1UnsupportedAccess{
+        address, physical.value_or(address), 2u, false, 0u};
+    return {R3000aBusStatus::unsupported, 0u};
+}
+
+R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
+    const auto physical = guest_to_physical(address);
+    if (physical) {
+        if (auto* p = mapped_bytes(*physical, 4u, main_ram_, scratchpad_)) {
+            return {R3000aBusStatus::ok, read_little_endian(p, 4u)};
+        }
+    }
+    last_unsupported_ = Ps1UnsupportedAccess{
+        address, physical.value_or(address), 4u, false, 0u};
+    return {R3000aBusStatus::unsupported, 0u};
+}
+
+R3000aBusResult Ps1MemoryBus::write8(std::uint32_t address, std::uint8_t value) noexcept {
+    const auto physical = guest_to_physical(address);
+    if (physical) {
+        if (auto* p = mapped_bytes(*physical, 1u, main_ram_, scratchpad_)) {
+            write_little_endian(p, 1u, value);
+            return {R3000aBusStatus::ok, 0u};
+        }
+    }
+    last_unsupported_ = Ps1UnsupportedAccess{
+        address, physical.value_or(address), 1u, true, value};
+    return {R3000aBusStatus::unsupported, 0u};
+}
+
+R3000aBusResult Ps1MemoryBus::write16(std::uint32_t address, std::uint16_t value) noexcept {
+    const auto physical = guest_to_physical(address);
+    if (physical) {
+        if (auto* p = mapped_bytes(*physical, 2u, main_ram_, scratchpad_)) {
+            write_little_endian(p, 2u, value);
+            return {R3000aBusStatus::ok, 0u};
+        }
+    }
+    last_unsupported_ = Ps1UnsupportedAccess{
+        address, physical.value_or(address), 2u, true, value};
+    return {R3000aBusStatus::unsupported, 0u};
+}
+
+R3000aBusResult Ps1MemoryBus::write32(std::uint32_t address, std::uint32_t value) noexcept {
+    const auto physical = guest_to_physical(address);
+    if (physical) {
+        if (auto* p = mapped_bytes(*physical, 4u, main_ram_, scratchpad_)) {
+            write_little_endian(p, 4u, value);
+            return {R3000aBusStatus::ok, 0u};
+        }
+    }
+    last_unsupported_ = Ps1UnsupportedAccess{
+        address, physical.value_or(address), 4u, true, value};
+    return {R3000aBusStatus::unsupported, 0u};
+}
+
+Result<void> Ps1MemoryBus::load_main_ram(
+    std::uint32_t guest_address,
+    std::span<const std::uint8_t> bytes) {
+    const auto physical = guest_to_physical(guest_address);
+    if (!physical || *physical >= main_ram_size ||
+        bytes.size() > static_cast<std::size_t>(main_ram_size - *physical)) {
+        return Result<void>::failure(
+            ErrorCode::invalid_argument,
+            "PS-X EXE payload destination is outside JoJo main RAM");
+    }
+    std::copy(bytes.begin(), bytes.end(), main_ram_.begin() + *physical);
+    return Result<void>::success();
+}
+
+const std::optional<Ps1UnsupportedAccess>&
+Ps1MemoryBus::last_unsupported_access() const noexcept {
+    return last_unsupported_;
+}
+
+void Ps1MemoryBus::clear_last_unsupported_access() noexcept {
+    last_unsupported_.reset();
+}
+
+} // namespace jojo

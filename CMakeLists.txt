@@ -26,6 +26,7 @@ add_library(jojo_core STATIC
   src/core/ps1_system_cnf.cpp
   src/core/ps1_exe.cpp
   src/core/ps1_installation.cpp
+  src/core/ps1_memory_bus.cpp
   src/core/mips_decoder.cpp
   src/core/r3000a_reference_executor.cpp
   src/core/revision.cpp
