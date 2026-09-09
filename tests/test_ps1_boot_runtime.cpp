@@ -76,6 +76,50 @@ static void test_bios_entry_stops_before_executing_bios_bytes() {
     }
 }
 
+static void test_a0_39_initheap_returns_to_ra_and_continues() {
+    const std::vector<std::uint32_t> words{
+        test_mips::i(0x09u, 0u, 4u, 0x4000u),
+        test_mips::i(0x09u, 0u, 5u, 0x1000u),
+        test_mips::i(0x09u, 0u, 9u, 0x0039u),
+        test_mips::i(0x09u, 0u, 10u, 0x00A0u),
+        test_mips::r(10u, 0u, 31u, 0u, 0x09u),
+        0x00000000u,
+        test_mips::i(0x09u, 0u, 16u, 0x1234u),
+        test_mips::j(0x02u, 0x8001001Cu >> 2),
+        0x00000000u,
+    };
+
+    auto runtime = make_runtime(words);
+    const auto report = runtime.run({16u});
+
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(report.instructions_retired == 16u);
+    CHECK(report.bios_call_count == 1u);
+    CHECK(runtime.cpu_state().gpr[16] == 0x1234u);
+}
+
+static void test_a0_33_remains_unimplemented() {
+    const std::vector<std::uint32_t> words{
+        test_mips::i(0x09u, 0u, 9u, 0x0033u),
+        test_mips::i(0x09u, 0u, 10u, 0x00A0u),
+        test_mips::r(10u, 0u, 31u, 0u, 0x09u),
+        0x00000000u,
+        test_mips::i(0x09u, 0u, 16u, 0x1234u),
+    };
+
+    auto runtime = make_runtime(words);
+    const auto report = runtime.run({16u});
+
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::bios_call_unimplemented);
+    CHECK(report.bios_call_count == 1u);
+    CHECK(report.recent_bios_calls.size() == 1u);
+    if (!report.recent_bios_calls.empty()) {
+        CHECK(report.recent_bios_calls.back().table_physical == 0x000000A0u);
+        CHECK(report.recent_bios_calls.back().selector == 0x00000033u);
+    }
+    CHECK(runtime.cpu_state().gpr[16] == 0u);
+}
+
 static void test_mmio_access_stops_with_structured_evidence() {
     const std::vector<std::uint32_t> words{
         test_mips::i(0x0Fu, 0u, 8u, 0x1F80u),
@@ -151,6 +195,8 @@ int main() {
     test_budget_exhaustion_keeps_bounded_recent_trace();
     test_local_evidence_options_are_deep_but_bounded();
     test_bios_entry_stops_before_executing_bios_bytes();
+    test_a0_39_initheap_returns_to_ra_and_continues();
+    test_a0_33_remains_unimplemented();
     test_mmio_access_stops_with_structured_evidence();
     test_deterministic_replay_matches_full_m3a_state();
     return failures ? 1 : 0;
