@@ -148,7 +148,7 @@ For the user's observed supported image, success means all of the following occu
 7. `PS-X EXE` signature/header validated;
 8. entry point extracted;
 9. load address extracted;
-10. initial GP extracted when defined by the executable header;
+10. initial GP extracted from the executable header;
 11. text size extracted and validated against the file payload;
 12. executable-derived hash calculated;
 13. required local data copied/extracted transactionally to the chosen install root;
@@ -168,7 +168,7 @@ The PS1 path must preserve support for at least the layouts already safely repre
 - raw BIN MODE2/2352;
 - cooked 2048 ISO when valid.
 
-GDI is Dreamcast-specific and must not be part of the JoJo production path after migration, even if generic parser code temporarily remains during transition.
+GDI is Dreamcast-specific and must not be part of the JoJo production path after migration. Its parser may survive only as unreachable historical/generic code during an intermediate branch; it must not be included in the final active JoJo media acceptance contract.
 
 ### 7.2 `SYSTEM.CNF`
 
@@ -191,9 +191,9 @@ A dedicated PS-X EXE reader owns:
 - initial GP;
 - text load address;
 - text size;
-- optional stack base/size metadata when meaningful;
+- stack base/size metadata from the header;
 - safe payload bounds checks;
-- derived hash over the actual executable representation chosen by the design.
+- derived hash over the complete PS-X EXE file used by the installation.
 
 Commercial executable bytes may be copied to the local installation if runtime requirements justify it, but never into repository fixtures.
 
@@ -208,7 +208,7 @@ On first conversion the Windows UI shows:
 - `Alterar pasta...` action;
 - explicit conversion/install action.
 
-The suggested default may be:
+The suggested default is:
 
 ```text
 %LOCALAPPDATA%\JOJO Recompiled\game
@@ -218,7 +218,7 @@ but conversion must work with another writable local path selected by the user.
 
 ### 8.2 Persistent location pointer
 
-Global application settings may remain under `%LOCALAPPDATA%\JOJO Recompiled`, because they are application metadata rather than installed commercial game data.
+Global application settings remain under `%LOCALAPPDATA%\JOJO Recompiled`, because they are application metadata rather than installed commercial game data.
 
 A global settings record stores the selected installation root, e.g.:
 
@@ -226,7 +226,7 @@ A global settings record stores the selected installation root, e.g.:
 install_root=C:\Games\JOJO Recompiled
 ```
 
-If the directory is later unavailable, startup must not silently create a replacement installation. Offer an explicit recovery path such as:
+If the directory is later unavailable, startup must not silently create a replacement installation. Offer an explicit recovery path:
 
 - `Localizar instalação existente`;
 - `Alterar pasta de instalação`;
@@ -234,22 +234,27 @@ If the directory is later unavailable, startup must not silently create a replac
 
 ### 8.3 Installation layout
 
-Canonical logical layout:
+The selected root is a stable container. The active generation is selected by a small atomically replaced pointer record:
 
 ```text
 <install_root>\
-    game_manifest.ini
-    data\
-    cache\
-        ps1\
-        native\
-    logs\
-        conversion.log
-        runtime.log
-    saves\
+    active_install.ini
+    generations\
+        <generation-id>\
+            game_manifest.ini
+            data\
+            cache\
+                ps1\
+                native\
+            logs\
+                conversion.log
+                runtime.log
+            saves\
 ```
 
-Only directories that are actually needed should be materialized.
+`active_install.ini` contains only non-proprietary local metadata needed to select the current generation, including the generation identifier and manifest-relative path. The referenced generation is immutable after activation except for explicitly mutable subtrees such as saves and runtime logs.
+
+Only directories actually needed by the current milestone are materialized.
 
 ## 9. Local Commercial Data Policy
 
@@ -286,32 +291,27 @@ The converter must:
 
 ## 10. Transactional Conversion and Re-Conversion
 
-Conversion uses staging instead of mutating a known-good install in place.
-
-Suggested model:
-
-```text
-<install_root>.conversion-staging-<nonce>\
-```
-
-or a sibling staging directory with equivalent collision safety.
+Conversion creates a new immutable generation instead of mutating the currently active generation.
 
 Required sequence:
 
 1. validate destination semantics and permissions;
-2. verify enough practical storage is available where the OS exposes reliable information;
-3. create staging;
+2. query free space when the OS/filesystem exposes it reliably and reject a conversion known to be too large;
+3. create a unique inactive generation directory;
 4. analyze source;
 5. extract/copy required user-local data;
 6. generate derived metadata/cache for the current milestone;
-7. validate staging contents;
-8. write final staging manifest last;
-9. atomically promote staging to the canonical install representation where filesystem semantics permit;
-10. clean obsolete generated state only after successful promotion.
+7. validate generation contents;
+8. write that generation's final `game_manifest.ini` last;
+9. write `active_install.ini.tmp` pointing to the fully validated generation;
+10. atomically replace `active_install.ini` with the temporary pointer record;
+11. only after activation, prune obsolete **known-generated** generations according to retention policy.
 
-If conversion fails at any stage, an older valid install remains valid.
+The pointer record is the commit point. Runtime accepts only the generation named by a valid `active_install.ini` and then independently validates the referenced manifest/content metadata required by the current runtime.
 
-A failed conversion must never leave a manifest claiming a readiness state that was not reached.
+If conversion fails before step 10, the previous pointer and previous active generation remain untouched.
+
+A failed conversion must never leave a manifest or active pointer claiming a readiness state that was not reached.
 
 ## 11. Legacy Dreamcast Installation Handling
 
@@ -324,11 +324,11 @@ Rules:
 - the UI explicitly identifies the installation as legacy/incompatible;
 - automatic silent conversion to v2 is forbidden;
 - user may choose `Reconverter nesta pasta`;
-- before destructive cleanup, preserve useful diagnostic metadata where practical;
-- only files known to have been generated by JOJO Recompiled may be removed automatically;
+- before destructive cleanup, copy any existing v1 manifest and JOJO-generated conversion log into the new generation's `migration/` directory when those files exist;
+- only files positively identified by the legacy schema/path allowlist as JOJO-generated may be removed automatically;
 - unknown user files must not be deleted.
 
-Optional diagnostic preservation layout:
+Diagnostic preservation layout:
 
 ```text
 migration\
@@ -336,11 +336,15 @@ migration\
     legacy-conversion.log
 ```
 
+Missing legacy diagnostics do not block reconversion.
+
 ## 12. Manifest v2
 
 `manifest_version=2` is a clean PS1 contract. It does not pretend the Dreamcast manifest schema is still semantically valid.
 
-Illustrative core fields:
+### 12.1 Required M1 fields
+
+Every successfully activated M1 generation contains these keys:
 
 ```ini
 manifest_version=2
@@ -349,15 +353,17 @@ game_id=jojo-ps1
 revision_id=<verified-revision-id>
 source_format=<observed-format>
 source_size=<decimal>
-source_hash_fnv1a64=<hex>
+source_hash_fnv1a64=<16-lowercase-hex>
 
-system_cnf_path=SYSTEM.CNF
+system_cnf_path=<resolved-iso-path>
 boot_executable=<resolved-iso-path>
-psx_exe_hash_fnv1a64=<hex>
-psx_exe_entry=0x........
-psx_exe_load_address=0x........
-psx_exe_initial_gp=0x........
+psx_exe_hash_fnv1a64=<16-lowercase-hex>
+psx_exe_entry=0x<8-lowercase-hex>
+psx_exe_load_address=0x<8-lowercase-hex>
+psx_exe_initial_gp=0x<8-lowercase-hex>
 psx_exe_text_size=<decimal>
+psx_exe_stack_base=0x<8-lowercase-hex>
+psx_exe_stack_size=<decimal>
 
 media_status=verified
 executable_status=verified
@@ -372,15 +378,21 @@ input_status=pending
 gameplay_status=pending
 ```
 
-The exact field set may be refined during planning, but these semantic guarantees are binding:
+Zero-valued PS-X EXE header fields are serialized as zero, not omitted. A successful M1 manifest therefore has a stable parseable shape.
+
+Later milestones may add version-2 keys, but they may not redefine the meaning of these M1 keys. A schema change that changes existing meaning requires a new manifest version.
+
+### 12.2 Parsing and validation guarantees
 
 - a field representing observed commercial data is populated only after it was actually observed;
 - numeric parsing is strict and overflow-safe;
+- hexadecimal fields require their canonical width/format;
 - advanced status fields cannot be inferred from source recognition alone;
 - current runtime validates all metadata it relies on rather than trusting a status string;
-- status promotion is monotonic within one successful transaction but can return to pending during a new re-conversion attempt until the new result is verified.
+- status promotion is monotonic inside one immutable generation;
+- a new conversion begins in a new inactive generation, so the currently active generation never moves backward while preparation is incomplete.
 
-The install root does not need to be duplicated inside the local manifest if the manifest's physical location is authoritative. If stored, it is informational and must not override the actual resolved path.
+The install root is not serialized as authoritative state inside `game_manifest.ini`; the manifest's resolved physical location under the generation selected by `active_install.ini` is authoritative.
 
 ## 13. Truthful Readiness Model
 
@@ -401,7 +413,7 @@ Canonical semantic states:
 - `input-verified`;
 - `gameplay-verified`.
 
-These are not necessarily all serialized as one enum; they may map to manifest status fields. Their meanings are binding.
+These are semantic gates. Manifest v2 represents them through the explicit status fields defined above and later additive fields when necessary.
 
 ### Evidence rules
 
@@ -441,7 +453,7 @@ These are not necessarily all serialized as one enum; they may map to manifest s
 `gameplay-verified`
 : Agreed real gameplay scenario completed successfully under the native product.
 
-Synthetic fixtures cannot establish the last five commercial-evidence states.
+Synthetic fixtures cannot establish `boot-reached`, `rendering-verified`, `audio-verified`, `input-verified`, or `gameplay-verified`.
 
 ## 14. R3000A Reference Executor
 
@@ -485,7 +497,7 @@ Initial required memory domains include:
 
 Unknown MMIO must not return fabricated success silently.
 
-Diagnostics should identify at least:
+Diagnostics identify at least:
 
 - access type;
 - address;
@@ -541,14 +553,14 @@ Reference fallback is a development correctness mechanism, not proof that recomp
 
 No proprietary BIOS is required or distributed.
 
-Implement only services required by observed JoJo execution. HLE scope may include, when proven necessary:
+Implement only services required by observed JoJo execution. HLE scope includes only calls demonstrated necessary by the commercial execution trace or by the supported startup path, such as:
 
 - A0/B0/C0 kernel/library calls;
 - memory helpers;
 - event/interrupt services;
 - controller services;
 - CD services;
-- simple libc-like services exposed by the BIOS interface;
+- libc-like services exposed by the BIOS interface;
 - exception entry/return behavior that the game relies on.
 
 Every unsupported HLE call generates a stable diagnostic including call vector/function identifier and guest PC.
@@ -559,7 +571,7 @@ HLE must not be described as a complete PlayStation BIOS implementation.
 
 Implement GTE only according to instructions and state actually used by the JoJo runtime.
 
-The design must preserve:
+The design preserves:
 
 - GTE data/control register model;
 - command decoding;
@@ -573,7 +585,7 @@ Unknown command or register behavior is a hard diagnostic during development, no
 
 GPU support is JoJo-driven rather than generic compatibility work.
 
-Expected boundaries include, as observed:
+Expected boundaries, when observed, include:
 
 - GP0 packet decoding;
 - GP1 control commands;
@@ -593,7 +605,7 @@ Initial rendering may use a correctness-first software/reference representation 
 
 These components are implemented based on runtime evidence from the title.
 
-CD-ROM responsibilities may include:
+CD-ROM responsibilities, when observed, include:
 
 - command/status protocol used by the game;
 - sector reads from installed data representation;
@@ -609,7 +621,7 @@ Timers and interrupt controller implement the behavior needed to progress the ga
 
 SPU support is driven by the title's real usage.
 
-Potential required features include:
+Features are implemented only when observed or required by the verified startup/gameplay path, including as applicable:
 
 - voice registers;
 - ADPCM decode;
@@ -617,14 +629,14 @@ Potential required features include:
 - volume/pitch;
 - transfer/DMA behavior;
 - IRQ behavior;
-- reverb only if observed and required;
-- XA/CD audio if the title uses it.
+- reverb;
+- XA/CD audio.
 
 Host audio output is a Windows-native presentation concern. Guest SPU state remains deterministic enough to test independently from the host audio device.
 
 ## 23. Input
 
-Input must expose PlayStation-side semantics needed by JoJo while reusing the existing Windows controller acquisition layer where sensible.
+Input exposes PlayStation-side semantics needed by JoJo while reusing the existing Windows controller acquisition layer where sensible.
 
 Requirements are evidence-based:
 
@@ -714,7 +726,7 @@ synthetic RED
 → next concrete unsupported behavior
 ```
 
-Only derived metadata/logging needed for debugging should be shared back. The project must never ask the user to commit/upload the commercial image to GitHub.
+Only derived metadata/logging needed for debugging should be shared back. The project must never require the commercial image to be committed or uploaded to GitHub.
 
 ## 26. UI Truthfulness
 
@@ -841,11 +853,20 @@ Only after corresponding evidence may the UI say that boot, rendering, audio, in
 
 ## 28. Existing Observed Revision
 
-The previously observed whole-source fingerprint remains useful as an exact **source identity fact**. Its existence must not imply Dreamcast semantics.
+The exact source identity already recorded by the current project is retained as a source-recognition fact:
 
-The migration may retain recognition of the observed source tuple already recorded by the project, but must relabel its game-backend path as PlayStation 1 and must independently discover `SYSTEM.CNF` and the actual PS-X EXE before claiming executable readiness.
+```text
+source_format=bin
+source_size=666806112
+source_hash_fnv1a64=b8b5dbf79cdb9fcf
+revision_id=jojo-usa-observed-b8b5dbf79cdb9fcf
+```
 
-If the observed source turns out to require a CUE/track interpretation different from the existing BIN-only route, the media evidence from the local run takes precedence over assumptions in old Dreamcast-oriented code.
+This tuple identifies the previously observed source only. It carries **no Dreamcast meaning** and does not by itself prove a valid PS1 filesystem, `SYSTEM.CNF`, PS-X EXE, MIPS analysis, boot, or gameplay.
+
+The corrected migration keeps this exact recognition gate and then independently discovers the PS1 boot metadata from the local source.
+
+If local media evidence demonstrates that the supported source must be opened through an associated CUE/track layout to read the correct PS1 data track, the implementation must treat that as a new explicitly verified source/media contract rather than silently forcing the old BIN-only interpretation.
 
 ## 29. Production Readiness Documentation
 
@@ -859,7 +880,7 @@ M0 must update current documentation to state:
 - commercial boot/gameplay support is not yet established under the corrected architecture;
 - previous Dreamcast-native readiness does not transfer to PS1.
 
-Historical design/plan documents may remain for audit/history but must be clearly non-current or kept outside current-roadmap references.
+Historical design/plan documents remain for audit/history but must be labeled or referenced as historical/non-current anywhere a current architecture index links to them.
 
 ## 30. CI and Content Safety
 
@@ -867,7 +888,7 @@ CI remains Linux + Windows/MSVC, with Windows authoritative for the final x64 AB
 
 Production-readiness checks must continue to reject accidental commercial content.
 
-New CI contracts should eventually include:
+New CI contracts eventually include:
 
 - PS1 media parser tests;
 - SYSTEM.CNF tests;
@@ -886,7 +907,7 @@ Windows artifact upload remains a single executable unless the product design is
 
 Conversion/runtime failure UI exposes enough information to distinguish source problems from implementation gaps.
 
-Suggested fields:
+Suggested presentation fields:
 
 ```text
 Etapa: <stage>
@@ -914,12 +935,12 @@ Installation path handling must:
 
 - reject paths that are files when a directory is required;
 - avoid path traversal from disc filenames;
-- sanitize/contain extracted ISO paths under the install data root;
+- sanitize/contain extracted ISO paths under the generation's data root;
 - not follow a source-provided path outside the destination root;
-- handle partial/stale staging directories safely;
+- handle partial/stale inactive generations safely;
 - avoid deleting unknown files during legacy migration or reconversion;
-- use atomic/replace-safe patterns where supported;
-- report inability to guarantee atomicity rather than pretending it occurred.
+- use atomic replacement for `active_install.ini`;
+- reject activation if the pointer record or referenced manifest is malformed.
 
 ## 33. Architectural Completion Criteria
 
