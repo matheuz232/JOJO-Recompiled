@@ -32,6 +32,8 @@ jobs:
         run: |
           c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc -Itests tests/test_runtime_native_backend.cpp build/libjojo_core.a -ldl -pthread -o runtime_native_backend_tests
           ./runtime_native_backend_tests
+      - name: USA native backend promotion contract
+        run: ./build/jojo_game_backend_tests && ./runtime_native_backend_tests
       - name: Unverified base conversion contract
         run: |
           c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc -Itests tests/test_unverified_conversion.cpp build/libjojo_core.a -ldl -pthread -o unverified_conversion_tests
@@ -71,6 +73,11 @@ jobs:
         run: |
           call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
           cl /nologo /std:c++20 /EHsc /MD /W4 /permissive- /utf-8 /Isrc /Itests tests\test_runtime_native_backend.cpp build\Release\jojo_core.lib /Fe:runtime_native_backend_tests.exe
+          runtime_native_backend_tests.exe
+      - name: USA native backend promotion contract
+        shell: cmd
+        run: |
+          build\Release\jojo_game_backend_tests.exe
           runtime_native_backend_tests.exe
       - name: Observed disc revision contract
         shell: cmd
