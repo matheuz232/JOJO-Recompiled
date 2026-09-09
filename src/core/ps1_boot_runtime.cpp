@@ -32,12 +32,14 @@ void record_recent_trace(Ps1BootReport& report,
 }
 
 bool handle_bios_call(R3000aState& cpu,
+                      std::optional<Ps1BiosHeapState>& heap_state,
                       std::uint32_t table_physical,
                       std::uint32_t selector) noexcept {
     if (table_physical != kBiosA0 || selector != kBiosA0InitHeap) {
         return false;
     }
 
+    heap_state = Ps1BiosHeapState{cpu.gpr[4], cpu.gpr[5]};
     cpu.pc = cpu.gpr[31];
     cpu.next_pc = cpu.pc + 4u;
     cpu.delay_slot = {};
@@ -69,7 +71,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
             ++report.bios_call_count;
             report.recent_bios_calls.push_back(
                 Ps1BiosCallSummary{cpu_.pc, *physical_pc, cpu_.gpr[9]});
-            if (handle_bios_call(cpu_, *physical_pc, cpu_.gpr[9])) {
+            if (handle_bios_call(cpu_, bios_heap_state_, *physical_pc, cpu_.gpr[9])) {
                 continue;
             }
             report.stop_reason = Ps1BootStopReason::bios_call_unimplemented;
@@ -125,6 +127,10 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
 
 const R3000aState& Ps1BootRuntime::cpu_state() const noexcept {
     return cpu_;
+}
+
+const std::optional<Ps1BiosHeapState>& Ps1BootRuntime::bios_heap_state() const noexcept {
+    return bios_heap_state_;
 }
 
 Ps1MemoryBus& Ps1BootRuntime::bus() noexcept {
