@@ -25,7 +25,7 @@ Result<std::vector<std::uint8_t>> read_local_file(
         bytes.push_back(static_cast<std::uint8_t>(
             static_cast<unsigned char>(*it)));
     }
-    if (!in.eof()) {
+    if (in.bad()) {
         return Result<std::vector<std::uint8_t>>::failure(
             ErrorCode::io_error,
             "failed while reading installed PS1 file: " + path.string());
