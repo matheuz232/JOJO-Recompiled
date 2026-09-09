@@ -77,14 +77,23 @@ int main() {
         CHECK(s.gpr[10] == 0x22114433u);
     }
 
-    // Merge operations use aligned bus words even when the effective address itself is unaligned.
+    // Merge operations use an aligned 32-bit bus access, not the unaligned effective address.
     {
         TestR3000aBus bus;
         auto s = base_state();
         bus.store32(0x2000u, 0x44332211u);
-        bus.fail_unsupported(0x2001u); // must not be accessed directly
         bus.store32(0x1000u, test_mips::i(0x22, 4, 8, 1));
         CHECK(jojo::step_r3000a(s, bus).status == jojo::R3000aStepStatus::retired);
+        CHECK(bus.last_read32_address() == 0x2000u);
+    }
+    {
+        TestR3000aBus bus;
+        auto s = base_state();
+        bus.store32(0x2000u, 0x44332211u);
+        bus.store32(0x1000u, test_mips::i(0x2A, 4, 8, 2));
+        CHECK(jojo::step_r3000a(s, bus).status == jojo::R3000aStepStatus::retired);
+        CHECK(bus.last_read32_address() == 0x2000u);
+        CHECK(bus.last_write32_address() == 0x2000u);
     }
 
     return failures ? 1 : 0;
