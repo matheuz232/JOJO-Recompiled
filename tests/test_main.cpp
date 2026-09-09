@@ -1,258 +1,428 @@
-#include "core/conversion.h"
-#include "core/device_id.h"
-#include "core/disc_image.h"
-#include "core/input.h"
-#include "core/network_protocol.h"
-#include "core/online_session.h"
-#include "core/presentation.h"
-#include "core/revision.h"
-#include "core/runtime.h"
-#include "core/settings.h"
-#include "core/training.h"
 #include "core/version.h"
+#include "core/settings.h"
+#include "core/input.h"
+#include "core/disc_image.h"
+#include "core/conversion.h"
+#include "core/runtime.h"
+#include "core/device_id.h"
+#include "core/game_backend.h"
 #include "iso_fixture.h"
-#include <algorithm>
-#include <chrono>
-#include <cmath>
-#include <cstdint>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
 static int failures = 0;
+
 #define CHECK(expr) do { if (!(expr)) { std::cerr << __FILE__ << ':' << __LINE__ << " CHECK failed: " #expr "\n"; ++failures; } } while (0)
 
 static fs::path temp_file(std::string_view name) {
     auto p = fs::temp_directory_path() / (std::string("jojo_recompiled_") + std::string(name));
     std::error_code ec;
     fs::remove(p, ec);
+    fs::remove(p.string() + ".tmp", ec);
     return p;
 }
 
-static void test_version_shape() {
-    const auto version = jojo::core_version();
-    CHECK(version.find('.') != std::string::npos);
+static constexpr std::array<std::uint8_t, 12> kValidBoot{{
+    0x01, 0xE0,
+    0x02, 0x70,
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
+}};
+
+static constexpr std::array<std::uint8_t, 12> kUnsupportedBoot{{
+    0xFF, 0xFF,
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
+    0x09, 0x00,
+}};
+
+static std::uint64_t test_fnv1a64(std::span<const std::uint8_t> bytes) {
+    std::uint64_t hash = 14695981039346656037ull;
+    for (const auto byte : bytes) {
+        hash ^= byte;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+static jojo::GameRevisionProfile profile_for_boot(
+    std::string revision_id,
+    const std::array<std::uint8_t, 12>& boot) {
+    return {
+        std::move(revision_id),
+        {
+            {"/1ST_READ.BIN", 12u, test_fnv1a64(boot)},
+            {"/DATA/ASSET.DAT", 5u, 0x65f9a54a4f1d65c8ull},
+        }
+    };
+}
+
+static jojo::GameRevisionProfile synthetic_revision_profile() {
+    return {
+        "synthetic-test-revision",
+        {
+            {"/1ST_READ.BIN", 12, 0x87ee7cce3a6a6a10ull},
+            {"/DATA/ASSET.DAT", 5, 0x65f9a54a4f1d65c8ull},
+        }
+    };
+}
+
+static jojo::ConversionOptions synthetic_conversion_options() {
+    jojo::ConversionOptions options{};
+    options.revision_profiles.push_back(synthetic_revision_profile());
+    return options;
+}
+
+static void test_version() {
+    CHECK(!std::string_view(jojo::core_version()).empty());
+}
+
+static void test_graphics_defaults_are_valid() {
+    const jojo::GraphicsSettings g{};
+    CHECK(jojo::validate_graphics(g));
+    CHECK(g.width >= 640);
+    CHECK(g.height >= 480);
+}
+
+static void test_graphics_rejects_invalid_options() {
+    jojo::GraphicsSettings g{};
+    g.width = 9000;
+    CHECK(!jojo::validate_graphics(g));
+    g = {};
+    g.msaa = static_cast<jojo::Msaa>(16);
+    CHECK(!jojo::validate_graphics(g));
+    g = {};
+    g.texture_filter = static_cast<jojo::TextureFilter>(32);
+    CHECK(!jojo::validate_graphics(g));
+    g = {};
+    g.aspect_ratio = static_cast<jojo::AspectRatio>(99);
+    CHECK(!jojo::validate_graphics(g));
 }
 
 static void test_settings_round_trip() {
     const auto path = temp_file("settings.ini");
-    jojo::Settings expected{};
-    expected.display_mode = jojo::DisplayMode::borderless;
-    expected.vsync = false;
-    expected.frame_cap = 120;
-    expected.internal_scale = 3;
-    expected.master_volume = 0.75f;
-    expected.music_volume = 0.35f;
-    expected.sfx_volume = 0.90f;
-    expected.input_delay_frames = 2;
-    expected.rollback_frames = 8;
-    CHECK(jojo::save_settings(path, expected));
+    jojo::AppSettings in{};
+    in.install_dir = "C:/Games/JOJO-Recompiled";
+    in.graphics.width = 7680;
+    in.graphics.height = 4320;
+    in.graphics.aspect_ratio = jojo::AspectRatio::ratio_32_9;
+    in.graphics.texture_filter = jojo::TextureFilter::x16;
+    in.graphics.msaa = jojo::Msaa::x4;
+    in.graphics.display_mode = jojo::DisplayMode::fullscreen;
+    in.graphics.vsync = false;
+
+    const auto saved = jojo::save_settings_atomic(path, in);
+    CHECK(saved);
     const auto loaded = jojo::load_settings(path);
     CHECK(loaded);
     if (loaded) {
-        CHECK(loaded.value.display_mode == expected.display_mode);
-        CHECK(loaded.value.vsync == expected.vsync);
-        CHECK(loaded.value.frame_cap == expected.frame_cap);
-        CHECK(loaded.value.internal_scale == expected.internal_scale);
-        CHECK(std::fabs(loaded.value.master_volume - expected.master_volume) < 0.001f);
-        CHECK(std::fabs(loaded.value.music_volume - expected.music_volume) < 0.001f);
-        CHECK(std::fabs(loaded.value.sfx_volume - expected.sfx_volume) < 0.001f);
-        CHECK(loaded.value.input_delay_frames == expected.input_delay_frames);
-        CHECK(loaded.value.rollback_frames == expected.rollback_frames);
+        CHECK(loaded.value.install_dir == in.install_dir);
+        CHECK(loaded.value.graphics == in.graphics);
     }
     std::error_code ec;
     fs::remove(path, ec);
 }
 
-static void test_settings_clamp_invalid_values() {
-    const auto path = temp_file("settings_invalid.ini");
-    {
-        std::ofstream out(path);
-        out << "display_mode=fullscreen\n";
-        out << "vsync=no\n";
-        out << "frame_cap=999\n";
-        out << "internal_scale=0\n";
-        out << "master_volume=4\n";
-        out << "music_volume=-3\n";
-        out << "sfx_volume=0.5\n";
-        out << "input_delay_frames=99\n";
-        out << "rollback_frames=99\n";
-    }
+static void test_graphics_extended_options_round_trip() {
+    const auto path = temp_file("graphics_extended.ini");
+    jojo::AppSettings in{};
+    in.graphics.width = 3840;
+    in.graphics.height = 2160;
+    in.graphics.msaa = jojo::Msaa::x8;
+    in.graphics.display_mode = jojo::DisplayMode::borderless;
+    in.graphics.ui_scale = jojo::UiScale::percent_80;
+    in.graphics.hud_safe_area = jojo::HudSafeArea::safe_16_9;
+    CHECK(jojo::validate_graphics(in.graphics));
+    CHECK(jojo::save_settings_atomic(path, in));
     const auto loaded = jojo::load_settings(path);
     CHECK(loaded);
     if (loaded) {
-        CHECK(loaded.value.display_mode == jojo::DisplayMode::fullscreen);
-        CHECK(!loaded.value.vsync);
-        CHECK(loaded.value.frame_cap == 360);
-        CHECK(loaded.value.internal_scale == 1);
-        CHECK(loaded.value.master_volume == 1.0f);
-        CHECK(loaded.value.music_volume == 0.0f);
-        CHECK(loaded.value.sfx_volume == 0.5f);
-        CHECK(loaded.value.input_delay_frames == 6);
-        CHECK(loaded.value.rollback_frames == 12);
+        CHECK(loaded.value.graphics.msaa == jojo::Msaa::x8);
+        CHECK(loaded.value.graphics.display_mode == jojo::DisplayMode::borderless);
+        CHECK(loaded.value.graphics.ui_scale == jojo::UiScale::percent_80);
+        CHECK(loaded.value.graphics.hud_safe_area == jojo::HudSafeArea::safe_16_9);
     }
     std::error_code ec;
     fs::remove(path, ec);
 }
 
-static void test_presentation_viewport() {
-    jojo::PresentationConfig cfg{};
-    cfg.design_width = 640;
-    cfg.design_height = 480;
-    cfg.window_width = 1920;
-    cfg.window_height = 1080;
-    const auto vp = jojo::calculate_letterbox_viewport(cfg);
-    CHECK(vp.width == 1440);
-    CHECK(vp.height == 1080);
-    CHECK(vp.x == 240);
-    CHECK(vp.y == 0);
+static void test_graphics_rejects_unknown_extended_options() {
+    jojo::GraphicsSettings g{};
+    g.display_mode = static_cast<jojo::DisplayMode>(99);
+    CHECK(!jojo::validate_graphics(g));
+    g = {};
+    g.ui_scale = static_cast<jojo::UiScale>(999);
+    CHECK(!jojo::validate_graphics(g));
+    g = {};
+    g.hud_safe_area = static_cast<jojo::HudSafeArea>(99);
+    CHECK(!jojo::validate_graphics(g));
 }
 
-static void test_input_state_and_bindings() {
-    jojo::InputState state{};
-    state.buttons = jojo::InputButton::left | jojo::InputButton::light_punch;
-    state.left_x = 0.5f;
-    CHECK(jojo::has_button(state, jojo::InputButton::left));
-    CHECK(jojo::has_button(state, jojo::InputButton::light_punch));
-    CHECK(!jojo::has_button(state, jojo::InputButton::right));
-    CHECK(std::fabs(jojo::apply_deadzone(0.1f, 0.2f)) < 0.001f);
-    CHECK(jojo::apply_deadzone(0.9f, 0.2f) > 0.8f);
-}
-
-static void test_network_packet_round_trip() {
-    jojo::InputPacket input{};
-    input.frame = 42;
-    input.buttons = 0xA5A5;
-    input.left_x = 1234;
-    input.left_y = -2345;
-    input.right_x = 3210;
-    input.right_y = -4321;
-    const auto bytes = jojo::serialize_input_packet(input);
-    const auto parsed = jojo::parse_input_packet(bytes);
-    CHECK(parsed);
-    if (parsed) {
-        CHECK(parsed.value.frame == input.frame);
-        CHECK(parsed.value.buttons == input.buttons);
-        CHECK(parsed.value.left_x == input.left_x);
-        CHECK(parsed.value.left_y == input.left_y);
-        CHECK(parsed.value.right_x == input.right_x);
-        CHECK(parsed.value.right_y == input.right_y);
+static void test_input_bindings_round_trip() {
+    const auto path = temp_file("input_settings.ini");
+    jojo::AppSettings in{};
+    in.input.selected_device = "xinput:0";
+    in.input.bindings[jojo::GameAction::up] = {"xinput:0", jojo::BindingKind::gamepad_button, "DPAD_UP"};
+    in.input.bindings[jojo::GameAction::attack_light] = {"xinput:0", jojo::BindingKind::gamepad_button, "A"};
+    in.input.bindings[jojo::GameAction::pause] = {"keyboard:default", jojo::BindingKind::keyboard_key, "Escape"};
+    CHECK(jojo::save_settings_atomic(path, in));
+    const auto loaded = jojo::load_settings(path);
+    CHECK(loaded);
+    if (loaded) {
+        CHECK(loaded.value.input.selected_device == "xinput:0");
+        CHECK(loaded.value.input.bindings.at(jojo::GameAction::attack_light).code == "A");
+        CHECK(loaded.value.input.bindings.at(jojo::GameAction::pause).kind == jojo::BindingKind::keyboard_key);
     }
+    std::error_code ec;
+    fs::remove(path, ec);
 }
 
-static void test_online_session_frame_flow() {
-    jojo::OnlineSession session{};
-    session.set_local_input_delay(2);
-    jojo::InputState local{};
-    local.buttons = jojo::InputButton::heavy_punch;
-    session.submit_local_input(10, local);
-    CHECK(session.local_input_for_frame(10).buttons == jojo::InputButton::none);
-    CHECK(jojo::has_button(session.local_input_for_frame(12), jojo::InputButton::heavy_punch));
-}
-
-static void test_training_state_helpers() {
-    jojo::TrainingState state{};
-    jojo::apply_training_preset(state, jojo::TrainingPreset::full_meter);
-    CHECK(state.player1_meter == state.max_meter);
-    CHECK(state.player2_meter == state.max_meter);
-    state.player1_health = 10;
-    jojo::reset_training_positions(state);
-    CHECK(state.player1_health == state.max_health);
-}
-
-static void test_disc_fingerprint_and_extensions() {
-    CHECK(jojo::supported_disc_extension("game.iso"));
-    CHECK(jojo::supported_disc_extension("GAME.BIN"));
-    CHECK(jojo::supported_disc_extension("disc.cue"));
-    CHECK(!jojo::supported_disc_extension("disc.gdi"));
+static void test_disc_extension_detection() {
+    CHECK(jojo::supported_disc_extension("game.ISO"));
+    CHECK(jojo::supported_disc_extension("game.bin"));
+    CHECK(jojo::supported_disc_extension("game.cue"));
+    CHECK(!jojo::supported_disc_extension("game.gdi"));
     CHECK(!jojo::supported_disc_extension("game.zip"));
+}
 
-    const auto path = temp_file("disc.bin");
+static void test_disc_fingerprint_is_deterministic() {
+    const auto path = temp_file("disc.iso");
     {
         std::ofstream out(path, std::ios::binary);
-        out << "JOJO";
+        out << "JOJO-RECOMPILED-SYNTHETIC-DISC";
     }
-    const auto fp = jojo::fingerprint_disc_image(path);
-    CHECK(fp);
-    if (fp) {
-        CHECK(fp.value.format == "bin");
-        CHECK(fp.value.size_bytes == 4);
-        CHECK(fp.value.hash_hex.size() == 16);
+    const auto a = jojo::fingerprint_disc_image(path);
+    const auto b = jojo::fingerprint_disc_image(path);
+    CHECK(a);
+    CHECK(b);
+    if (a && b) {
+        CHECK(a.value.size_bytes == 30);
+        CHECK(a.value.fnv1a64 == b.value.fnv1a64);
+        CHECK(a.value.hash_hex == b.value.hash_hex);
+        CHECK(a.value.format == "iso");
     }
     std::error_code ec;
     fs::remove(path, ec);
 }
 
-static void test_conversion_requires_known_revision_by_default() {
-    const auto source = temp_file("conversion_unknown.iso");
-    test_iso::write_image(source);
-    const auto install = fs::temp_directory_path() / "jojo_recompiled_conversion_unknown";
+static void test_conversion_creates_source_independent_installation() {
+    const auto source = temp_file("convert.iso");
+    const auto install = fs::temp_directory_path() / "jojo_recompiled_install_test";
     std::error_code ec;
     fs::remove_all(install, ec);
-    const auto result = jojo::convert_image(source, install, jojo::ConversionOptions{});
-    CHECK(!result);
-    if (!result) CHECK(result.error == jojo::ErrorCode::unknown_revision);
+    test_iso::write_image(source);
+
+    const auto converted = jojo::convert_image(source, install, synthetic_conversion_options());
+    CHECK(converted);
+    CHECK(fs::exists(install / "game_manifest.ini"));
+    CHECK(fs::is_directory(install / "data"));
+    CHECK(fs::is_directory(install / "cache"));
+    fs::remove(source, ec);
+    CHECK(!fs::exists(source));
+    const auto manifest = jojo::load_conversion_manifest(install / "game_manifest.ini");
+    CHECK(manifest);
+    if (manifest) {
+        CHECK(manifest.value.source_name == source.filename().string());
+        CHECK(!manifest.value.hash_hex.empty());
+        CHECK(manifest.value.revision_id == "synthetic-test-revision");
+        CHECK(manifest.value.backend == "pending-game-specific-recompiler");
+    }
+    fs::remove_all(install, ec);
+}
+
+static void test_conversion_rejects_unknown_revision_before_installation() {
+    const auto source = temp_file("unknown_revision.iso");
+    const auto install = fs::temp_directory_path() / "jojo_recompiled_unknown_revision_test";
+    std::error_code ec;
+    fs::remove_all(install, ec);
+    test_iso::write_image(source);
+
+    jojo::ConversionOptions options{};
+    const auto converted = jojo::convert_image(source, install, options);
+    CHECK(!converted);
+    CHECK(converted.error == jojo::ErrorCode::unknown_revision);
+    CHECK(converted.detail.find("verified revision profiles") != std::string::npos);
+    CHECK(!fs::exists(install / "game_manifest.ini"));
+
     fs::remove(source, ec);
     fs::remove_all(install, ec);
 }
 
-static void test_conversion_unverified_base_path() {
-    const auto source = temp_file("conversion_unverified.iso");
-    test_iso::write_image(source);
-    const auto install = fs::temp_directory_path() / "jojo_recompiled_conversion_unverified";
+static void test_conversion_reports_real_monotonic_progress() {
+    const auto source = temp_file("progress.iso");
+    const auto install = fs::temp_directory_path() / "jojo_recompiled_progress_test";
     std::error_code ec;
     fs::remove_all(install, ec);
-    jojo::ConversionOptions options{};
-    options.allow_unverified_base_conversion = true;
-    const auto result = jojo::convert_image(source, install, options);
-    CHECK(result);
-    if (result) {
-        CHECK(result.value.manifest_version == "1");
-        CHECK(result.value.backend == "pending-game-specific-recompiler");
-        CHECK(result.value.revision_id.rfind("unverified-fnv1a64-", 0) == 0);
+    test_iso::write_image(source);
+
+    std::vector<jojo::ConversionProgress> events;
+    const auto converted = jojo::convert_image(
+        source, install, synthetic_conversion_options(),
+        [&](const jojo::ConversionProgress& event) { events.push_back(event); });
+    CHECK(converted);
+    CHECK(events.size() >= 7);
+    if (!events.empty()) {
+        CHECK(events.front().percent == 0);
+        CHECK(events.back().percent == 100);
+        CHECK(events.back().stage == jojo::ConversionStage::completed);
+        bool saw_filesystem = false;
+        bool saw_revision = false;
+        int previous = -1;
+        for (const auto& event : events) {
+            CHECK(event.percent >= 0);
+            CHECK(event.percent <= 100);
+            CHECK(event.percent >= previous);
+            CHECK(!event.message_key.empty());
+            saw_filesystem = saw_filesystem || event.stage == jojo::ConversionStage::discovering_filesystem;
+            saw_revision = saw_revision || event.stage == jojo::ConversionStage::identifying_revision;
+            previous = event.percent;
+        }
+        CHECK(saw_filesystem);
+        CHECK(saw_revision);
     }
     fs::remove(source, ec);
     fs::remove_all(install, ec);
 }
 
-static void test_conversion_progress_is_monotonic() {
-    const auto source = temp_file("conversion_progress.iso");
-    test_iso::write_image(source);
-    const auto install = fs::temp_directory_path() / "jojo_recompiled_conversion_progress";
+static void test_supported_revision_promotes_native_backend() {
+    const auto source = temp_file("usa_promotion.iso");
+    const auto install = fs::temp_directory_path() / "jojo_recompiled_usa_promotion_test";
     std::error_code ec;
     fs::remove_all(install, ec);
+    test_iso::write_image(source);
+    test_iso::install_dreamcast_ip_metadata(source);
+    test_iso::overwrite_boot_program_12(source, kValidBoot);
+
     jojo::ConversionOptions options{};
-    options.allow_unverified_base_conversion = true;
-    std::vector<int> percents;
-    const auto result = jojo::convert_image(source, install, options,
-        [&](const jojo::ConversionProgress& progress) { percents.push_back(progress.percent); });
-    CHECK(result);
-    CHECK(!percents.empty());
-    CHECK(std::is_sorted(percents.begin(), percents.end()));
-    CHECK(percents.back() == 100);
+    options.revision_profiles.push_back(
+        profile_for_boot(std::string(jojo::kJojoUsaObservedRevisionId), kValidBoot));
+    std::vector<jojo::ConversionProgress> events;
+    const auto converted = jojo::convert_image(
+        source, install, options,
+        [&](const jojo::ConversionProgress& event) { events.push_back(event); });
+    CHECK(converted);
+    if (converted) {
+        CHECK(converted.value.revision_id == jojo::kJojoUsaObservedRevisionId);
+        CHECK(converted.value.backend == "native-ready");
+        CHECK(jojo::has_complete_native_backend_metadata(converted.value));
+    }
+    CHECK(jojo::bootstrap_runtime(install));
+
+    bool saw_preparing_backend = false;
+    bool saw_building_backend = false;
+    bool saw_verifying_backend = false;
+    bool saw_promoting_backend = false;
+    int previous = -1;
+    for (const auto& event : events) {
+        CHECK(event.percent >= previous);
+        previous = event.percent;
+        saw_preparing_backend = saw_preparing_backend ||
+            event.stage == jojo::ConversionStage::preparing_game_backend;
+        saw_building_backend = saw_building_backend ||
+            event.stage == jojo::ConversionStage::building_native_backend;
+        saw_verifying_backend = saw_verifying_backend ||
+            event.stage == jojo::ConversionStage::verifying_native_backend;
+        saw_promoting_backend = saw_promoting_backend ||
+            event.stage == jojo::ConversionStage::promoting_native_backend;
+    }
+    CHECK(saw_preparing_backend);
+    CHECK(saw_building_backend);
+    CHECK(saw_verifying_backend);
+    CHECK(saw_promoting_backend);
+
     fs::remove(source, ec);
     fs::remove_all(install, ec);
 }
 
-static void test_conversion_rejects_gdi() {
-    const auto gdi = temp_file("conversion_reject.gdi");
+static void test_failed_reprepare_leaves_pending_manifest() {
+    const auto source = temp_file("usa_reprepare.iso");
+    const auto install = fs::temp_directory_path() / "jojo_recompiled_usa_reprepare_test";
+    std::error_code ec;
+    fs::remove_all(install, ec);
+    test_iso::write_image(source);
+    test_iso::install_dreamcast_ip_metadata(source);
+    test_iso::overwrite_boot_program_12(source, kValidBoot);
+
+    jojo::ConversionOptions good_options{};
+    good_options.revision_profiles.push_back(
+        profile_for_boot(std::string(jojo::kJojoUsaObservedRevisionId), kValidBoot));
+    const auto first = jojo::convert_image(source, install, good_options);
+    CHECK(first);
+    if (first) CHECK(first.value.backend == "native-ready");
+    CHECK(jojo::bootstrap_runtime(install));
+
+    test_iso::overwrite_boot_program_12(source, kUnsupportedBoot);
+    jojo::ConversionOptions bad_options{};
+    bad_options.revision_profiles.push_back(
+        profile_for_boot(std::string(jojo::kJojoUsaObservedRevisionId), kUnsupportedBoot));
+    const auto failed = jojo::convert_image(source, install, bad_options);
+    CHECK(!failed);
+    CHECK(failed.error == jojo::ErrorCode::backend_unavailable);
+
+    const auto pending = jojo::load_conversion_manifest(install / "game_manifest.ini");
+    CHECK(pending);
+    if (pending) CHECK(pending.value.backend == "pending-game-specific-recompiler");
+    const auto boot = jojo::bootstrap_runtime(install);
+    CHECK(!boot);
+    CHECK(boot.error == jojo::ErrorCode::backend_unavailable);
+
+    fs::remove(source, ec);
+    fs::remove_all(install, ec);
+}
+
+static void test_conversion_accepts_bin_and_cue_media() {
+    const auto iso = temp_file("multi_media_source.iso");
+    const auto raw = temp_file("multi_media_track.bin");
+    const auto cue = temp_file("multi_media.cue");
+    test_iso::write_image(iso);
+    test_iso::write_raw2352_from_iso(iso, raw, 1);
+
     {
-        std::ofstream out(gdi);
-        out << "1\n1 0 4 2352 track.bin 0\n";
+        std::ofstream out(cue);
+        out << "FILE \"" << raw.filename().string() << "\" BINARY\n";
+        out << "  TRACK 01 MODE1/2352\n";
+        out << "    INDEX 01 00:00:00\n";
     }
-    const auto install = fs::temp_directory_path() / "jojo_recompiled_conversion_gdi";
+
+    const std::vector<std::pair<fs::path, std::string>> media = {
+        {raw, "bin"}, {cue, "cue"}
+    };
     std::error_code ec;
-    fs::remove_all(install, ec);
-    const auto result = jojo::convert_image(gdi, install);
-    CHECK(!result);
-    if (!result) CHECK(result.error == jojo::ErrorCode::unsupported_format);
-    fs::remove(gdi, ec);
-    fs::remove_all(install, ec);
+    for (const auto& [source_path, expected_format] : media) {
+        const auto install = fs::temp_directory_path() /
+            ("jojo_recompiled_track_conversion_" + expected_format);
+        fs::remove_all(install, ec);
+        const auto converted = jojo::convert_image(source_path, install, synthetic_conversion_options());
+        CHECK(converted);
+        if (converted) {
+            CHECK(converted.value.source_format == expected_format);
+            CHECK(converted.value.revision_id == "synthetic-test-revision");
+            CHECK(converted.value.backend == "pending-game-specific-recompiler");
+        }
+        const auto manifest = jojo::load_conversion_manifest(install / "game_manifest.ini");
+        CHECK(manifest);
+        if (manifest) {
+            CHECK(manifest.value.source_format == expected_format);
+            CHECK(manifest.value.revision_id == "synthetic-test-revision");
+            CHECK(manifest.value.backend == "pending-game-specific-recompiler");
+        }
+        fs::remove_all(install, ec);
+    }
+
+    fs::remove(iso, ec);
+    fs::remove(raw, ec);
+    fs::remove(cue, ec);
 }
 
 static void test_runtime_installation_validation() {
@@ -265,7 +435,6 @@ static void test_runtime_installation_validation() {
     fs::create_directories(install / "data");
     fs::create_directories(install / "cache");
     jojo::ConversionManifest m{};
-    m.manifest_version = "1";
     m.converter_version = jojo::core_version();
     m.source_name = "owned.iso";
     m.source_format = "iso";
@@ -291,25 +460,27 @@ static void test_device_id_helpers_are_stable() {
 }
 
 int main() {
-    test_version_shape();
+    test_version();
+    test_graphics_defaults_are_valid();
+    test_graphics_rejects_invalid_options();
     test_settings_round_trip();
-    test_settings_clamp_invalid_values();
-    test_presentation_viewport();
-    test_input_state_and_bindings();
-    test_network_packet_round_trip();
-    test_online_session_frame_flow();
-    test_training_state_helpers();
-    test_disc_fingerprint_and_extensions();
-    test_conversion_requires_known_revision_by_default();
-    test_conversion_unverified_base_path();
-    test_conversion_progress_is_monotonic();
-    test_conversion_rejects_gdi();
+    test_graphics_extended_options_round_trip();
+    test_graphics_rejects_unknown_extended_options();
+    test_input_bindings_round_trip();
+    test_disc_extension_detection();
+    test_disc_fingerprint_is_deterministic();
+    test_conversion_creates_source_independent_installation();
+    test_conversion_rejects_unknown_revision_before_installation();
+    test_conversion_reports_real_monotonic_progress();
+    test_supported_revision_promotes_native_backend();
+    test_failed_reprepare_leaves_pending_manifest();
+    test_conversion_accepts_bin_and_cue_media();
     test_runtime_installation_validation();
     test_device_id_helpers_are_stable();
     if (failures) {
         std::cerr << failures << " test assertion(s) failed\n";
         return 1;
     }
-    std::cout << "all core assertions passed\n";
+    std::cout << "all assertions passed\n";
     return 0;
 }
