@@ -75,7 +75,6 @@ if(WIN32)
   target_compile_definitions(jojo_recompiled PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
   target_link_libraries(jojo_recompiled PRIVATE jojo_core jojo_win32_input_host shell32 ole32 uuid d3d11 dxgi)
 
-  # Run the real application entry point and message loop to catch missing UI controls.
   add_executable(jojo_win32_image_selection_tests
     tests/test_win32_image_selection.cpp
     src/app_win32/main.cpp)
@@ -106,6 +105,9 @@ add_test(NAME jojo_iso_tests COMMAND jojo_iso_tests)
 add_executable(jojo_media_tests tests/test_disc_media.cpp)
 target_link_libraries(jojo_media_tests PRIVATE jojo_core)
 add_test(NAME jojo_media_tests COMMAND jojo_media_tests)
+add_executable(jojo_ps1_system_cnf_tests tests/test_ps1_system_cnf.cpp)
+target_link_libraries(jojo_ps1_system_cnf_tests PRIVATE jojo_core)
+add_test(NAME jojo_ps1_system_cnf_tests COMMAND jojo_ps1_system_cnf_tests)
 add_executable(jojo_boot_tests tests/test_dreamcast_boot.cpp)
 target_link_libraries(jojo_boot_tests PRIVATE jojo_core)
 add_test(NAME jojo_boot_tests COMMAND jojo_boot_tests)
@@ -220,51 +222,39 @@ add_test(NAME jojo_sh4_fpu_unary_tests COMMAND jojo_sh4_fpu_unary_tests)
 add_executable(jojo_sh4_fpu_completion_tests tests/test_sh4_fpu_completion.cpp)
 target_link_libraries(jojo_sh4_fpu_completion_tests PRIVATE jojo_core)
 add_test(NAME jojo_sh4_fpu_completion_tests COMMAND jojo_sh4_fpu_completion_tests)
-
 add_executable(jojo_sh4_fpu_disable_tests tests/test_sh4_fpu_disable.cpp)
 target_link_libraries(jojo_sh4_fpu_disable_tests PRIVATE jojo_core)
 add_test(NAME jojo_sh4_fpu_disable_tests COMMAND jojo_sh4_fpu_disable_tests)
-
 add_executable(jojo_native_backend_tests tests/test_native_backend.cpp)
 target_link_libraries(jojo_native_backend_tests PRIVATE jojo_core)
 add_test(NAME jojo_native_backend_tests COMMAND jojo_native_backend_tests)
-
 add_executable(jojo_game_backend_tests tests/test_game_backend.cpp)
 target_link_libraries(jojo_game_backend_tests PRIVATE jojo_core)
 add_test(NAME jojo_game_backend_tests COMMAND jojo_game_backend_tests)
-
 add_executable(jojo_presentation_tests tests/test_presentation.cpp)
 target_link_libraries(jojo_presentation_tests PRIVATE jojo_core)
 add_test(NAME jojo_presentation_tests COMMAND jojo_presentation_tests)
-
 add_executable(jojo_semver_tests tests/test_semver.cpp)
 target_link_libraries(jojo_semver_tests PRIVATE jojo_core)
 add_test(NAME jojo_semver_tests COMMAND jojo_semver_tests)
-
 add_executable(jojo_sha256_tests tests/test_sha256.cpp)
 target_link_libraries(jojo_sha256_tests PRIVATE jojo_core)
 add_test(NAME jojo_sha256_tests COMMAND jojo_sha256_tests)
-
 add_executable(jojo_mod_runtime_tests tests/test_mod_runtime.cpp)
 target_link_libraries(jojo_mod_runtime_tests PRIVATE jojo_core)
 add_test(NAME jojo_mod_runtime_tests COMMAND jojo_mod_runtime_tests)
-
 add_executable(jojo_m5_settings_input_tests tests/test_m5_settings_input.cpp)
 target_link_libraries(jojo_m5_settings_input_tests PRIVATE jojo_core)
 add_test(NAME jojo_m5_settings_input_tests COMMAND jojo_m5_settings_input_tests)
-
 add_executable(jojo_training_tests tests/test_training.cpp)
 target_link_libraries(jojo_training_tests PRIVATE jojo_core)
 add_test(NAME jojo_training_tests COMMAND jojo_training_tests)
-
 add_executable(jojo_rollback_tests tests/test_rollback.cpp)
 target_link_libraries(jojo_rollback_tests PRIVATE jojo_core)
 add_test(NAME jojo_rollback_tests COMMAND jojo_rollback_tests)
-
 add_executable(jojo_online_session_tests tests/test_online_session.cpp)
 target_link_libraries(jojo_online_session_tests PRIVATE jojo_core)
 add_test(NAME jojo_online_session_tests COMMAND jojo_online_session_tests)
-
 add_executable(jojo_mod_policy_tests tests/test_mod_policy.cpp)
 target_link_libraries(jojo_mod_policy_tests PRIVATE jojo_core)
 add_test(NAME jojo_mod_policy_tests COMMAND jojo_mod_policy_tests)
