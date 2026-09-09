@@ -1,17 +1,21 @@
 # Next milestones
 
-The reusable architecture roadmap is [`architecture/PRODUCTION-ROADMAP.md`](architecture/PRODUCTION-ROADMAP.md). Production-completion status is machine-checked from [`architecture/PRODUCTION-READINESS.tsv`](architecture/PRODUCTION-READINESS.tsv).
+The active guest architecture is PlayStation 1 and the project scope is this JoJo title/revision family only. Current machine-checkable readiness remains in [`architecture/PRODUCTION-READINESS.tsv`](architecture/PRODUCTION-READINESS.tsv).
 
-**R2.1 — Repository truth and release gates** is `verified`. Its readiness contract remains the authority for production-completion claims.
+**R2.1 — Repository truth and release gates** is `verified` for the PS1 architecture-clean baseline. The active build/CTest/workflow no longer contains Dreamcast/SH-4 guest/backend targets.
 
-**R2.2 — Commercial revision enablement** is `blocked-external-evidence` until legally supplied supported commercial media is available for independently verified fingerprints. No fingerprint or commercial-game data may be guessed to bypass that blocker.
+The immediate evidence milestone is a **new local PS1 M1 run** with the user's same legally obtained image. The expected success boundary is: source fingerprint recognized; PS1 ISO9660 opened; `SYSTEM.CNF` resolved; commercial `PS-X EXE` validated; local generation installed; manifest v2 activated; then stop truthfully at `R3000A/MIPS analysis pending`.
 
-**R2.3 — Game-specific execution and device integration** remains `implemented-unverified`. The Maple runtime package has generic Linux/Windows evidence for chained DMA, controller Device Request/Get Condition, input bridging, completion signaling and boot-harness integration. That evidence does not establish compatibility with the commercial game and therefore does not promote R2.3 to `verified`.
+**R2.2 — Commercial revision enablement** remains blocked on that local commercial-image evidence. The known whole-image fingerprint is recognized, but the corrected PS1 path has not yet observed the commercial `PS-X EXE` on the user's real image.
 
-**R2.4 — Real gameplay integration** is `blocked-external-evidence` by the same legally supplied supported commercial image required by R2.2. Real gameplay adapters may not be fabricated from synthetic fixtures.
+**R2.3 — Game-specific execution and device integration** is not started for the active PS1 architecture. The next engineering milestone after successful M1 evidence is an R3000A/MIPS I reference core built with synthetic TDD: register invariants, little-endian memory semantics, branch delay slots, load delay behavior, HI/LO, and only the exception/COP0/GTE behavior demonstrated to be required by this JoJo.
 
-**R2.5 — Online product modes/M9** remains `implemented-unverified` and is the active non-external track. The direct-session transport and product-facing `OnlineSessionController` are integrated into `main`, with Linux/Windows evidence from `github-actions:run-33862743012`. The integrated scope includes real nonblocking IPv4 UDP, caller-driven heartbeat/liveness, pinned-peer reconnect, reconnect timeout, gameplay suppression outside `connected`, spoof-resistant liveness accounting, RTT/jitter/loss telemetry, strict direct-endpoint parsing, Host/Join orchestration, stable product lifecycle state, local/remote endpoint presentation, gameplay gating, explicit disconnect/reset and operational-fault persistence. This evidence does not establish commercial-game online compatibility and does not complete M9.
+After the reference semantics are stable, the next compiler milestone is MIPS CFG/IR plus host x64 lowering/cache verification. Native x64 code generation is not an M1 capability and must not be claimed early.
 
-The next R2.5 increment is **in-game Online presentation/integration around the direct-session controller**: expose direct Host/Join, connection/reconnect/disconnect status and telemetry through the product flow, then bridge the established session to the real gameplay/rollback loop when game-specific integration evidence is available. Do not place production-online claims on the launcher merely to make the feature visible.
+**R2.4 — Real gameplay integration** remains not started. PS1 memory/bus, BIOS HLE, DMA, timers/interrupts, GPU, GTE, SPU, CD-ROM and controller work will be added evidence-first according to accesses actually made by the game. Unsupported operations must produce explicit diagnostics rather than fabricated success.
 
-Casual/ranked service claims, matchmaking, public rooms, invitations, accounts, relay/NAT traversal and related production-service capabilities remain unavailable until their actual infrastructure is explicitly scoped and integrated. Preserve the external-evidence blockers and the single-executable product contract.
+**R2.5 — Online product modes/M9** retains host-side rollback/networking infrastructure only. It is not proof of commercial-game online integration and is lower priority than getting the base PS1 game executing correctly.
+
+**R2.6 — Production validation/release** remains not started. Boot, rendering, audio, input and gameplay require independent evidence before any playable/release claim.
+
+No milestone may add commercial game bytes or a proprietary PlayStation BIOS to Git, CI, artifacts or releases.

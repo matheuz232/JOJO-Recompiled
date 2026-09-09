@@ -1,32 +1,46 @@
 # JOJO Recompiled
 
-JOJO Recompiled is an experimental native-Windows recompilation project for a **user-supplied, legally obtained** copy of *JoJo's Bizarre Adventure: Heritage for the Future*.
+JOJO Recompiled is an experimental native-Windows recompilation project for a **user-supplied, legally obtained PlayStation 1 copy** of *JoJo's Bizarre Adventure: Heritage for the Future*.
 
-This repository contains **no game image, original executable, artwork, music, ROM data, or extracted copyrighted game assets**.
+The active guest platform is **Sony PlayStation 1 only**, and the scope is **this JoJo title/revision family only**. This is not a general PlayStation emulator.
 
-## Product direction
+This repository contains **no game image, PS-X EXE, PlayStation BIOS, artwork, music, ROM data, or extracted copyrighted game assets**. The final runtime is designed not to require a proprietary external BIOS.
 
-The end-user product is intentionally one executable:
+## Product contract
+
+The end-user application remains one executable:
 
 ```text
 JOJO-Recompiled.exe
 ```
 
-On first launch it asks for the user's own supported game image and prepares local converted data under `%LOCALAPPDATA%\JOJO Recompiled\game`. Later launches should go directly into the game only after the production-readiness gates are actually satisfied. Graphics, controls, audio, mods, training tools and Online belong to the in-game menus rather than an external launcher.
+On first launch it asks for the user's own supported PS1 image (`.iso`, `.bin`, or `.cue`) and lets the user choose the installation root. `%LOCALAPPDATA%\JOJO Recompiled\game` is only the proposed default, not a fixed destination. The source image is opened read-only.
 
-## Current production program
+## Current state — PS1 M1 foundation
 
-The reusable architecture milestones M1–M8 are complete within their scoped contracts. The active program is **R2 — Production completion**, which requires evidence for real commercial-game integration before any global playability claim.
+The current active implementation is the PlayStation 1 M1 foundation:
 
-Canonical machine-checkable status: [`docs/architecture/PRODUCTION-READINESS.tsv`](docs/architecture/PRODUCTION-READINESS.tsv).
+- observed USA whole-image fingerprint: recognized;
+- PS1 ISO/BIN/CUE media path: implemented;
+- `SYSTEM.CNF` boot-path discovery: implemented and synthetic-test verified;
+- `PS-X EXE` parsing/validation and hashing: implemented and synthetic-test verified;
+- user-selectable install root: implemented;
+- transactional generation installation and active-generation pointer: implemented;
+- incompatible legacy Dreamcast/SH-4 guest/backend architecture: removed from the active build, tests, and CI contracts;
+- R3000A/MIPS execution: **not implemented in M1**;
+- native x64 code generation for R3000A: **not implemented in M1**;
+- commercial PS-X EXE discovery on the user's real image: **awaiting a new local run**;
+- boot, rendering, audio, game-input integration, and gameplay: **not verified**.
 
-Commercial-game integration is not yet verified. In particular, a supported commercial revision still requires independently verified fingerprints from a legally supplied user image, and real game boot/render/audio/input/gameplay evidence remains outside the completed reusable contracts.
+A synthetic fixture proves parser/conversion contracts only. It does not prove the commercial game boots or is playable.
 
-Implemented in the portable core includes the C++20/CMake/CTest foundation, disc-media parsing and revision infrastructure, deterministic SH-4/runtime contracts, presentation/settings/input contracts, mod runtime, training laboratory and rollback/networking core.
+The repository still uses the **R2 — Production completion** readiness vocabulary and machine-checkable status file at [`docs/architecture/PRODUCTION-READINESS.tsv`](docs/architecture/PRODUCTION-READINESS.tsv), but old Dreamcast/SH-4 implementation claims are not active product claims.
 
-Implemented for Windows includes the single shipping target `JOJO-Recompiled.exe`, first-run image selection/conversion UI, `%LOCALAPPDATA%\JOJO Recompiled` storage, platform presentation/input adapters and Windows/MSVC CI coverage.
+Commercial-game integration is not yet verified. The next evidence boundary is a local run against the user's same legally obtained PS1 image to confirm `SYSTEM.CNF` resolution and commercial `PS-X EXE` validation without storing commercial bytes in Git or CI.
 
-The generic native backend architecture is implemented, but that is not equivalent to verified commercial-game execution. Conversion/runtime readiness must remain truthful until R2.2–R2.6 evidence exists.
+## Retained host-side infrastructure
+
+Console-neutral components retained from earlier work include presentation/settings/input models, mods, training tools, rollback/networking utilities, revision/fingerprint infrastructure, ISO9660/media handling, Windows application plumbing, and CI. Their existence does **not** mean they are already connected to the original PS1 game code.
 
 ## Build on Windows
 
@@ -34,8 +48,8 @@ See [`docs/BUILD-WINDOWS.md`](docs/BUILD-WINDOWS.md).
 
 ## Architecture / roadmap
 
-See [`docs/architecture/PRODUCTION-ROADMAP.md`](docs/architecture/PRODUCTION-ROADMAP.md) for the reusable architecture milestones and [`docs/superpowers/specs/2026-09-01-production-completion-design.md`](docs/superpowers/specs/2026-09-01-production-completion-design.md) for the evidence-based R2 production-completion program.
+See [`docs/architecture/PRODUCTION-ROADMAP.md`](docs/architecture/PRODUCTION-ROADMAP.md) for the current PS1 roadmap. Historical design/plan files under `docs/superpowers/` remain in Git as project history and are not the active guest architecture.
 
 ## CI
 
-GitHub Actions builds/tests the portable core on Linux and the complete x64 application on `windows-2022`. Both jobs run the production-readiness gate, and the Windows job uploads only `JOJO-Recompiled.exe` as its application artifact.
+GitHub Actions builds/tests the portable core on Linux and the x64 application on `windows-2022`. Both jobs run the production-readiness gate and the PS1 active-architecture gate. The Windows job uploads only `JOJO-Recompiled.exe` as the application artifact.

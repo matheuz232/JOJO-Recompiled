@@ -1,58 +1,82 @@
 # JOJO Recompiled — Project State
 
-## Integrated line
+## Active development line
 
 - Repository: `matheuz232/JOJO-Recompiled`
-- Current integrated branch: `main`
-- R2.5 online-controller merge commit: `5122c2ad4eb475ec852eb7196f2f98dc8fa2b998`
-- Post-merge `main` CI: `33862743012` — Linux and Windows passed build, readiness, CTests and the R2.5 UDP contract.
+- Active branch: `feature/ps1-foundation-m1`
+- Active platform: **Sony PlayStation 1**
+- Product scope: **this JoJo title/revision family only**
+- PS1 architecture-clean commit: `c4a358b26755a7a32bdf4b2cf28d8aa941dc2568`
+- Verification workflow: `34314593101` (run #1287)
+- Linux job: passed configure, build, production-readiness gate, PS1 active-architecture gate, CTest, observed-disc revision contract, and UDP transport contract.
+- Windows job: passed configure, Release build, production-readiness gate, PS1 active-architecture gate, Release CTest, observed-disc revision contract, UDP transport contract, and artifact upload.
 - Windows artifact: `JOJO-Recompiled-Windows-x64`
-- Artifact ID: `9932817079`
-- Artifact digest: `sha256:f574aace1a1083e7227610c4a2a441d54986ef60869d4311f685b0ddc769a3ff`
+- Artifact ID: `10089639003`
+- Artifact digest: `sha256:5e93b51a671bcbccdbfc7e32baca3ff9ac0c3c09192447ca5666753b15b05721`
 - Shipping policy: one `JOJO-Recompiled.exe`.
-- Mods remain deferred until the base game reaches 100%.
 
-## Production workstreams
+## PS1 M1 evidence
 
-- R2.1: `verified`
-- R2.2: `blocked-external-evidence` — requires a legally supplied supported commercial image.
-- R2.3: `implemented-unverified` — generic execution/device integration exists; commercial compatibility is not proven.
-- R2.4: `blocked-external-evidence` — real gameplay integration requires the same legal commercial evidence.
-- R2.5: `implemented-unverified` — direct UDP transport, reconnect/liveness/telemetry and the product-facing direct-session controller are integrated into `main`; M9 is not complete.
-- R2.6: `not-started`
+Verified by repository tests/CI:
 
-## R2.5 reconnect checkpoint
-
-- RED commit: `bb1614c52114b37e3181cf5e805b3ff840c49978`
-- RED workflow: `33837212025`
-- Implementation commit: `4e7460fa04c7c40b44bc88e87cfd6b1eff6e01cc`
-- Feature GREEN workflow: `33837379074`
-- Merge-validation workflow: `33838201969`
-- Post-merge `main` workflow: `33838410540`
-
-Implemented scope includes configurable heartbeat/liveness/reconnect timing, pinned-peer liveness accounting, `connected -> reconnecting -> connected` recovery, terminal reconnect timeout, gameplay suppression while reconnecting, spoof rejection before liveness refresh, and RTT/jitter/loss telemetry integration.
-
-## R2.5 online controller checkpoint
-
-- Source branch: `feature/r2-5-online-controller` (merged)
-- Design: `docs/superpowers/specs/2026-09-04-r2-5-online-controller-design.md`
-- Plan: `docs/superpowers/plans/2026-09-04-r2-5-online-controller.md`
-- Functional/test checkpoint: `2a39d9cd51e62b7a53ee9fef6754df30b25510c8`
-- Feature GREEN workflow: `33842642660`
-- Feature checkpoint: `4e308e5652372b27e9d54ae594a2cf9cbd9f8041`
-- Feature checkpoint workflow: `33843852831`
-- Integration merge commit: `5122c2ad4eb475ec852eb7196f2f98dc8fa2b998`
-- Post-merge `main` workflow: `33862743012`
-- Windows artifact: `JOJO-Recompiled-Windows-x64`
-- Artifact ID: `9932817079`
-- Artifact digest: `sha256:f574aace1a1083e7227610c4a2a441d54986ef60869d4311f685b0ddc769a3ff`
-
-Implemented controller scope includes strict IPv4 `A.B.C.D:PORT` parsing, host/join lifecycle, waiting/connecting/connected/reconnecting/disconnected/faulted product states, local/remote endpoint presentation, gameplay gating, RTT/jitter/loss/counter telemetry, reconnect recovery/timeout mapping, explicit disconnect, reset, spoof-resistant liveness behavior, and operational-fault persistence.
+- `.iso`, `.bin`, and `.cue` are the active PS1 source formats; `.gdi` is rejected.
+- raw MODE1/2352 and MODE2/2352 logical-sector extraction remains supported.
+- ISO9660 access is retained.
+- strict `SYSTEM.CNF` boot-path parsing is implemented.
+- `PS-X EXE` validation/metadata/hash handling is implemented.
+- user-selectable installation root is implemented.
+- transactional generation staging/activation and manifest v2 handling are implemented.
+- the observed USA whole-image fingerprint `bin / 666806112 / b8b5dbf79cdb9fcf` is recognized as `jojo-usa-observed-b8b5dbf79cdb9fcf`.
+- Dreamcast/SH-4 guest sources, old guest backend files, old guest tests, and old native-backend workflow contracts are absent from the active architecture.
 
 ## Truth boundary
 
-No internal test, synthetic fixture or CI artifact is treated as proof that the commercial game is playable or that commercial online behavior is compatible. These R2.5 increments do not claim production matchmaking, ranked services, NAT traversal, relay service, accounts, encryption, public rooms, invitations, profiles/history/replays, game-specific online integration or complete M9 UI.
+The following are **not** verified or implemented by M1:
+
+- R3000A/MIPS instruction execution;
+- MIPS CFG/IR execution;
+- native x64 code generation for R3000A;
+- PlayStation BIOS/HLE service coverage for the commercial game;
+- commercial PS-X EXE discovery on the user's real image after the architecture migration;
+- commercial boot;
+- GPU rendering;
+- SPU audio;
+- original-game controller integration;
+- gameplay.
+
+Synthetic fixtures and CI prove only the repository contracts they exercise. They are not proof that the commercial game is playable.
+
+## Commercial-image evidence still required
+
+The user's previously observed whole-image fingerprint is known, but the corrected PS1 M1 pipeline still needs one new local run against the same legally obtained image. The success boundary for that run is:
+
+```text
+source recognized
+PS1 filesystem opened
+SYSTEM.CNF resolved
+PS-X EXE validated
+local generation installed
+manifest v2 activated
+R3000A/MIPS analysis pending
+```
+
+No commercial game bytes, extracted PS-X EXE, or proprietary BIOS are to be committed to the repository or CI.
+
+## Production workstreams
+
+Canonical status remains in `docs/architecture/PRODUCTION-READINESS.tsv`.
+
+- R2.1: repository truth/release gates — verified by the PS1 architecture-clean CI baseline.
+- R2.2: commercial revision enablement — blocked on a new local commercial-image M1 run for PS-X EXE discovery evidence.
+- R2.3: game-specific execution/device integration — not started for PS1 because R3000A execution is not implemented yet.
+- R2.4: real gameplay integration — not started.
+- R2.5: host-side online/rollback infrastructure exists but is not integrated with the commercial PS1 game.
+- R2.6: production validation/release — not started.
 
 ## Next priority
 
-Finish the R2.5 product path by presenting and integrating the direct Host/Join session flow in-game around the controller, without inventing service infrastructure. Then continue to R2.6 production validation. Resume R2.2/R2.4 immediately when legally supplied supported commercial evidence is available.
+1. Run the new Windows M1 artifact locally with the user's same legally obtained PS1 BIN/CUE and capture only derived logs/metadata.
+2. If `SYSTEM.CNF` and the commercial `PS-X EXE` validate, use that evidence to define the exact R3000A/MIPS instruction and runtime requirements.
+3. Begin the R3000A reference-execution milestone with synthetic TDD before any native x64 codegen claim.
+
+Historical Dreamcast/SH-4 plans/specs under `docs/superpowers/` remain only as project history.
