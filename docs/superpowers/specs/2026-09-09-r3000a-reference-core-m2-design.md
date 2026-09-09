@@ -57,12 +57,12 @@ M2 introduces focused modules with narrow interfaces:
 
 - `src/core/r3000a_state.h`
   - architectural CPU state only;
-  - 32 GPRs, HI, LO, PC/next-PC, pending delayed load, COP0 state and exception bookkeeping;
+  - 32 GPRs, HI, LO, PC/next-PC, delayed-load state, COP0 state and exception/delay-slot bookkeeping;
   - no host window/audio/input state.
 
 - `src/core/r3000a_bus.h`
   - abstract guest memory operations;
-  - `read8/read16/read32` and `write8/write16/write32` with explicit failure results;
+  - `read8/read16/read32` and `write8/write16/write32` with explicit typed failures;
   - future PS1 bus implementation plugs into this interface.
 
 - `src/core/r3000a_diagnostics.h`
@@ -71,7 +71,7 @@ M2 introduces focused modules with narrow interfaces:
 
 - `src/core/r3000a_reference_executor.h/.cpp`
   - one-instruction semantic execution;
-  - delay/load pipelines;
+  - branch/load pipelines;
   - exception entry;
   - COP0 subset;
   - deterministic interaction with `R3000aBus`.
@@ -89,11 +89,12 @@ LO
 PC
 next_PC
 pending_load { valid, register_index, value }
+delay_slot { active, branch_pc, taken, target }
 COP0.Status
 COP0.Cause
 COP0.EPC
 COP0.BadVAddr
-exception/branch-delay bookkeeping
+COP0.TargetAddress
 ```
 
 `GPR[0]` is architecturally hard-wired to zero. Any attempted write to register 0 is discarded. The invariant is reasserted at the public executor boundary so a malformed test fixture cannot leave `$zero` non-zero after a step.
@@ -118,13 +119,15 @@ A not-taken conditional branch still executes its sequential delay-slot instruct
 
 Direct branch targets use sign-extended immediate displacement shifted left by two and added to `PC + 4` of the branch instruction. `J`/`JAL` targets combine the high four bits of `PC + 4` with the 26-bit target shifted left by two.
 
-`JAL` and link variants write the architectural return address corresponding to the instruction after the delay slot (`branch_pc + 8`). `JALR` follows the same rule for its selected destination register.
+`JAL` and `JALR` write the architectural return address `branch_pc + 8`. `BLTZAL` and `BGEZAL` also write `$ra = branch_pc + 8` **whether or not the branch condition is true**. If their source register is `$ra`, the branch comparison uses the pre-link value.
 
-Control-transfer behavior inside a delay slot is treated according to the R3000A contract selected by the implementation tests; unsupported/unpredictable combinations must not be silently normalized into a different ISA model.
+All source operands are captured before destination writes, so `JALR` uses the pre-write jump target even if `rd == rs`. The resulting restart hazard after an exception is preserved rather than normalized away.
+
+A control-transfer instruction encountered **inside an already active delay slot** is outside the supported deterministic M2 contract. The executor returns a structured `unpredictable_delay_slot_control_transfer` boundary diagnostic rather than inventing a second-order branch rule. If JoJo is later observed to rely on such code, that behavior gets a separate evidence-driven design amendment.
 
 ## 7. Delayed-load model
 
-M2 models the R3000A one-instruction load delay explicitly.
+M2 models the R3000A one-instruction GPR load delay explicitly.
 
 For:
 
@@ -136,22 +139,38 @@ ADDU $t2, $t0, $zero
 
 the first `ADDU` observes the old `$t0`; the second observes the loaded value.
 
-Execution ordering must make this behavior testable without ad-hoc instruction-specific exceptions:
+Normal execution ordering is:
 
-1. read source operands for the current instruction from the pre-step architectural register view;
+1. capture source operands for the current instruction from the pre-step architectural register view;
 2. calculate the current instruction result;
 3. retire the previously pending delayed load;
 4. apply the current instruction's direct GPR write, if any;
 5. schedule a new pending load produced by the current instruction;
 6. reassert `$zero == 0`.
 
-If the instruction immediately after a load writes the same GPR directly, that newer architectural write wins over the older delayed load. Tests lock this rule.
+If the instruction immediately after a load writes the same GPR directly, that newer direct architectural write wins over the older delayed load.
 
-Loads into `$zero` perform their memory access and fault behavior normally but do not create visible register state.
+All GPR-producing memory loads use this delayed path. `MFC0` also uses the same one-instruction delayed GPR write. Future `MFC2/CFC2` support must use the same one-instruction GPR load-delay principle.
+
+### 7.1 `LWL/LWR` forwarding exception
+
+Consecutive `LWL`/`LWR` instructions targeting the same GPR are a required architectural special case. They are allowed to follow one another without an intervening NOP.
+
+When a current `LWL` or `LWR` merges into register `rt` and a pending delayed load already targets that same `rt`, the merge base is the **pending value**, not the stale visible GPR value. The combined result then becomes the new pending value. This permits the normal back-to-back unaligned-load pair to assemble one word correctly while preserving the final one-instruction delay before ordinary consumers may read it.
+
+No general ALU instruction receives this forwarding; it remains specific to the merge-load semantics.
+
+Loads into `$zero` still perform memory access and fault behavior normally but do not create visible or pending register state.
+
+### 7.2 Exceptions and pending loads
+
+If the instruction after a successful load raises an exception, the older pending load retires before the exception handler observes the architectural GPR state. A load instruction that itself faults does not schedule a pending result.
+
+An accepted interrupt between instructions likewise retires any older pending load before exception-handler execution.
 
 ## 8. Integer instruction baseline
 
-M2 implements the R3000A integer instructions required as the semantic foundation for JoJo analysis. The initial baseline is:
+M2 implements the R3000A integer instructions required as the semantic foundation for JoJo analysis.
 
 ### Shifts and register ALU
 
@@ -161,12 +180,16 @@ M2 implements the R3000A integer instructions required as the semantic foundatio
 - `AND`, `OR`, `XOR`, `NOR`;
 - `SLT`, `SLTU`.
 
+Variable shifts use only the low five bits of the shift-count register.
+
 ### Immediate ALU
 
 - `ADDI`, `ADDIU`;
 - `ANDI`, `ORI`, `XORI`;
 - `LUI`;
 - `SLTI`, `SLTIU`.
+
+`SLTIU` sign-extends its 16-bit immediate to 32 bits before performing the unsigned comparison.
 
 ### HI/LO
 
@@ -175,7 +198,18 @@ M2 implements the R3000A integer instructions required as the semantic foundatio
 
 Multiplication produces the architecturally correct 64-bit product split across HI/LO.
 
-Division is deterministic and tested for normal operands, divide-by-zero and signed `INT32_MIN / -1` behavior according to the R3000A contract. Host-language undefined behavior is forbidden.
+Division does not raise an architectural divide exception. M2 locks the R3000A edge results explicitly:
+
+```text
+DIVU rs,0                  -> HI=rs, LO=0xFFFFFFFF
+DIV  nonnegative_rs,0      -> HI=rs, LO=0xFFFFFFFF
+DIV  negative_rs,0         -> HI=rs, LO=0x00000001
+DIV  0x80000000,0xFFFFFFFF -> HI=0,  LO=0x80000000
+```
+
+Host-language division by zero or signed-overflow behavior is never invoked to implement these cases.
+
+M2 models architectural values, not multiply/divide cycle timing. Cycle-accurate stalls are deferred unless later JoJo evidence requires them.
 
 ### Branch/jump
 
@@ -189,7 +223,7 @@ Division is deterministic and tested for normal operands, divide-by-zero and sig
 - `SB`, `SH`, `SW`;
 - `LWL`, `LWR`, `SWL`, `SWR`.
 
-The unaligned merge instructions are included in M2 because they are architectural R3000A memory operations and are common enough that deferring them would weaken the reference oracle.
+The unaligned merge instructions are included in M2 because deferring them would make the reference oracle incomplete for ordinary R3000A code.
 
 ### System/control
 
@@ -198,7 +232,7 @@ The unaligned merge instructions are included in M2 because they are architectur
 - COP0 subset described below;
 - COP2/GTE decode boundary described below.
 
-Any encoding outside the supported contract produces an explicit unsupported-instruction result containing at least `pc` and `opcode`.
+A **reserved MIPS encoding** raises the architectural Reserved Instruction (`RI`) exception. A recognized architectural operation that this milestone deliberately leaves unimplemented returns a distinct structured implementation-boundary diagnostic. These two cases must never be conflated.
 
 ## 9. Arithmetic overflow
 
@@ -216,68 +250,111 @@ The CPU core is little-endian and delegates actual address mapping to `R3000aBus
 
 Alignment rules:
 
+- instruction fetch requires 4-byte alignment;
 - `LH/LHU/SH` require 2-byte alignment;
 - `LW/SW` require 4-byte alignment;
 - byte accesses require no extra alignment;
-- `LWL/LWR/SWL/SWR` implement their architectural byte-lane merge semantics and therefore are not rejected merely because the effective address is not word-aligned.
+- `LWL/LWR/SWL/SWR` align the underlying word access internally and implement architectural byte-lane merge semantics, so the original effective address need not be word-aligned.
 
-Misaligned loads/instruction fetches raise address-error-load/fetch (`AdEL`) as appropriate. Misaligned stores raise address-error-store (`AdES`). `BadVAddr` records the faulting guest address.
+Misaligned loads/instruction fetches raise address-error-load/fetch (`AdEL`). Misaligned stores raise address-error-store (`AdES`). `BadVAddr` records the faulting guest address.
 
-A bus failure that represents an unsupported physical/MMIO region remains distinguishable from an architectural alignment exception. M2 does not fabricate zero reads for unknown hardware.
+The bus interface distinguishes at least:
+
+- successful access;
+- architectural bus error;
+- unsupported/unimplemented address-space boundary.
+
+An instruction-fetch bus error maps to `IBE`; a data bus error maps to `DBE`. An unsupported future MMIO/device region remains an explicit implementation diagnostic rather than being converted to a fabricated zero read.
+
+M2 defines CPU byte-lane intent for `SB/SH/SWL/SWR`; device-specific PS1 behavior for partial-width MMIO writes belongs to the later PS1 bus/device milestone.
 
 ## 11. Exceptions and delay-slot precision
 
-M2 models exception entry accurately enough to become the later runtime oracle.
+M2 models precise architectural exception entry for:
 
-At minimum it supports exception causes required by this milestone:
-
-- interrupt entry hook;
-- address error load/fetch;
-- address error store;
+- external interrupt entry;
+- `AdEL`;
+- `AdES`;
+- `IBE`;
+- `DBE`;
 - syscall;
 - breakpoint;
-- reserved/unsupported instruction when mapped to architectural RI behavior;
-- arithmetic overflow;
-- coprocessor unusable where architecturally applicable.
+- reserved instruction (`RI`);
+- arithmetic overflow (`Ovf`);
+- coprocessor unusable (`CpU`) where applicable.
 
 On exception:
 
 - `Cause.ExcCode` reflects the exception type;
-- `EPC` identifies the correct restart location;
-- if the faulting instruction is in a branch delay slot, `Cause.BD` is set and `EPC` refers to the branch instruction, not the delay-slot instruction;
-- `BadVAddr` is updated for address exceptions;
-- current interrupt/user mode state is pushed using the R3000A COP0 status stack semantics;
-- control transfers to the appropriate general exception vector selected by `Status.BEV`.
+- outside a delay slot, `EPC` is the fault/restart PC;
+- in a branch/jump delay slot, `Cause.BD=1` and `EPC` is the branch/jump instruction address;
+- when the delay-slot exception belongs to a taken or unconditional transfer, `Cause.BT` and `TargetAddress` preserve the transfer direction/target context required by the PS1 R3000A contract;
+- `BadVAddr` changes only for address-error exceptions;
+- current interrupt/user mode state is pushed through the R3000A three-level status stack;
+- execution transfers to `0x80000080` when `Status.BEV=0` and to `0xBFC00180` when `Status.BEV=1`.
 
-The reference executor must track enough branch-origin metadata to derive `BD` and `EPC` deterministically.
+Exception entry pushes the low status stack as:
 
-## 12. COP0 subset
+```text
+Old      <- Previous
+Previous <- Current
+Current  <- kernel mode, interrupts disabled
+```
 
-M2 does not emulate every implementation-specific COP0 register. It implements the subset needed for architectural exceptions and the next PS1 runtime milestone:
+where each level contains the KU/IE pair.
+
+The reference executor tracks branch origin, whether the transfer was taken and the computed target so `BD`, `BT`, `EPC` and `TargetAddress` are deterministic.
+
+## 12. Interrupt recognition
+
+M2 accepts synthetic external interrupt-pending state through the CPU/COP0 boundary; device generation of interrupt lines belongs to the later PS1 runtime milestone.
+
+An interrupt is accepted only when the R3000A `Status/Cause` enable-and-mask conditions allow it.
+
+Interrupts are recognized at legal instruction boundaries. Once a branch or jump has issued and its delay slot is pending, an interrupt may not split the control-transfer instruction from its architectural delay slot; recognition is deferred until the delay slot retires.
+
+If an interrupt is accepted while a prior GPR load is pending, that load retires before the exception handler begins.
+
+M2 does not attempt cycle-level interrupt races with unfinished GTE commands because GTE execution is outside this milestone.
+
+## 13. COP0 subset
+
+M2 implements the subset required for architectural exceptions and the next PS1 runtime milestone:
 
 - `Status`;
 - `Cause`;
 - `EPC`;
 - `BadVAddr`;
+- `TargetAddress`;
 - `MFC0` for supported registers;
-- `MTC0` with register-specific writable-bit masking;
-- `RFE` using R3000A status-stack restore semantics.
+- `MTC0` with register-specific writable-bit masks;
+- `RFE`.
 
-Unsupported COP0 register access is diagnostic, not silently accepted.
+`MFC0` schedules a delayed GPR write and therefore has the same one-instruction visibility delay as memory loads.
 
-An external interrupt-pending input can be injected into the reference core for tests. Device generation of those interrupt lines belongs to the later PS1 bus/device milestone.
+`RFE` does **not** jump to `EPC`. It only restores status-stack bits:
 
-## 13. COP2/GTE boundary
+```text
+Current  <- Previous
+Previous <- Old
+Old      <- unchanged
+```
+
+All other status bits remain unchanged except where an explicitly tested writable-mask rule says otherwise.
+
+COP0 accesses to architecturally unavailable PS1 registers and unsupported COP0 commands that are reserved on this CPU produce architectural `RI` behavior where required. They are not silently accepted.
+
+## 14. COP2/GTE boundary
 
 M2 recognizes COP2/GTE instruction classes sufficiently to report them distinctly from unknown MIPS instructions.
 
 It does **not** implement GTE arithmetic in this milestone.
 
-The executor returns a structured `cop2_unimplemented`/equivalent boundary result containing `pc` and `opcode`, unless the architectural state requires a coprocessor-unusable exception first. This boundary lets later JoJo execution evidence identify exactly which GTE operations must be implemented.
+If COP2 is architecturally disabled in `Status`, an attempted COP2 operation raises `CpU` with the coprocessor field set appropriately. If COP2 is enabled but the operation requires GTE functionality outside M2, the executor returns a structured `cop2_unimplemented` boundary result containing at least `pc` and `opcode`.
 
 No COP2 instruction is treated as a NOP.
 
-## 14. Decoder contract
+## 15. Decoder contract
 
 The decoder is pure and side-effect free.
 
@@ -287,13 +364,13 @@ Given one 32-bit word, it returns:
 - opcode class;
 - `rs`, `rt`, `rd`, shift amount where applicable;
 - immediate/target fields in raw form;
-- typed operation identifier.
+- typed operation identifier or reserved-encoding classification.
 
 Sign extension, branch target calculation and architectural effects belong to execution helpers rather than being hidden inside the parser.
 
-Decoder tests cover valid encodings and representative reserved encodings.
+Decoder tests cover every implemented operation family plus representative reserved encodings.
 
-## 15. Executor API behavior
+## 16. Executor API behavior
 
 The reference executor exposes a deterministic one-step API conceptually equivalent to:
 
@@ -305,29 +382,36 @@ Result<R3000aStepResult> step_r3000a(
 
 The actual signature may use the project's existing `Result<T>` and diagnostic conventions, but the semantic boundary is fixed:
 
-- fetch one instruction through the bus at `state.pc`;
-- execute exactly one architectural instruction;
-- update state or enter an architectural exception;
-- report non-architectural unsupported boundaries explicitly.
+- recognize a legal pending interrupt boundary when applicable;
+- validate/fetch one instruction through the bus at `state.pc` when no interrupt preempts the step;
+- execute exactly one architectural instruction or perform one exception-entry transition;
+- retire/schedule delayed state in the order defined above;
+- report non-architectural implementation boundaries explicitly.
 
-A separate helper may execute an already-decoded instruction for unit testing, but production stepping must exercise instruction fetch through the bus so fetch alignment/fault behavior is covered.
+A separate helper may execute an already-decoded instruction for focused unit tests, but production stepping must exercise instruction fetch through the bus so fetch alignment and fetch-bus-error behavior are covered.
 
-## 16. PS-X EXE initialization
+## 17. PS-X EXE initialization
 
-M2 adds a pure initialization helper that consumes verified M1 executable metadata plus a caller-provided prepared bus/memory image.
+M2 adds a pure initialization helper that consumes verified M1 executable metadata plus an explicit caller-provided initial execution environment.
 
-Initialization sets at least:
+The helper initializes:
 
+- all GPRs deterministically, then forces `$zero=0`;
 - `PC = psx_exe_entry`;
 - `next_PC = psx_exe_entry + 4`;
-- `GP = psx_exe_initial_gp`;
-- initial stack register from the verified PS-X EXE stack fields when the image specifies them;
-- `$zero = 0`;
-- HI/LO and pending-load state to deterministic reset values defined by the helper contract.
+- `$gp`/R28 = `psx_exe_initial_gp`;
+- `$sp`/R29 = `stack_base + stack_size` when the verified PS-X EXE stack pair is non-zero;
+- HI/LO = deterministic zero values;
+- no pending load;
+- no active delay slot.
 
-M2 does not claim BIOS reset-state emulation. Full reset/BIOS-HLE startup semantics are a later milestone. This helper represents entry into the verified program image under the JoJo-specific BIOS-free runtime architecture.
+The `stack_size` field keeps the existing M1 project naming but corresponds to the second PS-X EXE initial-stack header word used as the offset added to the stack base.
 
-## 17. Diagnostics
+M2 does **not** invent a proprietary BIOS reset state. Initial COP0/environment values are supplied explicitly by the caller. Synthetic tests use a named deterministic test environment; the later JoJo BIOS/HLE milestone defines the production environment used before real program entry.
+
+The helper does not itself map RAM or copy executable payload bytes; that remains the prepared bus/memory owner's responsibility.
+
+## 18. Diagnostics
 
 Unsupported or failed operations expose structured context rather than prose-only errors.
 
@@ -351,42 +435,44 @@ Fields not relevant to an error are absent/unset rather than filled with fabrica
 
 Diagnostic formatting for user logs is separate from the structured semantic result.
 
-## 18. Testing strategy
+## 19. Testing strategy
 
 M2 is developed TDD RED -> GREEN in small instruction families.
 
 Required test groups:
 
 1. decoder field extraction and reserved encodings;
-2. `$zero`, register ALU and immediates;
+2. `$zero`, register ALU, shifts and immediates;
 3. overflow/no-overflow pairs;
-4. HI/LO multiply/divide edge cases;
-5. branches, jumps and link values;
-6. branch delay slots;
-7. delayed loads, including same-destination overwrite behavior;
-8. aligned loads/stores and sign extension;
-9. `LWL/LWR/SWL/SWR` merge tables for all low address bits;
-10. address exceptions and `BadVAddr`;
-11. syscall/break/reserved instruction exception entry;
-12. exception in a branch delay slot, including `Cause.BD` and `EPC`;
-13. COP0 `MFC0/MTC0/RFE` masking/state-stack behavior;
-14. interrupt-pending entry using a synthetic injected line;
-15. COP2/GTE boundary diagnostics;
-16. PS-X EXE CPU-state initialization;
-17. deterministic replay: identical initial state + bus contents -> identical final state/diagnostics.
+4. HI/LO multiply/divide, including all four defined divide edge cases;
+5. branches, jumps, link values and the unconditional link behavior of `BLTZAL/BGEZAL`;
+6. branch/jump delay slots and explicit rejection of a second control transfer inside a delay slot;
+7. delayed loads, direct same-destination overwrite and exception/interrupt retirement behavior;
+8. back-to-back `LWL/LWR` same-register forwarding plus final load delay;
+9. aligned loads/stores and sign/zero extension;
+10. `LWL/LWR/SWL/SWR` byte-lane tables for all low address bits;
+11. `AdEL/AdES`, `IBE/DBE` and `BadVAddr` behavior;
+12. syscall/break/RI/Ovf exception entry;
+13. exception in a branch delay slot, including `Cause.BD`, `Cause.BT`, `EPC` and `TargetAddress`;
+14. COP0 `MFC0/MTC0/RFE` delayed-load, masking and status-stack behavior;
+15. interrupt masking/entry and delay-slot deferral using a synthetic injected line;
+16. COP2 disabled (`CpU`) versus enabled-but-unimplemented GTE boundary;
+17. PS-X EXE CPU-state initialization;
+18. deterministic replay: identical initial state + bus contents -> identical final state/diagnostics.
 
 Tests use synthetic instruction words and synthetic RAM/bus fixtures only.
 
 Linux and Windows/MSVC CI are both required before M2 is considered complete.
 
-## 19. Readiness and truth boundary
+## 20. Readiness and truth boundary
 
 M2 may promote the semantic status `reference-execution-ready` only when:
 
 - the complete M2 synthetic semantic suite is green on Linux and Windows;
 - PS-X EXE initialization is validated against synthetic M1 metadata;
-- the executor can initialize the supported installed executable state without claiming unsupported hardware behavior as implemented;
-- unsupported CPU/COP0/COP2 boundaries remain explicit and observable.
+- a local validation path can initialize the supported installed executable state without uploading or embedding commercial bytes;
+- unsupported CPU/COP0/COP2 boundaries remain explicit and observable;
+- no unsupported hardware access is fabricated as successful.
 
 M2 does **not** promote:
 
@@ -400,10 +486,11 @@ M2 does **not** promote:
 
 A synthetic test can prove CPU semantics, not commercial-game compatibility.
 
-## 20. Out of scope
+## 21. Out of scope
 
 Explicitly deferred:
 
+- cycle-accurate pipeline and multiply/divide timing unless later JoJo evidence requires it;
 - PS1 RAM mirrors/scratchpad/MMIO implementation beyond synthetic bus fixtures;
 - BIOS A0/B0/C0 HLE services;
 - DMA/timers/interrupt-controller devices;
@@ -419,7 +506,7 @@ Explicitly deferred:
 
 These belong to later milestones and consume the M2 reference executor as their semantic authority.
 
-## 21. Implementation sequencing constraint
+## 22. Implementation sequencing constraint
 
 The implementation plan must preserve dependency order:
 
@@ -429,8 +516,8 @@ decoder/state/bus contracts
 -> HI/LO
 -> branches/jumps
 -> delay-slot machinery
--> memory + delayed loads
--> exceptions
+-> memory + delayed loads + merge-load forwarding
+-> exceptions + bus errors
 -> COP0/RFE/interrupt hook
 -> COP2 boundary
 -> PS-X EXE initialization
@@ -439,7 +526,7 @@ decoder/state/bus contracts
 
 Individual tasks may be split more finely for TDD, but later layers may not be used to bypass missing earlier semantics.
 
-## 22. Completion definition
+## 23. Completion definition
 
 M2 is complete only when all planned semantic contracts are implemented, the full project CI is green on Linux and Windows, the active PS1 architecture gate remains green, and documentation records the exact implemented CPU scope without claiming game boot.
 
