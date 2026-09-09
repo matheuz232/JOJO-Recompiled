@@ -18,6 +18,12 @@ int main() {
     CHECK(bus.read16(0xBF800010u).value == 0xBBAAu);
     CHECK(bus.read16(0x00000010u).value != 0xBBAAu);
 
+    CHECK(bus.write16(0x1F801074u, 0xFFFFu).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.interrupt_mask() == 0x07FFu);
+    CHECK(bus.write16(0x1F801074u, 0x0000u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.interrupt_mask() == 0x0000u);
+    CHECK(bus.write16(0x1F801070u, 0x0000u).status == jojo::R3000aBusStatus::unsupported);
+
     const auto unsupported = bus.read32(0x1F801070u);
     CHECK(unsupported.status == jojo::R3000aBusStatus::unsupported);
     CHECK(bus.last_unsupported_access().has_value());
