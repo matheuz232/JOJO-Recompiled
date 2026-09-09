@@ -24,6 +24,10 @@ jobs:
           cmake -DJOJO_SOURCE_DIR=${{ github.workspace }} -P cmake/CheckProductionReadinessNegative.cmake
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: RED native backend manifest contract
+        run: |
+          c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc tests/test_manifest_backend_metadata.cpp build/libjojo_core.a -ldl -pthread -o manifest_backend_tests
+          ./manifest_backend_tests
       - name: Unverified base conversion contract
         run: |
           c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc -Itests tests/test_unverified_conversion.cpp build/libjojo_core.a -ldl -pthread -o unverified_conversion_tests
