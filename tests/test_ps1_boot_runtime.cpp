@@ -34,6 +34,30 @@ static void test_instruction_budget_is_explicit_stop_reason() {
     CHECK(report.presented_frames == 0u);
 }
 
+static void test_budget_exhaustion_keeps_bounded_recent_trace() {
+    const std::vector<std::uint32_t> words{
+        test_mips::j(0x02u, 0x80010000u >> 2),
+        0x00000000u,
+    };
+    auto runtime = make_runtime(words);
+    const auto report = runtime.run({12u});
+
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(report.recent_trace.size() == 8u);
+    if (report.recent_trace.size() == 8u) {
+        CHECK(report.recent_trace.front().pc == 0x80010000u);
+        CHECK(report.recent_trace.back().pc == 0x80010004u);
+        for (const auto& sample : report.recent_trace) {
+            CHECK(sample.opcode.has_value());
+        }
+    }
+}
+
+static void test_local_evidence_options_are_deep_but_bounded() {
+    const auto options = jojo::ps1_local_evidence_options();
+    CHECK(options.instruction_budget == 1000000u);
+}
+
 static void test_bios_entry_stops_before_executing_bios_bytes() {
     const std::vector<std::uint32_t> words{
         test_mips::j(0x02u, 0x800000A0u >> 2),
@@ -93,6 +117,11 @@ static void test_deterministic_replay_matches_full_m3a_state() {
     CHECK(first_report.gpu_gp1_command_count == second_report.gpu_gp1_command_count);
     CHECK(first_report.vram_write_count == second_report.vram_write_count);
     CHECK(first_report.presented_frames == second_report.presented_frames);
+    CHECK(first_report.recent_trace.size() == second_report.recent_trace.size());
+    for (std::size_t i = 0; i < first_report.recent_trace.size(); ++i) {
+        CHECK(first_report.recent_trace[i].pc == second_report.recent_trace[i].pc);
+        CHECK(first_report.recent_trace[i].opcode == second_report.recent_trace[i].opcode);
+    }
 
     const auto& a = first.cpu_state();
     const auto& b = second.cpu_state();
@@ -119,6 +148,8 @@ static void test_deterministic_replay_matches_full_m3a_state() {
 
 int main() {
     test_instruction_budget_is_explicit_stop_reason();
+    test_budget_exhaustion_keeps_bounded_recent_trace();
+    test_local_evidence_options_are_deep_but_bounded();
     test_bios_entry_stops_before_executing_bios_bytes();
     test_mmio_access_stops_with_structured_evidence();
     test_deterministic_replay_matches_full_m3a_state();
