@@ -8,6 +8,8 @@
 namespace jojo {
 namespace {
 
+constexpr std::size_t kRecentTraceCapacity = 8u;
+
 bool is_bios_table(std::uint32_t physical) noexcept {
     return physical == 0x000000A0u ||
            physical == 0x000000B0u ||
@@ -16,6 +18,15 @@ bool is_bios_table(std::uint32_t physical) noexcept {
 
 bool is_initial_mmio_window(std::uint32_t physical) noexcept {
     return physical >= 0x1F801000u && physical < 0x1F803000u;
+}
+
+void record_recent_trace(Ps1BootReport& report,
+                         std::uint32_t pc,
+                         const std::optional<std::uint32_t>& opcode) {
+    if (report.recent_trace.size() == kRecentTraceCapacity) {
+        report.recent_trace.erase(report.recent_trace.begin());
+    }
+    report.recent_trace.push_back(Ps1TraceSample{pc, opcode});
 }
 
 } // namespace
@@ -52,6 +63,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
         } else {
             report.last_opcode.reset();
         }
+        record_recent_trace(report, cpu_.pc, report.last_opcode);
         bus_.clear_last_unsupported_access();
 
         const auto step = step_r3000a(cpu_, bus_);
