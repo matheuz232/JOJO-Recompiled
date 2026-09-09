@@ -1,6 +1,7 @@
 #ifdef _WIN32
 #define NOMINMAX
 #include "core/conversion.h"
+#include "core/ps1_boot_report_io.h"
 #include "core/ps1_installation.h"
 #include "core/runtime.h"
 #include "core/settings.h"
@@ -27,9 +28,10 @@ constexpr int ID_SELECT_SOURCE = 1002;
 constexpr int ID_PREPARE = 1003;
 constexpr int ID_INSTALL_PATH = 1004;
 constexpr int ID_SELECT_INSTALL = 1005;
+constexpr int ID_RUN_CHECKPOINT = 1006;
 constexpr COLORREF BG=RGB(13,8,22), PANEL=RGB(35,21,53), TEXT=RGB(248,244,252), MUTED=RGB(185,169,198);
 constexpr COLORREF PURPLE=RGB(119,73,196), MAGENTA=RGB(220,64,166), GOLD=RGB(235,193,83);
-HWND win{}, source_box{}, source_btn{}, install_box{}, install_btn{}, prepare_btn{};
+HWND win{}, source_box{}, source_btn{}, install_box{}, install_btn{}, prepare_btn{}, checkpoint_btn{};
 HFONT title_font{}, body_font{}, small_font{}, button_font{};
 HBRUSH edit_brush{};
 fs::path game_dir, settings_path;
@@ -129,6 +131,7 @@ void refresh_install(){
         status=L"Instalação inválida: "+wide(kind.detail);
         add_log(L"A instalação selecionada não pôde ser classificada.");
         SetWindowTextW(prepare_btn,L"PREPARAR JOGO");
+        EnableWindow(checkpoint_btn,FALSE);
         InvalidateRect(win,nullptr,FALSE);
         return;
     }
@@ -158,12 +161,13 @@ void refresh_install(){
         }
         converted=true;
         percent=100;
-        status=L"Executável PS1 identificado e instalação validada. Análise R3000A/MIPS é o próximo marco.";
+        status=L"Executável PS1 identificado e instalação validada. Checkpoint R3000A disponível.";
         add_log(L"Geração PS1 M1 validada a partir dos dados locais preparados.");
         SetWindowTextW(prepare_btn,L"REFAZER PREPARAÇÃO");
         break;
     }
     }
+    EnableWindow(checkpoint_btn,converted&&!running);
     InvalidateRect(win,nullptr,FALSE);
 }
 
@@ -219,6 +223,24 @@ void set_enabled(bool on){
     EnableWindow(source_btn,on);
     EnableWindow(install_btn,on);
     EnableWindow(prepare_btn,on);
+    EnableWindow(checkpoint_btn,on&&converted);
+}
+
+void run_checkpoint(){
+    if(!converted||running) return;
+
+    jojo::Ps1BootOptions options{};
+    options.instruction_budget=10000u;
+    const auto report_path=app_root()/L"diagnostics"/L"m3a-checkpoint.txt";
+    const auto result=jojo::bootstrap_runtime_checkpoint_to_file(game_dir,report_path,options);
+    if(!result){
+        status=L"Checkpoint M3A falhou: "+wide(result.detail);
+        add_log(L"Falha ao gerar diagnóstico derivado do checkpoint.");
+    }else{
+        status=L"Checkpoint M3A concluído. Relatório: "+report_path.wstring();
+        add_log(L"Parada: "+wide(jojo::ps1_boot_stop_reason_name(result.value.stop_reason)));
+    }
+    InvalidateRect(win,nullptr,FALSE);
 }
 
 void start_conversion(){
@@ -255,6 +277,7 @@ void create_controls(HWND parent){
     source_btn=CreateWindowExW(0,L"BUTTON",L"SELECIONAR IMAGEM",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,712,249,208,42,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_SELECT_SOURCE)),GetModuleHandleW(nullptr),nullptr);
     install_box=CreateWindowExW(0,L"EDIT",game_dir.wstring().c_str(),WS_CHILD|WS_VISIBLE|ES_READONLY|ES_AUTOHSCROLL,82,347,616,42,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_INSTALL_PATH)),GetModuleHandleW(nullptr),nullptr);
     install_btn=CreateWindowExW(0,L"BUTTON",L"SELECIONAR PASTA",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,712,347,208,42,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_SELECT_INSTALL)),GetModuleHandleW(nullptr),nullptr);
+    checkpoint_btn=CreateWindowExW(0,L"BUTTON",L"EXECUTAR CHECKPOINT",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,300,690,300,50,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_RUN_CHECKPOINT)),GetModuleHandleW(nullptr),nullptr);
     prepare_btn=CreateWindowExW(0,L"BUTTON",L"PREPARAR JOGO",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,620,690,300,50,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_PREPARE)),GetModuleHandleW(nullptr),nullptr);
     SendMessageW(source_box,WM_SETFONT,reinterpret_cast<WPARAM>(body_font),TRUE);
     SendMessageW(install_box,WM_SETFONT,reinterpret_cast<WPARAM>(body_font),TRUE);
@@ -285,6 +308,7 @@ LRESULT CALLBACK proc(HWND h,UINT m,WPARAM w,LPARAM l){
             if(!p.empty())select_install_root(fs::path(p));
             return 0;
         }
+        if(LOWORD(w)==ID_RUN_CHECKPOINT){run_checkpoint();return 0;}
         if(LOWORD(w)==ID_PREPARE){start_conversion();return 0;}
         break;
     case WM_DROPFILES:{
