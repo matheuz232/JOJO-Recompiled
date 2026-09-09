@@ -26,13 +26,14 @@ static void put_nop(TestR3000aBus& bus, std::uint32_t pc) { bus.store32(pc, 0u);
 int main() {
     constexpr std::uint32_t kStatusWritableMask = 0xF27FFF3Fu;
     constexpr std::uint32_t kCauseSwMask = 0x00000300u;
+    constexpr std::uint32_t kCauseExternalMask = 0x0000FC00u;
 
     // MFC0 values are delivered through the ordinary one-instruction GPR load delay.
     {
         struct ReadCase { std::uint8_t rd; std::uint32_t value; };
         const ReadCase cases[] = {
             {6u, 0x11111111u}, {8u, 0x22222222u}, {12u, 0x33333333u},
-            {13u, 0x44444444u}, {14u, 0x55555555u},
+            {13u, 0x44440344u}, {14u, 0x55555555u},
         };
         for (const auto& c : cases) {
             TestR3000aBus bus;
@@ -70,11 +71,12 @@ int main() {
         TestR3000aBus bus;
         auto s = base_state();
         const std::uint32_t before = 0x8F00FC7Cu;
+        const std::uint32_t synced_before = before & ~kCauseExternalMask;
         s.cop0.cause = before;
         s.gpr[8] = 0x00000100u;
         bus.store32(0x1000u, cop0(4u, 8u, 13u));
         CHECK(jojo::step_r3000a(s, bus).status == jojo::R3000aStepStatus::retired);
-        CHECK(s.cop0.cause == ((before & ~kCauseSwMask) | 0x00000100u));
+        CHECK(s.cop0.cause == ((synced_before & ~kCauseSwMask) | 0x00000100u));
     }
 
     // TAR, BadVAddr and EPC are readable but not writable in M2.
