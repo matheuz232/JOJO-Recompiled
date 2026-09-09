@@ -22,6 +22,7 @@ static fs::path temp_file(std::string_view suffix) {
 
 static jojo::ConversionManifest ordinary_manifest() {
     jojo::ConversionManifest m{};
+    m.manifest_version = "1";
     m.converter_version = jojo::core_version();
     m.source_name = "owned.iso";
     m.source_format = "iso";
