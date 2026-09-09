@@ -96,6 +96,13 @@ static void test_a0_39_initheap_returns_to_ra_and_continues() {
     CHECK(report.instructions_retired == 16u);
     CHECK(report.bios_call_count == 1u);
     CHECK(runtime.cpu_state().gpr[16] == 0x1234u);
+
+    const auto& heap = runtime.bios_heap_state();
+    CHECK(heap.has_value());
+    if (heap) {
+        CHECK(heap->base == 0x00004000u);
+        CHECK(heap->size == 0x00001000u);
+    }
 }
 
 static void test_a0_33_remains_unimplemented() {
