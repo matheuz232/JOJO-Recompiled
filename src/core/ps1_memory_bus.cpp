@@ -6,6 +6,7 @@
 namespace jojo {
 namespace {
 
+constexpr std::uint32_t kDiagnosticMmioBase = 0x1F801000u;
 constexpr std::uint32_t kInterruptStatusAddress = 0x1F801070u;
 constexpr std::uint32_t kInterruptMaskAddress = 0x1F801074u;
 constexpr std::uint16_t kInterruptValidBits = 0x07FFu;
@@ -24,6 +25,17 @@ std::uint8_t* mapped_bytes(std::uint32_t physical,
         if (offset < scratchpad.size() && width <= scratchpad.size() - offset) {
             return scratchpad.data() + offset;
         }
+    }
+    return nullptr;
+}
+
+std::uint8_t* diagnostic_mmio_bytes(std::uint32_t physical,
+                                    std::size_t width,
+                                    std::span<std::uint8_t> shadow) noexcept {
+    if (physical < kDiagnosticMmioBase) return nullptr;
+    const auto offset = static_cast<std::size_t>(physical - kDiagnosticMmioBase);
+    if (offset < shadow.size() && width <= shadow.size() - offset) {
+        return shadow.data() + offset;
     }
     return nullptr;
 }
@@ -65,6 +77,14 @@ R3000aBusResult Ps1MemoryBus::read8(std::uint32_t address) noexcept {
         if (auto* p = mapped_bytes(*physical, 1u, main_ram_, scratchpad_)) {
             return {R3000aBusStatus::ok, read_little_endian(p, 1u)};
         }
+        if (diagnostic_mmio_probe_enabled_) {
+            if (auto* p = diagnostic_mmio_bytes(*physical, 1u, diagnostic_mmio_shadow_)) {
+                const auto value = read_little_endian(p, 1u);
+                last_diagnostic_mmio_probe_ = Ps1UnsupportedAccess{
+                    address, *physical, 1u, false, value};
+                return {R3000aBusStatus::ok, value};
+            }
+        }
     }
     last_unsupported_ = Ps1UnsupportedAccess{
         address, physical.value_or(address), 1u, false, 0u};
@@ -80,6 +100,14 @@ R3000aBusResult Ps1MemoryBus::read16(std::uint32_t address) noexcept {
         if (auto* p = mapped_bytes(*physical, 2u, main_ram_, scratchpad_)) {
             return {R3000aBusStatus::ok, read_little_endian(p, 2u)};
         }
+        if (diagnostic_mmio_probe_enabled_) {
+            if (auto* p = diagnostic_mmio_bytes(*physical, 2u, diagnostic_mmio_shadow_)) {
+                const auto value = read_little_endian(p, 2u);
+                last_diagnostic_mmio_probe_ = Ps1UnsupportedAccess{
+                    address, *physical, 2u, false, value};
+                return {R3000aBusStatus::ok, value};
+            }
+        }
     }
     last_unsupported_ = Ps1UnsupportedAccess{
         address, physical.value_or(address), 2u, false, 0u};
@@ -91,6 +119,14 @@ R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
     if (physical) {
         if (auto* p = mapped_bytes(*physical, 4u, main_ram_, scratchpad_)) {
             return {R3000aBusStatus::ok, read_little_endian(p, 4u)};
+        }
+        if (diagnostic_mmio_probe_enabled_) {
+            if (auto* p = diagnostic_mmio_bytes(*physical, 4u, diagnostic_mmio_shadow_)) {
+                const auto value = read_little_endian(p, 4u);
+                last_diagnostic_mmio_probe_ = Ps1UnsupportedAccess{
+                    address, *physical, 4u, false, value};
+                return {R3000aBusStatus::ok, value};
+            }
         }
     }
     last_unsupported_ = Ps1UnsupportedAccess{
@@ -104,6 +140,14 @@ R3000aBusResult Ps1MemoryBus::write8(std::uint32_t address, std::uint8_t value) 
         if (auto* p = mapped_bytes(*physical, 1u, main_ram_, scratchpad_)) {
             write_little_endian(p, 1u, value);
             return {R3000aBusStatus::ok, 0u};
+        }
+        if (diagnostic_mmio_probe_enabled_) {
+            if (auto* p = diagnostic_mmio_bytes(*physical, 1u, diagnostic_mmio_shadow_)) {
+                write_little_endian(p, 1u, value);
+                last_diagnostic_mmio_probe_ = Ps1UnsupportedAccess{
+                    address, *physical, 1u, true, value};
+                return {R3000aBusStatus::ok, 0u};
+            }
         }
     }
     last_unsupported_ = Ps1UnsupportedAccess{
@@ -126,6 +170,14 @@ R3000aBusResult Ps1MemoryBus::write16(std::uint32_t address, std::uint16_t value
             write_little_endian(p, 2u, value);
             return {R3000aBusStatus::ok, 0u};
         }
+        if (diagnostic_mmio_probe_enabled_) {
+            if (auto* p = diagnostic_mmio_bytes(*physical, 2u, diagnostic_mmio_shadow_)) {
+                write_little_endian(p, 2u, value);
+                last_diagnostic_mmio_probe_ = Ps1UnsupportedAccess{
+                    address, *physical, 2u, true, value};
+                return {R3000aBusStatus::ok, 0u};
+            }
+        }
     }
     last_unsupported_ = Ps1UnsupportedAccess{
         address, physical.value_or(address), 2u, true, value};
@@ -138,6 +190,14 @@ R3000aBusResult Ps1MemoryBus::write32(std::uint32_t address, std::uint32_t value
         if (auto* p = mapped_bytes(*physical, 4u, main_ram_, scratchpad_)) {
             write_little_endian(p, 4u, value);
             return {R3000aBusStatus::ok, 0u};
+        }
+        if (diagnostic_mmio_probe_enabled_) {
+            if (auto* p = diagnostic_mmio_bytes(*physical, 4u, diagnostic_mmio_shadow_)) {
+                write_little_endian(p, 4u, value);
+                last_diagnostic_mmio_probe_ = Ps1UnsupportedAccess{
+                    address, *physical, 4u, true, value};
+                return {R3000aBusStatus::ok, 0u};
+            }
         }
     }
     last_unsupported_ = Ps1UnsupportedAccess{
@@ -161,6 +221,27 @@ Result<void> Ps1MemoryBus::load_main_ram(
 
 std::uint16_t Ps1MemoryBus::interrupt_mask() const noexcept {
     return interrupt_mask_;
+}
+
+void Ps1MemoryBus::set_diagnostic_mmio_probe_enabled(bool enabled) noexcept {
+    if (enabled && !diagnostic_mmio_probe_enabled_) {
+        diagnostic_mmio_shadow_.fill(0u);
+    }
+    diagnostic_mmio_probe_enabled_ = enabled;
+    last_diagnostic_mmio_probe_.reset();
+}
+
+bool Ps1MemoryBus::diagnostic_mmio_probe_enabled() const noexcept {
+    return diagnostic_mmio_probe_enabled_;
+}
+
+const std::optional<Ps1UnsupportedAccess>&
+Ps1MemoryBus::last_diagnostic_mmio_probe() const noexcept {
+    return last_diagnostic_mmio_probe_;
+}
+
+void Ps1MemoryBus::clear_last_diagnostic_mmio_probe() noexcept {
+    last_diagnostic_mmio_probe_.reset();
 }
 
 const std::optional<Ps1UnsupportedAccess>&

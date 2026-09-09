@@ -3,6 +3,7 @@
 #include "core/ps1_memory_bus.h"
 #include "core/r3000a_diagnostics.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -35,6 +36,7 @@ struct Ps1MmioSummary {
     std::uint8_t width{};
     bool write{};
     std::uint32_t value{};
+    bool speculative{};
 };
 
 struct Ps1CdromCommandSummary {
@@ -53,6 +55,8 @@ struct Ps1BootReport {
     std::uint32_t last_pc{};
     std::optional<std::uint32_t> last_opcode{};
     Ps1BootStopReason stop_reason{Ps1BootStopReason::none};
+    bool diagnostic_probe_mode{};
+    std::uint64_t speculative_mmio_count{};
     std::uint64_t bios_call_count{};
     std::vector<Ps1BiosCallSummary> recent_bios_calls;
     std::vector<Ps1MmioSummary> recent_mmio;
@@ -70,10 +74,13 @@ struct Ps1BootReport {
 
 struct Ps1BootOptions {
     std::uint64_t instruction_budget{10000u};
+    std::size_t trace_capacity{16u};
+    bool diagnostic_mmio_probe{false};
+    std::size_t mmio_event_capacity{16u};
 };
 
 [[nodiscard]] constexpr Ps1BootOptions ps1_local_evidence_options() noexcept {
-    return Ps1BootOptions{1000000u};
+    return Ps1BootOptions{10000000u, 128u, true, 256u};
 }
 
 } // namespace jojo

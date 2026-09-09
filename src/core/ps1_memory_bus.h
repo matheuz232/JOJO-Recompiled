@@ -40,14 +40,25 @@ public:
                                std::span<const std::uint8_t> bytes);
 
     [[nodiscard]] std::uint16_t interrupt_mask() const noexcept;
+
+    void set_diagnostic_mmio_probe_enabled(bool enabled) noexcept;
+    [[nodiscard]] bool diagnostic_mmio_probe_enabled() const noexcept;
+    const std::optional<Ps1UnsupportedAccess>& last_diagnostic_mmio_probe() const noexcept;
+    void clear_last_diagnostic_mmio_probe() noexcept;
+
     const std::optional<Ps1UnsupportedAccess>& last_unsupported_access() const noexcept;
     void clear_last_unsupported_access() noexcept;
 
 private:
+    static constexpr std::size_t diagnostic_mmio_shadow_size = 0x2000u;
+
     std::vector<std::uint8_t> main_ram_;
     std::array<std::uint8_t, scratchpad_size> scratchpad_{};
     std::uint16_t interrupt_status_{};
     std::uint16_t interrupt_mask_{};
+    bool diagnostic_mmio_probe_enabled_{};
+    std::array<std::uint8_t, diagnostic_mmio_shadow_size> diagnostic_mmio_shadow_{};
+    std::optional<Ps1UnsupportedAccess> last_diagnostic_mmio_probe_{};
     std::optional<Ps1UnsupportedAccess> last_unsupported_{};
 };
 

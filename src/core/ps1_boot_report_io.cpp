@@ -77,11 +77,15 @@ std::string ps1_boot_stop_reason_name(Ps1BootStopReason reason) noexcept {
 
 std::string format_ps1_boot_report(const Ps1BootReport& report) {
     std::ostringstream out;
-    out << "format=jojo-m3a-checkpoint-v1\n";
+    out << "format="
+        << (report.diagnostic_probe_mode ? "jojo-mega-checkpoint-v1" : "jojo-m3a-checkpoint-v1")
+        << '\n';
     out << "stop_reason=" << ps1_boot_stop_reason_name(report.stop_reason) << '\n';
     out << "instructions_retired=" << report.instructions_retired << '\n';
     out << "last_pc=" << hex32(report.last_pc) << '\n';
     out << "last_opcode=" << optional_hex32(report.last_opcode) << '\n';
+    out << "diagnostic_probe_mode=" << (report.diagnostic_probe_mode ? 1 : 0) << '\n';
+    out << "speculative_mmio_count=" << report.speculative_mmio_count << '\n';
     out << "bios_call_count=" << report.bios_call_count << '\n';
     out << "interrupts_accepted=" << report.interrupts_accepted << '\n';
     out << "dma_transfer_count=" << report.dma_transfer_count << '\n';
@@ -94,6 +98,17 @@ std::string format_ps1_boot_report(const Ps1BootReport& report) {
         const auto& sample = report.recent_trace[i];
         out << "trace_" << i << "_pc=" << hex32(sample.pc) << '\n';
         out << "trace_" << i << "_opcode=" << optional_hex32(sample.opcode) << '\n';
+    }
+
+    out << "mmio_event_count=" << report.recent_mmio.size() << '\n';
+    for (std::size_t i = 0; i < report.recent_mmio.size(); ++i) {
+        const auto& mmio = report.recent_mmio[i];
+        out << "mmio_event_" << i << "_pc=" << hex32(mmio.pc) << '\n';
+        out << "mmio_event_" << i << "_address=" << hex32(mmio.address) << '\n';
+        out << "mmio_event_" << i << "_width=" << static_cast<unsigned>(mmio.width) << '\n';
+        out << "mmio_event_" << i << "_write=" << (mmio.write ? 1 : 0) << '\n';
+        out << "mmio_event_" << i << "_value=" << hex32(mmio.value) << '\n';
+        out << "mmio_event_" << i << "_speculative=" << (mmio.speculative ? 1 : 0) << '\n';
     }
 
     if (report.recent_bios_calls.empty()) {
@@ -112,7 +127,8 @@ std::string format_ps1_boot_report(const Ps1BootReport& report) {
             << "mmio_last_address=none\n"
             << "mmio_last_width=none\n"
             << "mmio_last_write=none\n"
-            << "mmio_last_value=none\n";
+            << "mmio_last_value=none\n"
+            << "mmio_last_speculative=none\n";
     } else {
         const auto& mmio = report.recent_mmio.back();
         out << "mmio_last_pc=" << hex32(mmio.pc) << '\n';
@@ -120,6 +136,7 @@ std::string format_ps1_boot_report(const Ps1BootReport& report) {
         out << "mmio_last_width=" << static_cast<unsigned>(mmio.width) << '\n';
         out << "mmio_last_write=" << (mmio.write ? 1 : 0) << '\n';
         out << "mmio_last_value=" << hex32(mmio.value) << '\n';
+        out << "mmio_last_speculative=" << (mmio.speculative ? 1 : 0) << '\n';
     }
 
     if (report.recent_cdrom_commands.empty()) {

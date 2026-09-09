@@ -8,7 +8,6 @@
 namespace jojo {
 namespace {
 
-constexpr std::size_t kRecentTraceCapacity = 16u;
 constexpr std::uint32_t kBiosA0 = 0x000000A0u;
 constexpr std::uint32_t kBiosA0InitHeap = 0x00000039u;
 
@@ -24,11 +23,23 @@ bool is_initial_mmio_window(std::uint32_t physical) noexcept {
 
 void record_recent_trace(Ps1BootReport& report,
                          std::uint32_t pc,
-                         const std::optional<std::uint32_t>& opcode) {
-    if (report.recent_trace.size() == kRecentTraceCapacity) {
+                         const std::optional<std::uint32_t>& opcode,
+                         std::size_t capacity) {
+    if (capacity == 0u) return;
+    if (report.recent_trace.size() == capacity) {
         report.recent_trace.erase(report.recent_trace.begin());
     }
     report.recent_trace.push_back(Ps1TraceSample{pc, opcode});
+}
+
+void record_recent_mmio(Ps1BootReport& report,
+                        const Ps1MmioSummary& event,
+                        std::size_t capacity) {
+    if (capacity == 0u) return;
+    if (report.recent_mmio.size() == capacity) {
+        report.recent_mmio.erase(report.recent_mmio.begin());
+    }
+    report.recent_mmio.push_back(event);
 }
 
 bool handle_bios_call(R3000aState& cpu,
@@ -62,6 +73,8 @@ Result<Ps1BootRuntime> Ps1BootRuntime::create(const Ps1Executable& executable) {
 Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
     Ps1BootReport report{};
     report.last_pc = cpu_.pc;
+    report.diagnostic_probe_mode = options.diagnostic_mmio_probe;
+    bus_.set_diagnostic_mmio_probe_enabled(options.diagnostic_mmio_probe);
 
     while (report.instructions_retired < options.instruction_budget) {
         report.last_pc = cpu_.pc;
@@ -84,11 +97,23 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
         } else {
             report.last_opcode.reset();
         }
-        record_recent_trace(report, cpu_.pc, report.last_opcode);
+        record_recent_trace(report, cpu_.pc, report.last_opcode, options.trace_capacity);
         bus_.clear_last_unsupported_access();
+        bus_.clear_last_diagnostic_mmio_probe();
 
         const auto step = step_r3000a(cpu_, bus_);
         if (step.status == R3000aStepStatus::retired) {
+            if (const auto& probe = bus_.last_diagnostic_mmio_probe(); probe) {
+                ++report.speculative_mmio_count;
+                record_recent_mmio(report, Ps1MmioSummary{
+                    report.last_pc,
+                    probe->guest_address,
+                    probe->width,
+                    probe->write,
+                    probe->value,
+                    true,
+                }, options.mmio_event_capacity);
+            }
             ++report.instructions_retired;
             continue;
         }
@@ -106,13 +131,14 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
                 report.unsupported_access->guest_address);
             if (physical && is_initial_mmio_window(*physical)) {
                 report.stop_reason = Ps1BootStopReason::mmio_unimplemented;
-                report.recent_mmio.push_back(Ps1MmioSummary{
+                record_recent_mmio(report, Ps1MmioSummary{
                     step.diagnostic.pc,
                     report.unsupported_access->guest_address,
                     report.unsupported_access->width,
                     report.unsupported_access->write,
                     report.unsupported_access->value,
-                });
+                    false,
+                }, options.mmio_event_capacity);
                 return report;
             }
         }
