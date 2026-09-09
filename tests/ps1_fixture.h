@@ -4,6 +4,7 @@
 #include "iso_fixture.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -45,6 +46,20 @@ inline std::vector<std::uint8_t> make_psx_exe() {
         0x21, 0x50, 0x09, 0x01,
     };
     std::copy(std::begin(payload), std::end(payload), bytes.begin() + 0x800);
+    return bytes;
+}
+
+inline std::vector<std::uint8_t> make_psx_exe_from_words(
+    const std::vector<std::uint32_t>& words,
+    std::uint32_t entry_pc = 0x80010000u) {
+    auto bytes = make_psx_exe();
+    bytes.resize(0x800u + words.size() * 4u, 0u);
+    write_le32(bytes, 0x010, entry_pc);
+    write_le32(bytes, 0x018, entry_pc);
+    write_le32(bytes, 0x01C, static_cast<std::uint32_t>(words.size() * 4u));
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        write_le32(bytes, 0x800u + i * 4u, words[i]);
+    }
     return bytes;
 }
 
