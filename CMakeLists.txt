@@ -93,6 +93,7 @@ add_jojo_test(jojo_ps1_runtime_installation_tests tests/test_ps1_runtime_install
 add_jojo_test(jojo_ps1_memory_bus_tests tests/test_ps1_memory_bus.cpp)
 add_jojo_test(jojo_ps1_executable_loader_tests tests/test_ps1_executable_loader.cpp)
 add_jojo_test(jojo_ps1_boot_runtime_tests tests/test_ps1_boot_runtime.cpp)
+add_jojo_test(jojo_ps1_boot_report_io_tests tests/test_ps1_boot_report_io.cpp)
 add_jojo_test(jojo_mips_decoder_tests tests/test_mips_decoder.cpp)
 add_jojo_test(jojo_r3000a_integer_tests tests/test_r3000a_integer.cpp)
 add_jojo_test(jojo_r3000a_exception_tests tests/test_r3000a_exceptions.cpp)
