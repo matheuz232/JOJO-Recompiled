@@ -73,6 +73,9 @@ R3000aBusResult Ps1MemoryBus::read8(std::uint32_t address) noexcept {
 R3000aBusResult Ps1MemoryBus::read16(std::uint32_t address) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (*physical == kInterruptMaskAddress) {
+            return {R3000aBusStatus::ok, interrupt_mask_};
+        }
         if (auto* p = mapped_bytes(*physical, 2u, main_ram_, scratchpad_)) {
             return {R3000aBusStatus::ok, read_little_endian(p, 2u)};
         }
