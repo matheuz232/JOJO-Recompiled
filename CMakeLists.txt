@@ -26,6 +26,7 @@ add_library(jojo_core STATIC
   src/core/disc_image.cpp
   src/core/disc_media.cpp
   src/core/iso9660.cpp
+  src/core/ps1_system_cnf.cpp
   src/core/dreamcast_boot.cpp
   src/core/dreamcast_analysis.cpp
   src/core/dreamcast_memory.cpp
