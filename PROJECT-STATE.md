@@ -3,16 +3,16 @@
 ## Active development line
 
 - Repository: `matheuz232/JOJO-Recompiled`
-- Active branch: `feature/r3000a-reference-core-m2`
+- Active branch: `feature/ps1-visible-boot-m3a`
 - Active platform: **Sony PlayStation 1**
-- Product scope: **this JoJo title/revision family only**
-- R3000A M2 code-head commit: `24f08c2e364be13a16ff756ea69d3d42e734cfa7`
-- Verification workflow: `34323411695` (run #1325)
+- Product scope: **JoJo PS1 only**
+- M3A code-head commit: `814c956eefd608080320aff270d59568fbb2b28a`
+- M3A verification workflow: `34334677057` (run #1339)
 - Linux job: passed configure, build, production-readiness gate, PS1 active-architecture gate, CTest, observed-disc revision contract, and UDP transport contract.
 - Windows job: passed configure, Release build, production-readiness gate, PS1 active-architecture gate, Release CTest, observed-disc revision contract, UDP transport contract, and artifact upload.
 - Windows artifact: `JOJO-Recompiled-Windows-x64`
-- Artifact ID: `10092837844`
-- Artifact digest: `sha256:7a2d111b1ecf090208eb0aced051f948cf7663a608af6c809cd9da3f22b91a6a`
+- Artifact ID: `10097301228`
+- Artifact digest: `sha256:ee121eefcdb9876256306641bfc44f6f69050630d2e7240bebc12f40e4965ce6`
 - Shipping policy: one `JOJO-Recompiled.exe`.
 
 ## PS1 foundation evidence
@@ -33,40 +33,47 @@ Verified by repository tests/CI:
 R3000A reference CPU semantics are implemented and verified by synthetic Linux/Windows contracts.
 Commercial JoJo boot, rendering, audio, input and gameplay are not verified.
 
-The synthetic M2 contract covers:
+The synthetic M2 contract covers MIPS decoding, integer and HI/LO semantics, precise exceptions, delay-slot control flow, aligned and unaligned memory operations, one-instruction GPR load delay, COP0/RFE/interrupt admission, explicit COP2/GTE boundaries, deterministic PS-X EXE CPU-state initialization and deterministic replay.
 
-- MIPS decoder coverage used by the reference executor;
-- integer/shift/immediate semantics and the `$zero` invariant;
-- trapping ADD/ADDI/SUB and precise exception entry;
-- SYSCALL, BREAK, RI, AdEL/AdES, IBE/DBE and BEV vector selection;
-- HI/LO multiply/divide edge behavior;
-- J/JAL/JR/JALR and conditional branches with one architectural delay slot;
-- delay-slot exception BD/BT/EPC/TAR context;
-- LB/LBU/LH/LHU/LW and SB/SH/SW;
-- the R3000A one-instruction GPR load delay;
-- `LWL/LWR/SWL/SWR` lane semantics and merge-load forwarding;
-- COP0 MFC0/MTC0 masks, RFE and interrupt admission;
-- COP2/GTE gating: CU2 clear -> CpU with CE=2; CU2 set -> explicit `cop2_unimplemented` boundary;
-- deterministic PS-X EXE CPU-state initialization for PC/next-PC/GP/SP;
-- deterministic replay from cloned synthetic CPU/bus state.
+The R3000A reference executor is the semantic oracle for later compiler stages; it is not a Windows x64 native recompilation backend.
 
-The R3000A reference executor is a semantic oracle. It is not yet a complete PS1 runtime and is not a native x64 recompilation backend.
+## JoJo PS1 visible-boot path — M3A
+
+JoJo PS1 M3A memory/bus, PS-X EXE payload loading, and bounded R3000A boot checkpoints are implemented and verified by synthetic Linux/Windows contracts.
+Commercial JoJo boot, BIOS/HLE progress, device progress, rendering, audio, input and gameplay are not verified by M3A.
+
+The synthetic M3A contract covers:
+
+- heap-backed 2 MiB PS1 main RAM;
+- 1 KiB scratchpad;
+- explicit JoJo-required KUSEG/KSEG0/KSEG1 RAM aliases without adding generic PS1 mirrors;
+- little-endian 8/16/32-bit bus operations and bounded unsupported-access evidence;
+- transactional PS-X EXE payload placement from offset `0x800` into the validated load address;
+- exact R3000A `PC`, `next_pc`, `$gp` and `$sp` initialization through the M2 initializer;
+- installation-backed checkpoint execution from the validated local `boot.psxexe`;
+- explicit instruction-budget exhaustion;
+- explicit A0/B0/C0 BIOS-call boundaries;
+- explicit unsupported MMIO boundaries;
+- bounded derived `Ps1BootReport` diagnostics;
+- deterministic replay of two independent M3A runtime instances.
+
+The immutable implementation evidence is GitHub Actions run `34334677057` on code-head `814c956eefd608080320aff270d59568fbb2b28a`, with both Linux and Windows jobs successful.
 
 ## Truth boundary
 
 The following are still **not implemented or not verified** at this point:
 
-- JoJo-specific PS1 RAM/memory-map/bus integration sufficient to run the commercial executable;
+- commercial JoJo execution from the user's supported local installation;
 - PlayStation BIOS/HLE services required by the commercial game;
 - GTE execution semantics beyond the explicit COP2 boundary;
-- GPU rendering;
-- DMA/timer/device integration required by the game;
+- IRQ/timer device behavior required by JoJo;
+- DMA device behavior required by JoJo;
+- CD-ROM runtime/streaming behavior required by JoJo;
+- GPU command processing, VRAM rendering and frame presentation from commercial JoJo execution;
 - SPU audio;
-- CD-ROM runtime/streaming behavior;
 - original-game controller integration;
 - MIPS CFG/IR production execution;
 - Windows x64 native code generation for R3000A;
-- commercial PS-X EXE execution from the user's real image;
 - commercial boot;
 - rendering, audio, input, gameplay or playability.
 
@@ -74,18 +81,9 @@ Synthetic fixtures and CI prove only the repository contracts they exercise. The
 
 ## Commercial-image evidence still required
 
-The user's previously observed whole-image fingerprint is known, but the corrected PS1 pipeline still needs one new local run against the same legally obtained image for commercial `SYSTEM.CNF` / `PS-X EXE` discovery evidence. The success boundary for that run remains:
+The user's previously observed whole-image fingerprint is known, but the corrected PS1 pipeline still needs one local run against the same legally obtained image for commercial `SYSTEM.CNF` / `PS-X EXE` discovery evidence and then an M3A checkpoint run against the resulting supported local installation.
 
-```text
-source recognized
-PS1 filesystem opened
-SYSTEM.CNF resolved
-PS-X EXE validated
-local generation installed
-manifest v2 activated
-```
-
-No commercial game bytes, extracted PS-X EXE, or proprietary BIOS are to be committed to the repository or CI.
+No commercial game bytes, extracted PS-X EXE, proprietary BIOS, raw sectors, or unrestricted guest-memory dumps are to be committed to the repository or CI. Commercial checkpoint evidence must remain bounded and derived.
 
 ## Production workstreams
 
@@ -93,16 +91,17 @@ Canonical status remains in `docs/architecture/PRODUCTION-READINESS.tsv`.
 
 - R2.1: repository truth/release gates — verified.
 - R2.2: commercial revision enablement — blocked on local commercial-image discovery evidence.
-- R2.3: R3000A reference CPU layer — `implemented-unverified`, evidenced by GitHub Actions run `34323411695`; blocker is `ps1-memory-bus-bios-hle-not-implemented`.
+- R2.3: JoJo-specific reference execution checkpoint — `implemented-unverified`, evidenced by GitHub Actions run `34334677057`; blocker is `jojo-bios-hle-and-device-runtime-not-implemented`.
 - R2.4: real gameplay integration — not started.
-- R2.5: host-side online/rollback infrastructure exists but is not integrated with the commercial PS1 game.
+- R2.5: host-side online/rollback infrastructure exists but is not integrated with the commercial JoJo PS1 game.
 - R2.6: production validation/release — not started.
 
 ## Next priority
 
-1. Implement the **JoJo-specific PS1 memory/bus** required to place the validated PS-X EXE payload and service R3000A accesses truthfully.
-2. Add only the **BIOS/HLE services observed to be required by JoJo**, with explicit boundaries for unknown calls.
-3. Reach the first reference-execution checkpoint from the commercial PS-X EXE entry point using local user-owned data only.
-4. Keep MIPS CFG/IR and Windows x64 lowering downstream of the verified reference executor.
+M3B — JoJo-observed BIOS/HLE: run the supported local JoJo installation through the M3A checkpoint, capture only bounded derived diagnostics at the first A0/B0/C0 or kernel boundary, reproduce the required contract synthetically, and implement only the JoJo-required service.
+
+After each JoJo-observed boundary, add the smallest synthetic RED→GREEN contract needed to progress toward the first visible commercial frame. IRQ/timers, DMA, CD-ROM, GPU and GTE subsets are added only when the JoJo execution path proves they are required.
+
+Keep MIPS CFG/IR and Windows x64 lowering downstream of visible boot. This project has no compatibility target for unrelated games.
 
 Historical Dreamcast/SH-4 plans/specs under `docs/superpowers/` remain project history only.
