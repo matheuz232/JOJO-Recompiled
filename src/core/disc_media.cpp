@@ -121,23 +121,6 @@ Result<std::filesystem::path> safe_descriptor_track_path(const std::filesystem::
     return Result<std::filesystem::path>::success((descriptor.parent_path() / relative).lexically_normal());
 }
 
-Result<LogicalSectorSource> try_track_candidate(const std::filesystem::path& path,
-                                                std::uint64_t file_offset,
-                                                std::uint32_t sector_size,
-                                                std::string format) {
-    if (sector_size == 2048) {
-        auto candidate = make_candidate(path, file_offset, 2048, 0, format);
-        if (candidate && has_iso9660_pvd(candidate.value)) return candidate;
-    } else if (sector_size == 2352) {
-        for (const auto user_offset : {16u, 24u}) {
-            auto candidate = make_candidate(path, file_offset, 2352, user_offset, format);
-            if (candidate && has_iso9660_pvd(candidate.value)) return candidate;
-        }
-    }
-    return Result<LogicalSectorSource>::failure(ErrorCode::unsupported_format,
-                                                 "data track does not contain a supported ISO9660 layout");
-}
-
 std::string ascii_upper_copy(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
         return static_cast<char>(std::toupper(c));
@@ -155,54 +138,6 @@ bool parse_msf(std::string_view text, std::uint64_t& frames) {
         !parse_unsigned(text.substr(second + 1), ff) || ss >= 60 || ff >= 75) return false;
     frames = (static_cast<std::uint64_t>(mm) * 60 + ss) * 75 + ff;
     return true;
-}
-
-Result<LogicalSectorSource> open_gdi_source(const std::filesystem::path& descriptor) {
-    std::ifstream in(descriptor);
-    if (!in) {
-        return Result<LogicalSectorSource>::failure(ErrorCode::file_not_found,
-                                                     "GDI descriptor not found: " + descriptor.string());
-    }
-    std::string line;
-    if (!std::getline(in, line)) {
-        return Result<LogicalSectorSource>::failure(ErrorCode::unsupported_format, "empty GDI descriptor");
-    }
-    std::uint32_t declared_tracks{};
-    const auto header = split_descriptor_tokens(line);
-    if (header.size() != 1 || !parse_unsigned<std::uint32_t>(header[0], declared_tracks) || declared_tracks == 0) {
-        return Result<LogicalSectorSource>::failure(ErrorCode::unsupported_format, "invalid GDI track count");
-    }
-
-    std::uint32_t parsed_tracks = 0;
-    std::vector<LogicalSectorSource> candidates;
-    while (std::getline(in, line)) {
-        if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
-        ++parsed_tracks;
-        const auto tokens = split_descriptor_tokens(line);
-        if (tokens.size() < 6) {
-            return Result<LogicalSectorSource>::failure(ErrorCode::unsupported_format, "malformed GDI track line");
-        }
-        std::uint32_t track_no{}, lba{}, type{}, sector_size{};
-        std::uint64_t file_offset{};
-        if (!parse_unsigned(tokens[0], track_no) || !parse_unsigned(tokens[1], lba) ||
-            !parse_unsigned(tokens[2], type) || !parse_unsigned(tokens[3], sector_size) ||
-            !parse_unsigned(tokens[5], file_offset)) {
-            return Result<LogicalSectorSource>::failure(ErrorCode::unsupported_format, "invalid numeric field in GDI track line");
-        }
-        (void)track_no; (void)lba;
-        auto path = safe_descriptor_track_path(descriptor, tokens[4]);
-        if (!path) return Result<LogicalSectorSource>::failure(path.error, path.detail);
-        if (type != 4) continue;
-        auto candidate = try_track_candidate(path.value, file_offset, sector_size, "gdi");
-        if (candidate) candidates.push_back(std::move(candidate.value));
-    }
-    if (parsed_tracks != declared_tracks) {
-        return Result<LogicalSectorSource>::failure(ErrorCode::unsupported_format, "GDI track count does not match descriptor");
-    }
-    if (candidates.empty()) {
-        return Result<LogicalSectorSource>::failure(ErrorCode::unsupported_format, "GDI has no supported ISO9660 data track");
-    }
-    return Result<LogicalSectorSource>::success(std::move(candidates.back()));
 }
 
 Result<LogicalSectorSource> open_cue_source(const std::filesystem::path& descriptor) {
@@ -317,7 +252,6 @@ Result<std::vector<std::uint8_t>> read_logical_sectors(const LogicalSectorSource
 Result<LogicalSectorSource> open_logical_sector_source(const std::filesystem::path& source_path) {
     const auto ext = lower_extension(source_path);
     if (ext == ".iso") return cooked_candidate(source_path, "iso");
-    if (ext == ".gdi") return open_gdi_source(source_path);
     if (ext == ".cue") return open_cue_source(source_path);
     if (ext == ".bin") {
         if (auto cooked = cooked_candidate(source_path, "bin-cooked"); cooked) return cooked;
@@ -327,7 +261,7 @@ Result<LogicalSectorSource> open_logical_sector_source(const std::filesystem::pa
                                                      "BIN does not contain a supported ISO9660 data layout");
     }
     return Result<LogicalSectorSource>::failure(ErrorCode::unsupported_format,
-                                                 "track-aware adapter is not implemented for: " + ext);
+                                                 "unsupported PS1 media extension " + ext + "; expected .iso, .bin, or .cue");
 }
 
 }
