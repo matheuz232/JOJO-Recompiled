@@ -435,6 +435,7 @@ static void test_runtime_installation_validation() {
     fs::create_directories(install / "data");
     fs::create_directories(install / "cache");
     jojo::ConversionManifest m{};
+    m.manifest_version = "1";
     m.converter_version = jojo::core_version();
     m.source_name = "owned.iso";
     m.source_format = "iso";
