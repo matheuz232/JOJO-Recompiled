@@ -89,6 +89,12 @@ std::string format_ps1_boot_report(const Ps1BootReport& report) {
     out << "gpu_gp1_command_count=" << report.gpu_gp1_command_count << '\n';
     out << "vram_write_count=" << report.vram_write_count << '\n';
     out << "presented_frames=" << report.presented_frames << '\n';
+    out << "trace_sample_count=" << report.recent_trace.size() << '\n';
+    for (std::size_t i = 0; i < report.recent_trace.size(); ++i) {
+        const auto& sample = report.recent_trace[i];
+        out << "trace_" << i << "_pc=" << hex32(sample.pc) << '\n';
+        out << "trace_" << i << "_opcode=" << optional_hex32(sample.opcode) << '\n';
+    }
 
     if (report.recent_bios_calls.empty()) {
         out << "bios_last_pc=none\n"
