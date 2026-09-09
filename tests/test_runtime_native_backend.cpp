@@ -51,6 +51,7 @@ static ReadyInstall make_ready_install(const char* suffix) {
     if (!prepared) return fixture;
 
     auto& m = fixture.manifest;
+    m.manifest_version = "1";
     m.converter_version = jojo::core_version();
     m.source_name = "synthetic.iso";
     m.source_format = "iso";
