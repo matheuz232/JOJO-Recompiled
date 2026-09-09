@@ -9,6 +9,8 @@ namespace jojo {
 namespace {
 
 constexpr std::size_t kRecentTraceCapacity = 16u;
+constexpr std::uint32_t kBiosA0 = 0x000000A0u;
+constexpr std::uint32_t kBiosA0InitHeap = 0x00000039u;
 
 bool is_bios_table(std::uint32_t physical) noexcept {
     return physical == 0x000000A0u ||
@@ -27,6 +29,20 @@ void record_recent_trace(Ps1BootReport& report,
         report.recent_trace.erase(report.recent_trace.begin());
     }
     report.recent_trace.push_back(Ps1TraceSample{pc, opcode});
+}
+
+bool handle_bios_call(R3000aState& cpu,
+                      std::uint32_t table_physical,
+                      std::uint32_t selector) noexcept {
+    if (table_physical != kBiosA0 || selector != kBiosA0InitHeap) {
+        return false;
+    }
+
+    cpu.pc = cpu.gpr[31];
+    cpu.next_pc = cpu.pc + 4u;
+    cpu.delay_slot = {};
+    cpu.gpr[0] = 0u;
+    return true;
 }
 
 } // namespace
@@ -50,10 +66,13 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
 
         const auto physical_pc = Ps1MemoryBus::guest_to_physical(cpu_.pc);
         if (physical_pc && is_bios_table(*physical_pc)) {
-            report.stop_reason = Ps1BootStopReason::bios_call_unimplemented;
             ++report.bios_call_count;
             report.recent_bios_calls.push_back(
                 Ps1BiosCallSummary{cpu_.pc, *physical_pc, cpu_.gpr[9]});
+            if (handle_bios_call(cpu_, *physical_pc, cpu_.gpr[9])) {
+                continue;
+            }
+            report.stop_reason = Ps1BootStopReason::bios_call_unimplemented;
             return report;
         }
 
