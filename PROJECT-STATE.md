@@ -3,16 +3,15 @@
 ## Active development line
 
 - Repository: `matheuz232/JOJO-Recompiled`
-- Active branch: `feature/ps1-visible-boot-m3a`
+- Active branch: `feature/ps1-visible-boot-m3b-evidence`
 - Active platform: **Sony PlayStation 1**
 - Product scope: **JoJo PS1 only**
 - M3A code-head commit: `814c956eefd608080320aff270d59568fbb2b28a`
 - M3A verification workflow: `34334677057` (run #1339)
+- M3B evidence-capture code-head commit: `c460d34c8e46f0fddae026fbdcf570c1e7e3bedf`
+- M3B evidence-capture verification workflow: `34404397974` (run #1349)
 - Linux job: passed configure, build, production-readiness gate, PS1 active-architecture gate, CTest, observed-disc revision contract, and UDP transport contract.
 - Windows job: passed configure, Release build, production-readiness gate, PS1 active-architecture gate, Release CTest, observed-disc revision contract, UDP transport contract, and artifact upload.
-- Windows artifact: `JOJO-Recompiled-Windows-x64`
-- Artifact ID: `10097301228`
-- Artifact digest: `sha256:ee121eefcdb9876256306641bfc44f6f69050630d2e7240bebc12f40e4965ce6`
 - Shipping policy: one `JOJO-Recompiled.exe`.
 
 ## PS1 foundation evidence
@@ -59,11 +58,19 @@ The synthetic M3A contract covers:
 
 The immutable implementation evidence is GitHub Actions run `34334677057` on code-head `814c956eefd608080320aff270d59568fbb2b28a`, with both Linux and Windows jobs successful.
 
+## M3B evidence-capture surface
+
+The single Windows executable now exposes an explicit `EXECUTAR CHECKPOINT` action only when the selected local installation validates as PS1 M1/M3A-compatible. The action runs the existing bounded M3A reference checkpoint with a 10,000-instruction budget and exports only bounded derived diagnostics to `%LOCALAPPDATA%/JOJO Recompiled/diagnostics/m3a-checkpoint.txt`.
+
+The installation-backed checkpoint-to-file path and Win32 control are verified by GitHub Actions run `34404397974` on code-head `c460d34c8e46f0fddae026fbdcf570c1e7e3bedf`, with both `Portable core / Linux` and `Windows x64 / MSVC 2022` successful.
+
+CI does not contain the user's commercial JoJo image, so this run supplies **no commercial JoJo checkpoint evidence**. No PlayStation BIOS/HLE function was implemented by this M3B evidence-capture plan. This surface exists only to capture the first real JoJo boundary locally and safely enough to drive the next synthetic RED→GREEN contract.
+
 ## Truth boundary
 
 The following are still **not implemented or not verified** at this point:
 
-- commercial JoJo execution from the user's supported local installation;
+- commercial JoJo execution beyond a locally captured bounded checkpoint from the user's supported installation;
 - PlayStation BIOS/HLE services required by the commercial game;
 - GTE execution semantics beyond the explicit COP2 boundary;
 - IRQ/timer device behavior required by JoJo;
@@ -81,7 +88,7 @@ Synthetic fixtures and CI prove only the repository contracts they exercise. The
 
 ## Commercial-image evidence still required
 
-The user's previously observed whole-image fingerprint is known, but the corrected PS1 pipeline still needs one local run against the same legally obtained image for commercial `SYSTEM.CNF` / `PS-X EXE` discovery evidence and then an M3A checkpoint run against the resulting supported local installation.
+The user's previously observed whole-image fingerprint is known. The corrected PS1 pipeline now provides the local Windows path to prepare/validate the supported installation and run the bounded checkpoint, but the actual commercial boundary report still has to be produced locally from the user's legally obtained image.
 
 No commercial game bytes, extracted PS-X EXE, proprietary BIOS, raw sectors, or unrestricted guest-memory dumps are to be committed to the repository or CI. Commercial checkpoint evidence must remain bounded and derived.
 
@@ -98,9 +105,9 @@ Canonical status remains in `docs/architecture/PRODUCTION-READINESS.tsv`.
 
 ## Next priority
 
-M3B — JoJo-observed BIOS/HLE: run the supported local JoJo installation through the M3A checkpoint, capture only bounded derived diagnostics at the first A0/B0/C0 or kernel boundary, reproduce the required contract synthetically, and implement only the JoJo-required service.
+Run the supported local JoJo installation through `EXECUTAR CHECKPOINT` and inspect only the bounded derived report at `%LOCALAPPDATA%/JOJO Recompiled/diagnostics/m3a-checkpoint.txt`.
 
-After each JoJo-observed boundary, add the smallest synthetic RED→GREEN contract needed to progress toward the first visible commercial frame. IRQ/timers, DMA, CD-ROM, GPU and GTE subsets are added only when the JoJo execution path proves they are required.
+Do not implement or speculate about a BIOS/HLE service before that report identifies the actual JoJo boundary selector/address. Once the local report identifies it, reproduce that boundary with the smallest synthetic RED→GREEN contract and implement only the JoJo-required service. IRQ/timers, DMA, CD-ROM, GPU and GTE subsets remain evidence-driven follow-on work.
 
 Keep MIPS CFG/IR and Windows x64 lowering downstream of visible boot. This project has no compatibility target for unrelated games.
 

@@ -4,11 +4,15 @@ The active guest architecture is PlayStation 1 and the product scope is **JoJo P
 
 **R2.1 — Repository truth and release gates** is `verified` for the PS1 architecture-clean baseline. The active build/CTest/workflow contains no Dreamcast/SH-4 guest/backend targets.
 
-**R2.2 — Commercial revision enablement** remains `blocked-external-evidence`. The known whole-image fingerprint is recognized, but the corrected PS1 path still needs one local run against the user's same legally obtained image to record commercial `SYSTEM.CNF` / `PS-X EXE` discovery evidence. This external-evidence gate does not authorize commercial game bytes or a proprietary PlayStation BIOS in Git, CI, artifacts or releases.
+**R2.2 — Commercial revision enablement** remains `blocked-external-evidence`. The known whole-image fingerprint is recognized, but the corrected PS1 path still needs a local run against the user's same legally obtained image to supply the commercial evidence. This external-evidence gate does not authorize commercial game bytes or a proprietary PlayStation BIOS in Git, CI, artifacts or releases.
 
-**R2.3 — Game-specific execution and device integration** is `implemented-unverified` at the M3A checkpoint layer. Synthetic Linux/Windows contracts now cover the M2 R3000A semantics plus JoJo-specific 2 MiB PS1 RAM, 1 KiB scratchpad, explicit supported aliases, transactional PS-X EXE payload placement, installation-backed bounded reference execution, deterministic replay, A0/B0/C0 boundary recognition, MMIO-boundary reporting and instruction-budget termination. The immutable M3A code-head evidence run is `34334677057`.
+**R2.3 — Game-specific execution and device integration** remains `implemented-unverified` at the M3A checkpoint layer. Synthetic Linux/Windows contracts cover the M2 R3000A semantics plus JoJo-specific 2 MiB PS1 RAM, 1 KiB scratchpad, explicit supported aliases, transactional PS-X EXE payload placement, installation-backed bounded reference execution, deterministic replay, A0/B0/C0 boundary recognition, MMIO-boundary reporting and instruction-budget termination. The immutable M3A evidence remains GitHub Actions run `34334677057`.
 
-M3B — JoJo-observed BIOS/HLE: run the supported local JoJo installation through the M3A checkpoint, capture only bounded derived diagnostics at the first A0/B0/C0 or kernel boundary, reproduce the required contract synthetically, and implement only the JoJo-required service.
+**M3B evidence capture — ready for local boundary evidence.** The single Windows `JOJO-Recompiled.exe` now exposes `EXECUTAR CHECKPOINT` only for a validated PS1 installation, runs a 10,000-instruction bounded M3A checkpoint, and writes only derived diagnostics to `%LOCALAPPDATA%/JOJO Recompiled/diagnostics/m3a-checkpoint.txt`. The code-head is `c460d34c8e46f0fddae026fbdcf570c1e7e3bedf`; GitHub Actions run `34404397974` passed both `Portable core / Linux` and `Windows x64 / MSVC 2022`.
+
+That CI run contains no commercial JoJo image and therefore supplies **no commercial JoJo checkpoint evidence**. No BIOS/HLE service was implemented by this evidence-capture milestone. `R2.3` must remain `implemented-unverified`, and `R2.4` remains `not-started`.
+
+The next M3B action is local evidence capture: run the supported local JoJo installation through `EXECUTAR CHECKPOINT`, inspect the bounded derived report, and identify the actual first JoJo A0/B0/C0, CPU, or device boundary. Only after that selector/address is known should a new implementation plan reproduce the boundary synthetically and implement the smallest JoJo-required BIOS/HLE or device service.
 
 Unsupported BIOS/HLE calls and not-yet-implemented PS1 device accesses must remain explicit diagnostic boundaries rather than fabricated success. The implementation remains evidence-driven and JoJo-only; there is no compatibility target for unrelated games.
 
@@ -20,4 +24,4 @@ MIPS CFG/IR and Windows x64 native lowering/cache remain downstream of visible b
 
 **R2.5 — Online product modes/M9** retains host-side rollback/networking infrastructure only. It is not proof of commercial-game online integration and is lower priority than getting the base JoJo PS1 game executing correctly.
 
-**R2.6 — Production validation/release** remains `not-started`. Passing synthetic M3A contracts does not make the commercial game bootable or playable.
+**R2.6 — Production validation/release** remains `not-started`. Passing synthetic M3A/M3B evidence-capture contracts does not make the commercial game bootable or playable.
