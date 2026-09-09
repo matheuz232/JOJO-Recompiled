@@ -16,12 +16,12 @@ enum class ConversionStage {
     fingerprinting_source,
     discovering_filesystem,
     identifying_revision,
+    reading_system_cnf,
+    reading_psx_exe,
     preparing_installation,
-    preparing_game_backend,
-    building_native_backend,
-    verifying_native_backend,
-    promoting_native_backend,
+    copying_local_data,
     writing_manifest,
+    activating_installation,
     completed
 };
 
@@ -36,7 +36,6 @@ using ConversionProgressCallback = std::function<void(const ConversionProgress&)
 
 struct ConversionOptions {
     std::vector<GameRevisionProfile> revision_profiles;
-    bool allow_unverified_base_conversion{false};
 };
 
 struct ConversionManifest {
