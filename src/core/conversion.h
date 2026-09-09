@@ -40,13 +40,40 @@ struct ConversionOptions {
 };
 
 struct ConversionManifest {
-    std::string manifest_version{"1"};
+    std::string manifest_version{"2"};
     std::string converter_version;
+    std::string platform{"playstation"};
+    std::string game_id{"jojo-ps1"};
     std::string source_name;
     std::string source_format;
     std::uint64_t source_size{};
-    std::string hash_hex;
+    std::string source_hash_fnv1a64;
     std::string revision_id;
+    std::string system_cnf_path;
+    std::string boot_executable;
+    std::string psx_exe_hash_fnv1a64;
+    std::optional<std::uint32_t> psx_exe_entry;
+    std::optional<std::uint32_t> psx_exe_load_address;
+    std::optional<std::uint32_t> psx_exe_initial_gp;
+    std::optional<std::uint32_t> psx_exe_text_size;
+    std::optional<std::uint32_t> psx_exe_stack_base;
+    std::optional<std::uint32_t> psx_exe_stack_size;
+    std::string media_status{"pending"};
+    std::string executable_status{"pending"};
+    std::string mips_analysis_status{"pending"};
+    std::string reference_runtime_status{"pending"};
+    std::string native_codegen_status{"pending"};
+    std::string hardware_runtime_status{"pending"};
+    std::string boot_status{"pending"};
+    std::string rendering_status{"pending"};
+    std::string audio_status{"pending"};
+    std::string input_status{"pending"};
+    std::string gameplay_status{"pending"};
+
+    // Temporary v1 compatibility bridge. The legacy Dreamcast conversion/runtime
+    // path is removed later in this milestone; new PS1 manifests never serialize
+    // these fields.
+    std::string hash_hex;
     std::string backend{"pending-game-specific-recompiler"};
     std::string boot_program_hash_hex;
     std::optional<std::uint32_t> backend_abi_version;
