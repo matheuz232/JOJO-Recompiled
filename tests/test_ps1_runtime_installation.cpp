@@ -3,11 +3,13 @@
 #include "core/ps1_installation.h"
 #include "ps1_fixture.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 static int failures = 0;
@@ -58,6 +60,19 @@ static std::string read_text(const fs::path& path) {
 static void write_text(const fs::path& path, const std::string& text) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out << text;
+}
+
+static std::vector<std::string> regular_files_under(const fs::path& root) {
+    std::vector<std::string> files;
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+        if (it->is_regular_file(ec) && !ec) {
+            files.push_back(fs::relative(it->path(), root, ec).generic_string());
+            if (ec) break;
+        }
+    }
+    std::sort(files.begin(), files.end());
+    return files;
 }
 
 static void test_absent_installation_is_classified() {
@@ -223,6 +238,36 @@ static void test_checkpoint_executes_validated_installed_exe_without_mutation() 
     cleanup(fixture);
 }
 
+static void test_checkpoint_export_is_bounded_and_does_not_mutate_installation() {
+    auto fixture = make_converted("checkpoint-export");
+    const auto generation = generation_dir(fixture);
+    const auto manifest_path = generation / "game_manifest.ini";
+    const auto manifest_before = read_text(manifest_path);
+    const auto files_before = regular_files_under(generation);
+    const auto report_path = fixture.root / "diagnostics" / "m3a-checkpoint.txt";
+
+    jojo::Ps1BootOptions options{};
+    options.instruction_budget = 4u;
+    const auto checkpoint = jojo::bootstrap_runtime_checkpoint_to_file(
+        fixture.install, report_path, options);
+    CHECK(checkpoint);
+    if (checkpoint) {
+        CHECK(checkpoint.value.instructions_retired == 4u);
+        CHECK(checkpoint.value.presented_frames == 0u);
+    }
+
+    CHECK(fs::is_regular_file(report_path));
+    const auto report_text = read_text(report_path);
+    CHECK(report_text.find("format=jojo-m3a-checkpoint-v1\n") == 0u);
+    CHECK(report_text.find("instructions_retired=4\n") != std::string::npos);
+    CHECK(report_text.find("PS-X EXE") == std::string::npos);
+    CHECK(read_text(manifest_path) == manifest_before);
+    CHECK(regular_files_under(generation) == files_before);
+    CHECK(!fs::exists(generation / "diagnostics"));
+
+    cleanup(fixture);
+}
+
 int main() {
     test_absent_installation_is_classified();
     test_valid_m1_install_survives_source_deletion();
@@ -233,6 +278,7 @@ int main() {
     test_active_pointer_to_missing_generation_is_rejected();
     test_manifest_metadata_mismatch_is_rejected();
     test_checkpoint_executes_validated_installed_exe_without_mutation();
+    test_checkpoint_export_is_bounded_and_does_not_mutate_installation();
     if (failures) {
         std::cerr << failures << " PS1 runtime-installation assertion(s) failed\n";
         return 1;
