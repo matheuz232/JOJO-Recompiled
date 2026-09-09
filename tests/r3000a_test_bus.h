@@ -28,6 +28,7 @@ public:
     }
 
     jojo::R3000aBusResult read32(std::uint32_t address) noexcept override {
+        last_read32_address_ = address;
         std::uint32_t value = 0u;
         for (std::uint32_t i = 0; i < 4u; ++i) {
             const auto byte = read8(address + i);
@@ -55,6 +56,7 @@ public:
     }
 
     jojo::R3000aBusResult write32(std::uint32_t address, std::uint32_t value) noexcept override {
+        last_write32_address_ = address;
         for (std::uint32_t i = 0; i < 4u; ++i) {
             const auto out = write8(address + i, static_cast<std::uint8_t>((value >> (8u * i)) & 0xffu));
             if (out.status != jojo::R3000aBusStatus::ok) return out;
@@ -83,6 +85,9 @@ public:
         return value;
     }
 
+    [[nodiscard]] std::uint32_t last_read32_address() const noexcept { return last_read32_address_; }
+    [[nodiscard]] std::uint32_t last_write32_address() const noexcept { return last_write32_address_; }
+
     void fail_bus_error(std::uint32_t address) { bus_error_.insert(address); }
     void fail_unsupported(std::uint32_t address) { unsupported_.insert(address); }
 
@@ -90,4 +95,6 @@ private:
     std::unordered_map<std::uint32_t, std::uint8_t> bytes_;
     std::unordered_set<std::uint32_t> bus_error_;
     std::unordered_set<std::uint32_t> unsupported_;
+    std::uint32_t last_read32_address_{};
+    std::uint32_t last_write32_address_{};
 };
