@@ -46,7 +46,7 @@ static void cleanup(const ConvertedFixture& fixture) {
 static fs::path generation_dir(const ConvertedFixture& fixture) {
     const auto resolved = jojo::resolve_active_install_generation(fixture.install);
     CHECK(resolved);
-    return resolved ? resolved.value : fs::path{};
+    return resolved ? resolved.value.generation_dir : fs::path{};
 }
 
 static std::string read_text(const fs::path& path) {
