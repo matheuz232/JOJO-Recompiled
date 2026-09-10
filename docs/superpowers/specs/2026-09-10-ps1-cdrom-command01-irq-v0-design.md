@@ -50,7 +50,7 @@ This milestone does not implement:
 - XA/CD-DA audio;
 - timing-accurate HC05 command latency;
 - asynchronous multi-response command queues beyond what command `0x01` requires;
-- parameter FIFO semantics beyond storage scaffolding if needed by the component boundary;
+- parameter FIFO behavior or storage;
 - GPU, DMA2, rendering, or presentation changes;
 - a native x64 recompiler backend.
 
@@ -83,11 +83,11 @@ This access is real MMIO and must no longer produce a diagnostic probe.
 
 ### `0x1F801803` read
 
-For bank 1 (and bank 3 if reached through the same HINTSTS mirror), return HINTSTS. The visible value is `0xE0 | interrupt_type`, matching the reserved high bits documented as one.
+For the observed bank 1, return HINTSTS. The visible value is `0xE0 | interrupt_type`, matching the reserved high bits documented as one.
 
 The currently observed pre-command state therefore has interrupt type zero.
 
-For bank 0/2, HINTMSK reads remain strict in this milestone unless required internally by a test of the approved IRQ bridge. The checkpoint does not currently require guest-visible HINTMSK reads.
+Bank 0/2 HINTMSK reads and the bank 3 HINTSTS mirror remain strict in v0. They are documented hardware behaviors but are not required by the approved checkpoint path.
 
 ### `0x1F801803` write
 
@@ -142,9 +142,9 @@ This bridge does not force an interrupt if I_MASK bit 2 is disabled. It merely m
 
 `Ps1BootReport::cdrom_command_count` must report the number of real CD-ROM commands observed during the run, not diagnostic shadow writes.
 
-`recent_cdrom_commands` must receive a `Ps1CdromCommandSummary` for each supported command event retained within the existing report capacity strategy. For command `0x01`, the summary contains command `0x01`, bank/index 0, and the status byte returned by the command.
+`recent_cdrom_commands` receives one `Ps1CdromCommandSummary` per supported command event. In v0, its retention cap reuses `Ps1BootOptions::mmio_event_capacity`; no new public capacity option is added. For command `0x01`, the summary contains command `0x01`, bank/index 0, and the status byte returned by the command.
 
-A real CD-ROM command counts as diagnostic progress for stagnation tracking so the runtime does not immediately classify successful new device activity as a stall.
+A real CD-ROM command resets diagnostic stagnation progress when it creates a new command event. Repeated command events are still bounded by the global instruction budget and the retained-event cap.
 
 ## MAX3 hashing
 
@@ -173,6 +173,8 @@ Remain unsupported unless separately observed or required by the approved comman
 - bank-1 HCLRCTL writes,
 - parameter FIFO writes,
 - RDDATA reads,
+- bank 0/2 HINTMSK guest reads,
+- bank 3 HINTSTS mirror reads,
 - DMA3 registers and transfers,
 - CD audio/volume banks.
 
@@ -208,3 +210,9 @@ After this milestone, the four current speculative dependencies should disappear
 - or a new subsystem frontier.
 
 No claim is made that this milestone will produce graphics, DMA, sector reads, or a playable build. Its success criterion is narrower: replace the first observed CD-ROM protocol with real deterministic device/IRQ semantics and expose the next evidence frontier.
+
+## References
+
+- https://psx-spx.consoledev.net/cdromdrive/
+- https://psx-spx.consoledev.net/interrupts/
+- https://psx-spx.consoledev.net/iomap/
