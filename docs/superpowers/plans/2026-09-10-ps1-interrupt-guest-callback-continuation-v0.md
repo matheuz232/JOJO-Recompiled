@@ -4,7 +4,7 @@
 
 **Goal:** Replace zero-filled exception-vector fallthrough with a deterministic HLE interrupt dispatcher that executes registered IntRP callbacks as ordinary guest R3000A code and returns through `B0:17`/HookEntryInt without expanding unrelated BIOS, CD-ROM, GPU, DMA, or event behavior.
 
-**Architecture:** Add a value-type `Ps1InterruptContinuation` state machine owned by `Ps1BootRuntime`. The continuation captures the interrupted context after architectural interrupt entry, walks the existing `Ps1HleBios` priority-chain metadata, launches guest FIRST/SECOND callbacks through the ordinary CPU loop using an internal unmapped return sentinel, handles `B0:17 ReturnFromException`, and optionally resumes a guest HookEntryInt buffer. `Ps1BootRuntime` intercepts only an all-zero normal exception vector at `0x80000080`; custom vectors remain guest-owned.
+**Architecture:** Add a value-type `Ps1InterruptContinuation` state machine owned by `Ps1BootRuntime`. It captures the interrupted context after architectural interrupt entry, walks the existing `Ps1HleBios` priority-chain metadata, launches guest FIRST/SECOND callbacks through the ordinary CPU loop using an internal unmapped return sentinel, consumes `B0:17 ReturnFromException`, and optionally resumes a guest HookEntryInt buffer. `Ps1BootRuntime` intercepts only an all-zero normal exception vector at `0x80000080`; any custom vector remains guest-owned.
 
 **Tech Stack:** C++20, CMake 3.20+, portable R3000A reference executor, `Ps1MemoryBus`, `Ps1HleBios`, MAX3 explorer, GitHub Actions Linux + Windows Server 2022 / Visual Studio 2022 x64.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Design base is `f485a6fa3434f05505205589a5aa181f055d3308`; the written spec head is `4ce652af118389d9c65dc45bc5c520359461d3a0`.
+- Design base is `f485a6fa3434f05505205589a5aa181f055d3308`; the approved written-spec head is `4ce652af118389d9c65dc45bc5c520359461d3a0`.
 - Do not import, materialize, execute, commit, artifact, or release a retail PS1 BIOS image or proprietary game payload.
 - Use only synthetic fixtures in repository tests; commercial checkpoints remain external evidence only.
 - Intercept only the normal exception vector `0x80000080`, and only when all four words at `0x80000080..0x8000008C` are readable and zero.
@@ -22,6 +22,7 @@
 - Do not auto-clear I_STAT, CD-ROM HINTSTS, or any device IRQ merely to avoid re-entry.
 - Do not implement `A0:35 lsearch`, new CD-ROM commands/FIFO semantics, `B0:07 DeliverEvent`, general event callbacks, DMA3, GPU drawing, linked-list DMA2, renderer/presentation, nested kernel exceptions, or native x64 lowering in this milestone.
 - Preserve MAX3 copyability and deterministic hashing: continuation state must contain no host coroutine, opaque pointer, or host-stack continuation.
+- Inactive continuation state must be canonical: dead saved/traversal data must be cleared when the continuation finishes so it cannot perturb MAX3 hashes.
 - Every production change follows TDD RED → GREEN; Windows/MSVC CI remains the final cross-platform authority.
 
 ---
@@ -31,16 +32,16 @@
 **Create:**
 - `src/core/ps1_interrupt_continuation.h` — public value-state interface, phases, saved interrupted context, drive/restore API, internal return sentinel.
 - `src/core/ps1_interrupt_continuation.cpp` — priority traversal, callback launch/return, cycle guard, HookEntryInt restore, deterministic hash.
-- `tests/test_ps1_interrupt_continuation.cpp` — focused unit tests for saved context, chain ordering, FIRST/SECOND decisions, callback sentinel, hook restore, cycle strictness, hash.
+- `tests/test_ps1_interrupt_continuation.cpp` — focused unit tests for saved context, chain ordering, FIRST/SECOND decisions, callback sentinel, hook restore, cycle strictness, canonical reset, and hash.
 
 **Modify:**
 - `src/core/ps1_hle_bios.h` — expose priority-head query and an explicit `return_from_exception` disposition.
 - `src/core/ps1_hle_bios.cpp` — recognize `B0:17` without mutating CPU state; expose the current IntRP head.
 - `src/core/ps1_boot_runtime.h` — own one `Ps1InterruptContinuation` value.
-- `src/core/ps1_boot_runtime.cpp` — all-zero vector probe, pre-step interrupt snapshot, continuation driving, nested-interrupt boundary, `B0:17` consumption, continuation hash.
+- `src/core/ps1_boot_runtime.cpp` — all-zero vector probe, pre-step Status capture, continuation driving, nested-interrupt boundary, `B0:17` consumption, continuation hash.
 - `tests/test_ps1_kernel_hle_frontier.cpp` — BIOS metadata/control-transfer contract for C0 heads and B0:17.
 - `tests/test_ps1_cdrom_boot_runtime.cpp` — accepted-CDROM-IRQ integration regression, zero-vector interception, custom-vector preservation, context restore.
-- `tests/test_ps1_max3_explorer.cpp` — prove fake `A0:35` no longer becomes a MAX3 dependency and no unsupported CD-ROM relaxation was introduced.
+- `tests/test_ps1_max3_explorer.cpp` — prove fake `A0:35` no longer becomes a MAX3 dependency.
 - `CMakeLists.txt` — compile the continuation source and register its focused test executable.
 
 No public checkpoint-format change is planned.
@@ -55,14 +56,18 @@ No public checkpoint-format change is planned.
 - Test: `tests/test_ps1_kernel_hle_frontier.cpp`
 
 **Interfaces:**
-- Consumes: existing `Ps1HleBios::dispatch(...)`, `interrupt_priority_heads_`, `B0:19 HookEntryInt`, `C0:02/C0:03` storage.
+- Consumes: existing `Ps1HleBios::dispatch(...)`, `interrupt_priority_heads_`, `B0:19 HookEntryInt`, and `C0:02/C0:03` state.
 - Produces:
-  - `Ps1HleBiosDisposition::return_from_exception`
-  - `std::optional<std::uint32_t> Ps1HleBios::interrupt_priority_head(std::uint32_t priority) const noexcept`
+
+```cpp
+Ps1HleBiosDisposition::return_from_exception
+std::optional<std::uint32_t> Ps1HleBios::interrupt_priority_head(
+    std::uint32_t priority) const noexcept;
+```
 
 - [ ] **Step 1: Write RED tests for priority-head visibility and B0:17 signaling**
 
-Extend `tests/test_ps1_kernel_hle_frontier.cpp` with a test that enqueues one synthetic node, reads the head through the new query, then dispatches B0:17 and proves the CPU is not mutated by HLE:
+Extend `tests/test_ps1_kernel_hle_frontier.cpp` with:
 
 ```cpp
 static void test_interrupt_metadata_and_return_from_exception_signal() {
@@ -98,8 +103,6 @@ Add the test to `main()`.
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
-Run:
-
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 2 --target jojo_ps1_kernel_hle_frontier_tests
@@ -110,7 +113,7 @@ Expected RED: compilation fails because `return_from_exception` and/or `interrup
 
 - [ ] **Step 3: Add the minimal BIOS interfaces**
 
-In `src/core/ps1_hle_bios.h`, extend the disposition and add the query:
+In `src/core/ps1_hle_bios.h`, extend the enum:
 
 ```cpp
 enum class Ps1HleBiosDisposition : std::uint8_t {
@@ -119,23 +122,23 @@ enum class Ps1HleBiosDisposition : std::uint8_t {
     terminal,
     return_from_exception,
 };
-
-class Ps1HleBios {
-public:
-    // existing API...
-    [[nodiscard]] std::optional<std::uint32_t> interrupt_priority_head(
-        std::uint32_t priority) const noexcept;
-};
 ```
 
-In the B0 switch in `src/core/ps1_hle_bios.cpp`, signal B0:17 without changing PC, registers, bus state, or the saved interrupt metadata:
+Add this public declaration to `Ps1HleBios`:
+
+```cpp
+[[nodiscard]] std::optional<std::uint32_t> interrupt_priority_head(
+    std::uint32_t priority) const noexcept;
+```
+
+In the B0 switch in `src/core/ps1_hle_bios.cpp`:
 
 ```cpp
 case 0x17u: // ReturnFromException: Ps1BootRuntime owns context restoration.
     return {Ps1HleBiosDisposition::return_from_exception};
 ```
 
-Add the query implementation:
+Add:
 
 ```cpp
 std::optional<std::uint32_t> Ps1HleBios::interrupt_priority_head(
@@ -148,8 +151,6 @@ std::optional<std::uint32_t> Ps1HleBios::interrupt_priority_head(
 Do not change `C0:02`, `C0:03`, `B0:18`, or `B0:19` semantics.
 
 - [ ] **Step 4: Run focused and neighboring BIOS tests and verify GREEN**
-
-Run:
 
 ```bash
 cmake --build build --parallel 2 --target jojo_ps1_kernel_hle_frontier_tests jojo_ps1_hle_bios_tests
@@ -213,17 +214,17 @@ public:
 };
 ```
 
-The sentinel is intentionally `>= 0xC0000000`, so `Ps1MemoryBus::guest_to_physical()` does not map it.
+`0xE00000F0` is intentionally `>= 0xC0000000`, so `Ps1MemoryBus::guest_to_physical()` does not map it.
 
 - [ ] **Step 1: Register the new source/test and write RED context tests**
 
-Add `src/core/ps1_interrupt_continuation.cpp` to `jojo_core` and:
+Add `src/core/ps1_interrupt_continuation.cpp` to `jojo_core` and register:
 
 ```cmake
 add_jojo_test(jojo_ps1_interrupt_continuation_tests tests/test_ps1_interrupt_continuation.cpp)
 ```
 
-Create `tests/test_ps1_interrupt_continuation.cpp` with tests that prove exact capture/restoration and hash behavior:
+Create `tests/test_ps1_interrupt_continuation.cpp`:
 
 ```cpp
 #include "core/ps1_interrupt_continuation.h"
@@ -239,7 +240,7 @@ static void test_begin_and_restore_exact_v0_context() {
     for (std::uint32_t i = 1; i < 32; ++i) cpu.gpr[i] = 0x10000000u + i;
     cpu.hi = 0x11112222u;
     cpu.lo = 0x33334444u;
-    cpu.cop0.status = 0x00000404u; // post-exception stack value; not restored as-is
+    cpu.cop0.status = 0x00000404u;
     cpu.cop0.cause = 0x00000400u;
     cpu.cop0.epc = 0x80012000u;
     cpu.cop2_gte.control[0] = 0xABCDEF01u;
@@ -274,6 +275,7 @@ static void test_begin_and_restore_exact_v0_context() {
     CHECK(cpu.cop0.epc == 0x87654321u);
     CHECK(cpu.cop2_gte.control[0] == 0x10203040u);
     CHECK(cpu.external_interrupt_pending == 0x08u);
+    CHECK(continuation.diagnostic_state_hash() == inactive_hash);
 }
 
 static void test_equal_continuations_hash_equal() {
@@ -295,8 +297,6 @@ int main() {
 
 - [ ] **Step 2: Run the new test and verify RED**
 
-Run:
-
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 2 --target jojo_ps1_interrupt_continuation_tests
@@ -304,9 +304,11 @@ cmake --build build --parallel 2 --target jojo_ps1_interrupt_continuation_tests
 
 Expected RED: missing header/source/types.
 
-- [ ] **Step 3: Implement value-state capture, restore, and deterministic hash**
+- [ ] **Step 3: Implement value-state capture, restoration, canonical reset, and hash**
 
-Create the header with the exact public API above. Private state must remain plain value data:
+The header includes `<array>`, `<cstddef>`, `<cstdint>`, and `core/r3000a_state.h`. Forward-declare `Ps1MemoryBus` and `Ps1HleBios`; do not include them until Task 3 needs the drive signature.
+
+Private state:
 
 ```cpp
 Ps1InterruptContinuationPhase phase_{Ps1InterruptContinuationPhase::inactive};
@@ -321,24 +323,27 @@ std::array<std::uint32_t, 64> visited_nodes_{};
 std::size_t visited_count_{};
 ```
 
-`begin()` copies GPR1..31, HI/LO from the post-exception state, stores the passed pre-exception Status and resume PCs, clears traversal fields, and sets `phase_ = dispatch`. `return_from_exception()` restores only the fields defined by the spec:
+`begin()` copies GPR1..31, HI/LO from the post-exception state, stores the passed pre-exception Status and resume PCs, zeroes traversal fields, and sets `phase_ = dispatch`.
+
+`return_from_exception()` first copies `saved_` to a local value, restores from that local, then canonicalizes the whole continuation:
 
 ```cpp
-for (std::size_t i = 1; i < saved_.gpr.size(); ++i) cpu.gpr[i] = saved_.gpr[i];
-cpu.hi = saved_.hi;
-cpu.lo = saved_.lo;
-cpu.cop0.status = saved_.status;
-cpu.pc = saved_.resume_pc;
-cpu.next_pc = saved_.resume_next_pc;
+const auto saved = saved_;
+for (std::size_t i = 1; i < saved.gpr.size(); ++i) cpu.gpr[i] = saved.gpr[i];
+cpu.hi = saved.hi;
+cpu.lo = saved.lo;
+cpu.cop0.status = saved.status;
+cpu.pc = saved.resume_pc;
+cpu.next_pc = saved.resume_next_pc;
 cpu.pending_load = {};
 cpu.delay_slot = {};
 cpu.gpr[0] = 0u;
-phase_ = Ps1InterruptContinuationPhase::inactive;
+*this = Ps1InterruptContinuation{};
 ```
 
 Do not restore Cause, EPC, COP2/GTE, or `external_interrupt_pending`.
 
-Hash every field that can affect future traversal/restoration, including all saved GPRs, traversal fields, phase, and the populated visited-node prefix.
+Hash phase, every saved-context field, traversal fields, `priority_head_loaded_`, `visited_count_`, and only the populated prefix `[0, visited_count_)` of `visited_nodes_`.
 
 - [ ] **Step 4: Run the focused test and verify GREEN**
 
@@ -347,7 +352,7 @@ cmake --build build --parallel 2 --target jojo_ps1_interrupt_continuation_tests
 ctest --test-dir build -R jojo_ps1_interrupt_continuation_tests --output-on-failure
 ```
 
-Expected: PASS.
+Expected: PASS, including hash returning to the original inactive value after restoration.
 
 - [ ] **Step 5: Commit Task 2**
 
@@ -386,39 +391,38 @@ struct Ps1InterruptDriveResult {
     const Ps1HleBios& bios) noexcept;
 ```
 
-- [ ] **Step 1: Write RED tests for chain order, FIRST/SECOND rules, and sentinel return**
+- [ ] **Step 1: Write RED tests for chain order, FIRST/SECOND rules, sentinel return, and cycle strictness**
 
-Extend `tests/test_ps1_interrupt_continuation.cpp` with helpers that materialize IntRP nodes through the bus and register heads through `C0:02`. Use direct sentinel simulation for the unit test: after `drive()` launches a callback, set `cpu.pc = callback_return_sentinel` and set `cpu.gpr[2]` to the desired return value before calling `drive()` again.
+Extend `tests/test_ps1_interrupt_continuation.cpp` to include `ps1_hle_bios.h` and `ps1_memory_bus.h`. Add a helper that writes each IntRP node as `{next, second, first}` and register heads through real `C0:02`. When registering multiple nodes in one priority, enqueue them in reverse desired traversal order because `C0:02` stores the previous head into `node+0`.
 
-Cover these exact cases:
+For FIRST returning zero:
 
 ```cpp
-// priority 0 node: next=0, second=0x80012100, first=0x80012000
-// FIRST returns 0 -> SECOND is skipped and dispatch completes/restores.
-CHECK(continuation.drive(cpu, bus, bios).status == jojo::Ps1InterruptDriveStatus::guest_execution);
+CHECK(continuation.drive(cpu, bus, bios).status ==
+      jojo::Ps1InterruptDriveStatus::guest_execution);
 CHECK(cpu.pc == 0x80012000u);
 CHECK(cpu.gpr[31] == jojo::Ps1InterruptContinuation::callback_return_sentinel);
 cpu.pc = jojo::Ps1InterruptContinuation::callback_return_sentinel;
 cpu.gpr[2] = 0u;
-CHECK(continuation.drive(cpu, bus, bios).status == jojo::Ps1InterruptDriveStatus::restored);
-
-// FIRST returns 1 -> SECOND launches.
-// after SECOND reaches sentinel, next linked node launches before next priority.
+CHECK(continuation.drive(cpu, bus, bios).status ==
+      jojo::Ps1InterruptDriveStatus::restored);
 ```
 
-Add a multi-priority test with synthetic callback addresses encoding order (for example `0x80012000`, `0x80012100`, `0x80012200`, `0x80012300`) and check launch order is linked-list order inside a priority, then priority 0→1→2→3.
-
-Add cycle strictness:
+For FIRST returning one, require SECOND to launch before traversal advances:
 
 ```cpp
-// node.next points to itself
-CHECK(continuation.drive(cpu, bus, bios).status == jojo::Ps1InterruptDriveStatus::guest_execution);
 cpu.pc = jojo::Ps1InterruptContinuation::callback_return_sentinel;
-cpu.gpr[2] = 0u;
-CHECK(continuation.drive(cpu, bus, bios).status == jojo::Ps1InterruptDriveStatus::terminal);
+cpu.gpr[2] = 1u;
+CHECK(continuation.drive(cpu, bus, bios).status ==
+      jojo::Ps1InterruptDriveStatus::guest_execution);
+CHECK(cpu.pc == 0x80012100u);
 ```
 
-- [ ] **Step 2: Run focused test and verify RED**
+Add a multi-priority test with distinct callback addresses and require linked-list order within a priority, then priority 0→1→2→3.
+
+Add a cycle test whose captured `next` points to the current node. After FIRST returns, the next `drive()` must return `terminal`, not loop.
+
+- [ ] **Step 2: Run the focused test and verify RED**
 
 ```bash
 cmake --build build --parallel 2 --target jojo_ps1_interrupt_continuation_tests
@@ -429,7 +433,9 @@ Expected RED: `drive`, drive status types, or traversal behavior are missing.
 
 - [ ] **Step 3: Implement traversal and callback launch**
 
-Add `drive()` and these private helpers:
+Add forward declarations for `Ps1MemoryBus`/`Ps1HleBios` and the drive types/signature to the header. In the cpp include both concrete headers.
+
+Private helpers:
 
 ```cpp
 [[nodiscard]] bool remember_node(std::uint32_t node) noexcept;
@@ -438,9 +444,9 @@ void launch_callback(R3000aState& cpu,
                      Ps1InterruptContinuationPhase phase) noexcept;
 ```
 
-`remember_node()` rejects zero, repeated addresses, and a 65th distinct node. Do not silently skip malformed chains.
+`remember_node()` rejects zero, a repeated address, and a 65th distinct node. Do not silently skip malformed chains.
 
-`launch_callback()` must do exactly:
+`launch_callback()`:
 
 ```cpp
 cpu.pc = callback;
@@ -452,14 +458,13 @@ cpu.gpr[0] = 0u;
 phase_ = phase;
 ```
 
-`drive()` behavior:
+Callback-return handling:
 
 ```cpp
 if (phase_ == Ps1InterruptContinuationPhase::first_callback) {
     if (cpu.pc != callback_return_sentinel)
         return {Ps1InterruptDriveStatus::guest_execution};
-    const bool first_nonzero = cpu.gpr[2] != 0u;
-    if (first_nonzero && second_callback_ != 0u) {
+    if (cpu.gpr[2] != 0u && second_callback_ != 0u) {
         launch_callback(cpu, second_callback_, Ps1InterruptContinuationPhase::second_callback);
         return {Ps1InterruptDriveStatus::guest_execution};
     }
@@ -478,15 +483,15 @@ if (phase_ == Ps1InterruptContinuationPhase::second_callback) {
 For `dispatch`, loop until a guest callback is launched or dispatch completes:
 
 1. Load the current priority head once with `bios.interrupt_priority_head(priority_)`.
-2. If the current chain is empty, advance priority.
-3. For each node, reject a repeated/overflow node through `terminal`.
-4. Read `next`, `SECOND`, `FIRST` from `node+0`, `node+4`, `node+8`; any unsupported read returns `terminal` and leaves the bus's unsupported-access evidence intact.
-5. Capture all three pointers before executing a callback.
-6. If FIRST is zero, skip the node's SECOND and advance directly to captured `next`.
+2. If the current chain is empty, advance priority and clear `priority_head_loaded_`.
+3. For each node, reject repeated/overflow nodes through `terminal`.
+4. Read `next`, `SECOND`, and `FIRST` from `node+0`, `node+4`, `node+8`; any unsupported read returns `terminal` and leaves bus unsupported-access evidence intact.
+5. Capture all three values before executing a callback.
+6. If FIRST is zero, skip SECOND and advance directly to captured `next`.
 7. If FIRST is non-zero, launch it and return `guest_execution`.
-8. When priority 3 is exhausted and no HookEntryInt handling exists yet, call `return_from_exception(cpu)` and return `restored`. Task 5 will replace this final branch with hook-aware completion.
+8. When priority 3 is exhausted, call `return_from_exception(cpu)` and return `restored`. Task 5 will replace only this final branch with hook-aware completion.
 
-Update the continuation hash to include all new traversal fields and visited-node state.
+Update the continuation hash to include current traversal/callback phase and visited-node state.
 
 - [ ] **Step 4: Run focused tests and verify GREEN**
 
@@ -514,14 +519,25 @@ git commit -m "feat: dispatch PS1 IntRP guest callbacks"
 - Test: `tests/test_ps1_cdrom_boot_runtime.cpp`
 
 **Interfaces:**
-- Consumes: Task 2/3 `Ps1InterruptContinuation`, Task 1 `return_from_exception`, existing `step_r3000a`, I_STAT/I_MASK→IP2 sync.
+- Consumes: Task 2/3 `Ps1InterruptContinuation`, Task 1 `return_from_exception`, existing `step_r3000a`, and I_STAT/I_MASK→IP2 synchronization.
 - Produces: one copyable `Ps1InterruptContinuation interrupt_continuation_{}` member included in runtime diagnostic hashing.
 
-- [ ] **Step 1: Write RED integration tests for zero vector, custom vector, B0:17, and nested interrupt strictness**
+- [ ] **Step 1: Write RED integration tests for zero vector, custom vector, B0:17, and nested-interrupt strictness**
 
-Add a helper in `tests/test_ps1_cdrom_boot_runtime.cpp` that constructs a program which enables I_MASK bit 2, enables COP0 IEc+IM2, emits CD-ROM command `0x01`, and leaves `r9=0x35` before the interrupt. Do not materialize a vector.
+Add a synthetic IRQ program helper in `tests/test_ps1_cdrom_boot_runtime.cpp` that enables I_MASK bit 2, enables COP0 IEc+IM2, emits CD-ROM command `0x01`, and leaves `r9=0x35` before the interrupt. Do not materialize an exception vector.
 
-Add a zero-vector regression:
+Register a synthetic priority-2 IntRP node whose FIRST callback at `0x80012000` is:
+
+```cpp
+// addiu r9,r0,0x17 ; j 0x800000B0 ; nop
+runtime.bus().write32(0x80012000u, test_mips::i(0x09u, 0u, 9u, 0x17u));
+runtime.bus().write32(0x80012004u, test_mips::j(0x02u, 0x000000B0u >> 2));
+runtime.bus().write32(0x80012008u, 0x00000000u);
+```
+
+The J instruction inherits the high PC nibble and reaches guest `0x800000B0`, whose physical alias is BIOS B0.
+
+Zero-vector regression:
 
 ```cpp
 jojo::Ps1BootOptions options{};
@@ -534,20 +550,11 @@ for (const auto& event : report.recent_bios_calls) {
 }
 ```
 
-Register a synthetic priority-2 node whose FIRST callback is:
+Assert execution returns to the interrupted guest path rather than sequentially crossing `0x800000A0`.
 
-```cpp
-// at 0x80012000: B0:17 ReturnFromException
-addiu r9, r0, 0x17
-j     0x000000B0
-nop
-```
+Custom-vector preservation: write a non-zero self-loop at `0x80000080/84` before IRQ and assert the run exhausts budget in that custom vector and the IntRP callback never executes.
 
-After the run, assert execution returns to the interrupted program and does not fall through to `0x800000A0`.
-
-Add custom-vector preservation by writing a non-zero self-loop at `0x80000080` before the IRQ and asserting the continuation does not hijack it: the run exhausts budget while PC remains in the custom vector and no registered IntRP callback executes.
-
-Add nested-interrupt strictness with a FIRST callback that re-enables interrupt acceptance while the original I_STAT remains asserted. Expected stop: `cpu_boundary` with the second step diagnostic exception code `interrupt`; continuation state must not be overwritten by a second `begin()`.
+Nested-interrupt strictness: use a FIRST callback that writes COP0 Status back to IEc+IM2 while I_STAT remains asserted. The second accepted interrupt must stop as `cpu_boundary` with diagnostic exception code `interrupt`; it must not overwrite the first continuation.
 
 - [ ] **Step 2: Run the focused runtime test and verify RED**
 
@@ -560,7 +567,7 @@ Expected RED: zero vector still falls through to fake A0 and runtime has no cont
 
 - [ ] **Step 3: Add vector probe and continuation member**
 
-In `src/core/ps1_boot_runtime.h` include the new header and add:
+In `src/core/ps1_boot_runtime.h`, include `core/ps1_interrupt_continuation.h` and add:
 
 ```cpp
 Ps1InterruptContinuation interrupt_continuation_{};
@@ -579,7 +586,7 @@ std::optional<bool> zero_default_exception_vector(Ps1MemoryBus& bus) noexcept {
 }
 ```
 
-At the beginning of each loop iteration, before BIOS-vector classification or bus fetch, drive an active continuation:
+At the beginning of each runtime loop iteration, before BIOS-vector classification or ordinary fetch, drive an active continuation:
 
 ```cpp
 if (interrupt_continuation_.active()) {
@@ -588,13 +595,11 @@ if (interrupt_continuation_.active()) {
         report.unsupported_access = bus_.last_unsupported_access();
         return finish(Ps1BootStopReason::fatal_runtime_error);
     }
-    if (driven.status == Ps1InterruptDriveStatus::restored) {
-        continue;
-    }
+    if (driven.status == Ps1InterruptDriveStatus::restored) continue;
 }
 ```
 
-When BIOS dispatch returns `return_from_exception`, consume it only if a continuation is active:
+When BIOS dispatch returns `return_from_exception`, consume it before generic disposition handling:
 
 ```cpp
 if (hle.disposition == Ps1HleBiosDisposition::return_from_exception) {
@@ -608,16 +613,12 @@ if (hle.disposition == Ps1HleBiosDisposition::return_from_exception) {
 }
 ```
 
-This must occur before generic `handled/terminal/unsupported` processing.
+- [ ] **Step 4: Capture pre-step Status and intercept only an accepted interrupt with all-zero vector**
 
-- [ ] **Step 4: Capture pre-step interrupt state and intercept only the all-zero vector**
-
-Immediately before `step_r3000a`, snapshot:
+Immediately before `step_r3000a`:
 
 ```cpp
 const auto pre_step_status = cpu_.cop0.status;
-const auto pre_step_pc = cpu_.pc;
-const auto pre_step_next_pc = cpu_.next_pc;
 ```
 
 On an interrupt exception:
@@ -646,9 +647,9 @@ if (step.status == R3000aStepStatus::exception &&
 }
 ```
 
-Use `pre_step_pc`/`pre_step_next_pc` in tests or assertions to prove the accepted interrupt occurred outside a delay slot; do not synthesize a branch-delay resume mode.
+Do not synthesize a branch-delay resume case; the executor already accepts interrupts only when `current_delay.active == false`.
 
-Include the continuation hash in `Ps1BootRuntime::diagnostic_state_hash()`:
+Include continuation identity in `Ps1BootRuntime::diagnostic_state_hash()`:
 
 ```cpp
 hash_u64(hash, interrupt_continuation_.diagnostic_state_hash());
@@ -681,17 +682,17 @@ git commit -m "feat: route zero PS1 exception vector through HLE"
 - Modify/Test: `tests/test_ps1_cdrom_boot_runtime.cpp`
 
 **Interfaces:**
-- Consumes: `Ps1HleBios::interrupt_hook_address()`, known ResetEntryInt default address `0x00006CF4`, Task 4 B0:17 runtime consumption.
+- Consumes: `Ps1HleBios::interrupt_hook_address()`, known ResetEntryInt default address `0x00006CF4`, and Task 4 B0:17 runtime consumption.
 - Produces: hook-aware completion in `drive()`; no new public checkpoint field.
 
 - [ ] **Step 1: Write RED tests for no-hook/default-hook completion and guest HookEntryInt restore**
 
-In the continuation unit test, cover direct restoration when no hook exists and when the hook is the known ResetEntryInt default `0x00006CF4`.
+In the continuation unit test, cover direct canonical restoration when no hook exists and when the hook is the known ResetEntryInt default `0x00006CF4`.
 
-For a custom hook at `0x80003000`, write this exact 0x30-byte jmp buffer through `Ps1MemoryBus::write32`:
+For a custom hook at `0x80003000`, materialize this 0x30-byte jmp buffer:
 
 ```cpp
-bus.write32(0x80003000u + 0x00u, 0x80014000u); // resume PC / RA
+bus.write32(0x80003000u + 0x00u, 0x80014000u); // RA/resume PC
 bus.write32(0x80003000u + 0x04u, 0x801FF000u); // SP/R29
 bus.write32(0x80003000u + 0x08u, 0x80003F00u); // FP/R30
 for (std::uint32_t i = 0; i < 8; ++i)
@@ -699,9 +700,11 @@ for (std::uint32_t i = 0; i < 8; ++i)
 bus.write32(0x80003000u + 0x2Cu, 0x80004000u); // GP/R28
 ```
 
-Set HookEntryInt through B0:19, exhaust empty priority chains, and assert `drive()` returns `guest_execution` with:
+Install it through real B0:19, exhaust empty priority chains, and assert:
 
 ```cpp
+CHECK(continuation.drive(cpu, bus, bios).status ==
+      jojo::Ps1InterruptDriveStatus::guest_execution);
 CHECK(cpu.pc == 0x80014000u);
 CHECK(cpu.next_pc == 0x80014004u);
 CHECK(cpu.gpr[2] == 1u);
@@ -711,15 +714,15 @@ CHECK(cpu.gpr[28] == 0x80004000u);
 CHECK(continuation.phase() == jojo::Ps1InterruptContinuationPhase::hook_guest);
 ```
 
-Then call `return_from_exception(cpu)` and assert the original interrupted context, not the hook buffer, is restored.
+Then call `return_from_exception(cpu)` and assert the original interrupted context, not the hook buffer, is restored and the continuation hash returns to canonical inactive.
 
 - [ ] **Step 2: Add RED runtime tests for callback BIOS/MMIO and pending-load fidelity**
 
-Add one synthetic FIRST callback that performs an already-supported B0 BIOS call, one supported MMIO write (for example I_STAT acknowledge or I_MASK write using existing semantics), then returns through `jr ra`. Confirm the callback's trace/BIOs/MMIO activity is visible and dispatch proceeds normally.
+Create a synthetic FIRST callback that performs one already-supported BIOS call and one already-supported MMIO operation, then returns through `jr ra`. Use existing instruction encoders and bus APIs; do not add a BIOS/MMIO feature solely for the test. Confirm the callback's trace/BIOS/MMIO activity is visible and dispatch proceeds normally.
 
-Add a pending-load case: arrange a load immediately before the point where IP2 becomes acceptable, verify the R3000A exception entry retires that load, then after B0:17 assert the loaded GPR value is preserved and `pending_load.valid == false`.
+Pending-load case: arrange a load immediately before the point where IP2 becomes acceptable, verify architectural exception entry retires it, then after B0:17 assert the loaded GPR value survives and `pending_load.valid == false`.
 
-Add a hook integration callback at `0x80014000` that invokes B0:17 and prove execution returns to the original interrupted PC/context.
+Hook integration: place guest code at `0x80014000` that invokes B0:17 and prove it returns to the original interrupted PC/context.
 
 - [ ] **Step 3: Run focused tests and verify RED**
 
@@ -742,7 +745,7 @@ if (!hook || *hook == 0x00006CF4u) {
 }
 ```
 
-For a custom hook, read all 12 words first. If any read fails, return `terminal` without partially mutating CPU. Only after all reads succeed, apply:
+For a custom hook, read all 12 words into a local `std::array<std::uint32_t, 12>` first. If any read fails, return `terminal` without partially mutating CPU. After all reads succeed:
 
 ```cpp
 cpu.gpr[31] = words[0];
@@ -760,19 +763,19 @@ phase_ = Ps1InterruptContinuationPhase::hook_guest;
 return {Ps1InterruptDriveStatus::guest_execution};
 ```
 
-While `phase_ == hook_guest`, `drive()` returns `guest_execution` without changing state until guest code reaches an ordinary frontier or B0:17. Do not assign the callback return sentinel to hook code.
+While `phase_ == hook_guest`, `drive()` returns `guest_execution` without modifying CPU until guest code reaches an ordinary frontier or B0:17. Do not assign the callback return sentinel to hook code.
 
 - [ ] **Step 5: Preserve strict malformed behavior**
 
-Extend unit coverage so:
+Extend tests so all of these are terminal and never silently repaired:
 
-- unreadable IntRP node returns `terminal`;
-- cyclic/repeated IntRP node returns `terminal`;
-- unreadable custom HookEntryInt buffer returns `terminal` without partial register restore;
-- an invalid callback address is not pre-skipped: runtime attempts the ordinary guest fetch and stops through the existing CPU boundary path;
-- no device acknowledgement is synthesized by continuation completion.
+- unreadable IntRP node;
+- cyclic/repeated IntRP node;
+- unreadable custom HookEntryInt buffer, with no partial register restore;
+- invalid callback fetch, which must be attempted by the ordinary CPU loop and stop through the existing CPU boundary path;
+- second accepted interrupt while continuation state is active.
 
-Do not introduce a new public checkpoint format for these internal faults.
+Confirm continuation completion does not clear I_STAT, HINTSTS, or another device state.
 
 - [ ] **Step 6: Run all focused interrupt/HLE/CPU tests and verify GREEN**
 
@@ -800,12 +803,12 @@ git commit -m "feat: resume PS1 HookEntryInt guest continuation"
 
 **Files:**
 - Modify/Test: `tests/test_ps1_max3_explorer.cpp`
-- Modify/Test as needed only for regressions already specified: `tests/test_ps1_cdrom_state.cpp`, `tests/test_ps1_cdrom_strict_widths.cpp`
-- No production behavior expansion is allowed in this task unless a RED exposes a defect in Tasks 1–5.
+- Modify/Test: `tests/test_ps1_interrupt_continuation.cpp`
+- Verify unchanged strictness tests: `tests/test_ps1_cdrom_state.cpp`, `tests/test_ps1_cdrom_strict_widths.cpp`
 
 **Interfaces:**
-- Consumes: complete interrupt continuation path and existing MAX3 `Ps1BootRuntime` copy/hash behavior.
-- Produces: evidence that fake A0 disappears, continuation state is deterministic under copies, and the unsupported second CD-ROM command remains strict.
+- Consumes: complete interrupt-continuation path and existing MAX3 `Ps1BootRuntime` copy/hash behavior.
+- Produces: evidence that fake A0 disappears, continuation state remains copy/hash deterministic, and the unsupported second CD-ROM command remains strict.
 
 - [ ] **Step 1: Write RED MAX3 regression for the commercial-checkpoint shape**
 
@@ -815,10 +818,10 @@ Construct a fully synthetic executable that:
 2. leaves `r9=0x35` before the interrupt;
 3. raises the already-supported CD-ROM command-01 IRQ;
 4. uses an all-zero exception vector;
-5. has the FIRST callback return through B0:17;
-6. then enters a harmless guest loop.
+5. has the FIRST callback invoke B0:17;
+6. resumes into a harmless guest self-loop.
 
-Run `explore_ps1_max3()` with a small deterministic budget and assert:
+Run `explore_ps1_max3()` with a small deterministic budget and require exactly one node and no fake A0 dependency:
 
 ```cpp
 CHECK(result);
@@ -830,34 +833,40 @@ for (const auto& dependency : result.value.dependencies) {
 CHECK(result.value.best_report.interrupts_accepted == 1u);
 ```
 
-The exact node count may be greater than one only if the synthetic program intentionally exposes another real BIOS frontier; design the fixture so it does not.
+Design the fixture so no other BIOS frontier is reachable within its budget; if the test sees another frontier, fix the fixture rather than relaxing the one-node assertion.
 
-- [ ] **Step 2: Add deterministic copy/hash coverage**
+- [ ] **Step 2: Add deterministic continuation copy/hash coverage**
 
-In `tests/test_ps1_interrupt_continuation.cpp`, copy an active continuation at each of these states and require equal hashes for equal copies and unequal hashes after changing only continuation-controlled future execution:
+In `tests/test_ps1_interrupt_continuation.cpp`, copy an active continuation and require equal hashes for equal copies. Then create controlled states that differ only in continuation-owned future execution and require different component hashes:
 
-- dispatch priority/node state;
-- FIRST active versus SECOND active;
-- different saved resume PC or saved register;
-- hook_guest versus dispatch.
+- different saved resume PC;
+- dispatch versus FIRST callback phase;
+- FIRST versus SECOND callback phase;
+- dispatch versus hook_guest phase;
+- different current/next IntRP node state.
 
-This proves the value state itself is copy/hash deterministic. In `Ps1BootRuntime::diagnostic_state_hash()`, retain the explicit `hash_u64(...interrupt_continuation_.diagnostic_state_hash())` integration from Task 4; the MAX3 regression proves copied runtimes can traverse the path without false frontier deduplication.
-
-- [ ] **Step 3: Reassert CD-ROM non-expansion**
-
-Keep/add tests proving:
+Keep the explicit runtime integration from Task 4:
 
 ```cpp
-// existing command 01 with an unread response remains unsupported on a second command 01
+hash_u64(hash, interrupt_continuation_.diagnostic_state_hash());
+```
+
+The MAX3 regression then proves copied runtimes traverse the continuation without generating the false frontier that previously caused branching.
+
+- [ ] **Step 3: Re-run existing CD-ROM strictness contracts without changing production behavior**
+
+The existing tests must still prove:
+
+```cpp
 CHECK(bus.write8(0x1F801801u, 0x01u).status == jojo::R3000aBusStatus::ok);
 CHECK(bus.write8(0x1F801801u, 0x01u).status == jojo::R3000aBusStatus::unsupported);
 ```
 
-Also preserve strict `0x1F801802` and 16/32-bit CD-ROM access behavior. Do not loosen these tests merely because the old commercial fallback path reached the second command.
+Also require the existing `0x1F801802` and 16/32-bit CD-ROM strict-width tests to remain green. Do not loosen those tests because the old diagnostic fallback path reached a second command.
 
 - [ ] **Step 4: Run the full Linux verification suite**
 
-Run from a clean Release build:
+From a clean Release build:
 
 ```bash
 rm -rf build
@@ -877,47 +886,48 @@ Expected: every command exits 0. Record the exact test count rather than assumin
 
 - [ ] **Step 5: Audit the final diff against the approved spec head**
 
-Compare from `4ce652af118389d9c65dc45bc5c520359461d3a0` to the candidate final SHA. The changed-file set must be limited to the files named in this plan (plus the plan itself). Reject unrelated refactors or any proprietary payload.
+Compare `4ce652af118389d9c65dc45bc5c520359461d3a0` to the candidate final SHA. The changed-file set must be limited to files named in this plan (plus this plan document). Reject unrelated refactors or any proprietary payload.
 
-Explicitly inspect that production diffs do **not** add:
+Explicitly verify production diffs do not add:
 
 - `A0:35` implementation;
-- new CD-ROM commands/FIFO capacity;
+- new CD-ROM commands or FIFO capacity;
 - automatic I_STAT/HINTSTS clear;
 - `B0:07 DeliverEvent` callback execution;
 - DMA3/GPU drawing/presentation;
 - BIOS ROM blobs or game-derived binary fixtures.
 
-- [ ] **Step 6: Commit final test/audit changes**
+- [ ] **Step 6: Commit final MAX3/hash test changes**
 
 ```bash
-git add tests/test_ps1_max3_explorer.cpp tests/test_ps1_interrupt_continuation.cpp tests/test_ps1_cdrom_state.cpp tests/test_ps1_cdrom_strict_widths.cpp
+git add tests/test_ps1_max3_explorer.cpp tests/test_ps1_interrupt_continuation.cpp
 git commit -m "test: lock PS1 interrupt continuation frontier"
 ```
 
-Only stage files actually changed.
+If only one of those files changed, stage only that file.
 
 - [ ] **Step 7: Verify GitHub Actions on the exact final SHA**
 
-Wait for the repository `build` workflow for the exact candidate SHA. Require both jobs to finish `success`:
+Require the repository `build` workflow for the exact candidate SHA to finish `success` in both jobs:
 
 - `Portable core / Linux`
 - `Windows x64 / MSVC 2022`
 
-On Windows, require `Build Release`, production readiness, PS1 active architecture, `Test Release`, observed disc revision, direct UDP transport, and `Upload single executable` all to pass. Record the exact Windows test count.
-
-Do not declare completion from a green older SHA.
+On Windows require `Build Release`, production readiness, PS1 active architecture, `Test Release`, observed disc revision, direct UDP transport, and `Upload single executable` all to pass. Record the exact Windows test count. Do not declare completion from an older green SHA.
 
 - [ ] **Step 8: Verify the exact Windows artifact**
 
-Download only the `JOJO-Recompiled-Windows-x64` artifact from the exact final workflow run. Verify:
+After downloading the exact-run artifact, derive its local name from the exact final SHA instead of using a placeholder:
 
 ```bash
-sha256sum JOJO-Recompiled-Windows-x64-<short-final-sha>.zip
-unzip -l JOJO-Recompiled-Windows-x64-<short-final-sha>.zip
+FINAL_SHA="$(git rev-parse HEAD)"
+SHORT_SHA="$(printf '%s' "$FINAL_SHA" | cut -c1-8)"
+ARTIFACT_ZIP="JOJO-Recompiled-Windows-x64-${SHORT_SHA}.zip"
+sha256sum "$ARTIFACT_ZIP"
+unzip -l "$ARTIFACT_ZIP"
 ```
 
-The local ZIP SHA-256 must equal the digest reported by GitHub Actions, and the archive must contain exactly one production file: `JOJO-Recompiled.exe`. Extract it and record its SHA-256 as well.
+The local ZIP SHA-256 must equal the digest reported by GitHub Actions. The archive must contain exactly one production file, `JOJO-Recompiled.exe`; extract that file and record its SHA-256.
 
 - [ ] **Step 9: Request exactly one new commercial checkpoint**
 
