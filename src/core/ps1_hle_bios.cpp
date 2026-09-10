@@ -177,6 +177,9 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
                 }
+                case 0x0Bu: // TestEvent(event): no ready producer exists yet, so observed enabled event remains busy.
+                    return_zero_from_bios_vector(cpu);
+                    return {Ps1HleBiosDisposition::handled};
                 case 0x0Cu: { // EnableEvent(event): valid EvCB becomes enabled/busy; BIOS returns 1 always.
                     const auto limit = kEventDescriptorBase + static_cast<std::uint32_t>(events_.size());
                     if (call.a0 >= kEventDescriptorBase && call.a0 < limit) {
