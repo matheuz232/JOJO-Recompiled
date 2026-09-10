@@ -14,6 +14,8 @@ constexpr std::uint32_t kDefaultEntryInt = 0x00006CF4u;
 constexpr std::uint32_t kReturnFromException = 0x00000F40u;
 constexpr std::uint32_t kKernelSavedSp = 0x000085D4u;
 constexpr std::uint32_t kC0TableWords = 0x1Eu;
+constexpr std::uint32_t kGpuGp0Address = 0x1F801810u;
+constexpr std::uint32_t kStdOutFd = 1u;
 
 void hash_byte(std::uint64_t& hash, std::uint8_t value) noexcept {
     hash ^= value;
@@ -59,6 +61,13 @@ void advance_sys_instruction(R3000aState& cpu) noexcept {
 
 bool write32_ok(Ps1MemoryBus& bus, std::uint32_t address, std::uint32_t value) noexcept {
     return bus.write32(address, value).status == R3000aBusStatus::ok;
+}
+
+bool readable_range(Ps1MemoryBus& bus, std::uint32_t address, std::uint32_t length) noexcept {
+    for (std::uint32_t i = 0u; i < length; ++i) {
+        if (bus.read8(address + i).status != R3000aBusStatus::ok) return false;
+    }
+    return true;
 }
 
 bool is_safe_a0_return_zero(std::uint32_t selector) noexcept {
@@ -120,6 +129,14 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
                 case 0x44u: // FlushCache; interpreter has no instruction cache.
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
+                case 0x49u: // GPU_cw(gp0cmd): synchronous in this immediate GPU model.
+                    if (!bus) return {Ps1HleBiosDisposition::unsupported};
+                    if (!write32_ok(*bus, kGpuGp0Address, call.a0)) {
+                        return {Ps1HleBiosDisposition::terminal};
+                    }
+                    cpu.gpr[2] = 0u;
+                    return_from_bios_vector(cpu);
+                    return {Ps1HleBiosDisposition::handled};
                 case 0x56u:
                 case 0x72u:
                     iso9660_removed_ = true;
@@ -152,6 +169,16 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
                 }
                 case 0x19u:
                     interrupt_hook_address_ = call.a0;
+                    return_from_bios_vector(cpu);
+                    return {Ps1HleBiosDisposition::handled};
+                case 0x35u: // write(fd,src,length): support only BIOS dummy std_out.
+                    if (!bus || call.a0 != kStdOutFd) {
+                        return {Ps1HleBiosDisposition::unsupported};
+                    }
+                    if (!readable_range(*bus, call.a1, call.a2)) {
+                        return {Ps1HleBiosDisposition::terminal};
+                    }
+                    cpu.gpr[2] = call.a2;
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
                 case 0x56u: { // GetC0Table
