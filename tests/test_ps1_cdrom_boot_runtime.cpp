@@ -144,6 +144,28 @@ static void write_ack_and_return_hook(jojo::Ps1BootRuntime& runtime,
     CHECK(runtime.bus().write32(address + 0x14u, 0u).status == jojo::R3000aBusStatus::ok);
 }
 
+static void write_bios_mmio_returning_callback(jojo::Ps1BootRuntime& runtime,
+                                               std::uint32_t address) {
+    CHECK(runtime.bus().write32(address + 0x00u,
+        test_mips::i(0x0Fu, 0u, 8u, 0x1F80u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x04u,
+        test_mips::i(0x0Du, 8u, 8u, 0x1070u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x08u,
+        test_mips::i(0x2Bu, 8u, 0u, 0u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x0Cu,
+        test_mips::r(31u, 0u, 15u, 0u, 0x21u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x10u,
+        test_mips::i(0x09u, 0u, 9u, 0x44u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x14u,
+        test_mips::j(0x03u, 0x000000A0u >> 2)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x18u, 0u).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x1Cu,
+        test_mips::r(15u, 0u, 31u, 0u, 0x21u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x20u,
+        test_mips::r(31u, 0u, 0u, 0u, 0x08u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x24u, 0u).status == jojo::R3000aBusStatus::ok);
+}
+
 static void test_runtime_seeds_post_bios_cdrom_state() {
     auto runtime = make_runtime({
         test_mips::j(0x02u, 0x80010000u >> 2),
@@ -336,6 +358,50 @@ static void test_custom_hook_guest_can_ack_irq_and_return_with_pending_load_reti
     CHECK(saw_return_from_exception);
 }
 
+static void test_first_callback_can_use_supported_bios_and_mmio_then_return() {
+    auto runtime = make_runtime(registered_irq_program());
+    constexpr std::uint32_t callback = 0x80012200u;
+    prepare_interrupt_node(runtime, callback);
+    write_bios_mmio_returning_callback(runtime, callback);
+
+    jojo::Ps1BootOptions options{};
+    options.instruction_budget = 160u;
+    options.bios_event_capacity = 64u;
+    const auto report = runtime.run(options);
+
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(report.interrupts_accepted == 1u);
+    CHECK(runtime.bus().interrupt_status() == 0u);
+    bool saw_flush_cache = false;
+    for (const auto& event : report.recent_bios_calls) {
+        if (event.table_physical == 0xA0u && event.selector == 0x44u) {
+            saw_flush_cache = true;
+        }
+        CHECK(!(event.table_physical == 0xA0u && event.selector == 0x35u));
+    }
+    CHECK(saw_flush_cache);
+}
+
+static void test_invalid_first_callback_fetch_uses_normal_cpu_boundary() {
+    auto runtime = make_runtime(registered_irq_program());
+    prepare_interrupt_node(runtime, 0xE0000000u);
+
+    jojo::Ps1BootOptions options{};
+    options.instruction_budget = 128u;
+    const auto report = runtime.run(options);
+
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::cpu_boundary);
+    CHECK(report.interrupts_accepted == 1u);
+    CHECK(report.cpu_diagnostic.has_value());
+    if (report.cpu_diagnostic) CHECK(report.cpu_diagnostic->pc == 0xE0000000u);
+    CHECK(report.unsupported_access.has_value());
+    if (report.unsupported_access) {
+        CHECK(report.unsupported_access->guest_address == 0xE0000000u);
+        CHECK(report.unsupported_access->width == 4u);
+        CHECK(!report.unsupported_access->write);
+    }
+}
+
 int main() {
     test_runtime_seeds_post_bios_cdrom_state();
     test_enabled_cdrom_irq_enters_exception_handler_without_terminal_stop();
@@ -347,5 +413,7 @@ int main() {
     test_custom_exception_vector_remains_guest_owned();
     test_nested_interrupt_while_callback_active_is_terminal();
     test_custom_hook_guest_can_ack_irq_and_return_with_pending_load_retired();
+    test_first_callback_can_use_supported_bios_and_mmio_then_return();
+    test_invalid_first_callback_fetch_uses_normal_cpu_boundary();
     return failures ? 1 : 0;
 }
