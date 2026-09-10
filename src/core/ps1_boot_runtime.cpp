@@ -142,7 +142,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
                 bios_domain(*physical_pc), cpu_.gpr[9], cpu_.pc,
                 cpu_.gpr[4], cpu_.gpr[5], cpu_.gpr[6], cpu_.gpr[7], cpu_.gpr[31],
             };
-            const auto hle = hle_bios_.dispatch(call, cpu_);
+            const auto hle = hle_bios_.dispatch(call, cpu_, bus_);
             if (hle.disposition == Ps1HleBiosDisposition::handled) {
                 diagnostic_bios_frontier_pending_ = false;
                 continue;
@@ -168,7 +168,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
                 Ps1HleBiosDomain::sys, cpu_.gpr[4], cpu_.pc,
                 cpu_.gpr[4], cpu_.gpr[5], cpu_.gpr[6], cpu_.gpr[7], cpu_.gpr[31],
             };
-            if (hle_bios_.dispatch(call, cpu_).disposition == Ps1HleBiosDisposition::handled) {
+            if (hle_bios_.dispatch(call, cpu_, bus_).disposition == Ps1HleBiosDisposition::handled) {
                 ++report.instructions_retired;
                 ++instructions_since_progress;
                 if (options.stagnation_instruction_limit != 0u &&
