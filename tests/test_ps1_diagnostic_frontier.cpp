@@ -42,6 +42,11 @@ static constexpr std::uint32_t mtc0(std::uint8_t rt, std::uint8_t rd) noexcept {
            (std::uint32_t(rt) << 16) | (std::uint32_t(rd) << 11);
 }
 
+static constexpr std::uint32_t ctc2(std::uint8_t rt, std::uint8_t rd) noexcept {
+    return (0x12u << 26) | (0x06u << 21) |
+           (std::uint32_t(rt) << 16) | (std::uint32_t(rd) << 11);
+}
+
 static void test_unknown_bios_frontier_can_branch_from_snapshot() {
     auto stopped = make_unknown_bios_runtime();
     CHECK(!stopped.apply_diagnostic_bios_fallback(jojo::Ps1BiosFallback::return_zero));
@@ -122,6 +127,60 @@ static void test_diagnostic_state_fingerprint_tracks_guest_state() {
     CHECK(zero.diagnostic_state_hash() != one.diagnostic_state_hash());
 }
 
+static void test_diagnostic_state_fingerprint_tracks_only_gte_control_delta() {
+    auto prepared = make_runtime({
+        0x3C084000u,              // lui   $t0,0x4000 (CU2)
+        mtc0(8u, 12u),            // mtc0  $t0,$12
+        0x24080155u,              // addiu $t0,$zero,0x155
+        0x00000000u,              // patched to ctc2 only in mutated clone
+        0x00000000u,
+    });
+
+    CHECK(prepared.run({3u}).stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    auto baseline = prepared;
+    auto mutated = prepared;
+    CHECK(baseline.diagnostic_state_hash() == mutated.diagnostic_state_hash());
+
+    constexpr std::uint32_t kPatchAddress = 0x8001000Cu;
+    constexpr std::uint32_t kObservedCtc2Zsf3 = 0x48C8E800u;
+    static_assert(kObservedCtc2Zsf3 == ctc2(8u, 29u));
+
+    CHECK(mutated.bus().write32(kPatchAddress, kObservedCtc2Zsf3).status ==
+          jojo::R3000aBusStatus::ok);
+    CHECK(mutated.run({1u}).stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(mutated.cpu_state().cop2_gte.control[29] == 0x00000155u);
+    CHECK(mutated.bus().write32(kPatchAddress, 0x00000000u).status ==
+          jojo::R3000aBusStatus::ok);
+
+    CHECK(baseline.run({1u}).stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(baseline.cpu_state().pc == mutated.cpu_state().pc);
+    CHECK(baseline.cpu_state().gpr == mutated.cpu_state().gpr);
+    CHECK(baseline.cpu_state().cop0.status == mutated.cpu_state().cop0.status);
+    CHECK(baseline.bus().read32(kPatchAddress).value == mutated.bus().read32(kPatchAddress).value);
+
+    CHECK(mutated.diagnostic_state_hash() != baseline.diagnostic_state_hash());
+}
+
+static void test_observed_commercial_ctc2_sequence_retires_past_frontier() {
+    constexpr std::uint32_t kObservedCtc2Zsf3 = 0x48C8E800u;
+    static_assert(kObservedCtc2Zsf3 == ctc2(8u, 29u));
+
+    auto runtime = make_runtime({
+        0x3C084000u,              // lui   $t0,0x4000 (CU2)
+        mtc0(8u, 12u),            // mtc0  $t0,$12
+        0x24080155u,              // addiu $t0,$zero,0x155
+        kObservedCtc2Zsf3,        // ctc2  $t0,$29
+        0x24101234u,              // addiu $s0,$zero,0x1234
+    });
+
+    const auto report = runtime.run({5u});
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(report.instructions_retired == 5u);
+    CHECK(runtime.cpu_state().cop2_gte.control[29] == 0x00000155u);
+    CHECK(runtime.cpu_state().gpr[16] == 0x00001234u);
+    CHECK(runtime.cpu_state().pc == 0x80010014u);
+}
+
 static void test_sys00_nofunction_continues_without_clobbering_v0() {
     auto runtime = make_runtime({
         test_mips::i(0x09u, 0u, 2u, 0x1234u),
@@ -192,6 +251,8 @@ int main() {
     test_unknown_bios_frontier_can_branch_from_snapshot();
     test_stagnation_watchdog_stops_tight_loop();
     test_diagnostic_state_fingerprint_tracks_guest_state();
+    test_diagnostic_state_fingerprint_tracks_only_gte_control_delta();
+    test_observed_commercial_ctc2_sequence_retires_past_frontier();
     test_sys00_nofunction_continues_without_clobbering_v0();
     test_sys01_entercriticalsection_disables_interrupts_and_returns_prior_state();
     test_sys02_exitcriticalsection_enables_interrupts_and_preserves_v0();
