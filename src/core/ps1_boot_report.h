@@ -70,6 +70,7 @@ struct Ps1BootReport {
     std::vector<Ps1MmioSummary> recent_mmio;
     std::uint64_t interrupts_accepted{};
     std::uint64_t dma_transfer_count{};
+    std::uint64_t cdrom_command_count{};
     std::vector<Ps1CdromCommandSummary> recent_cdrom_commands;
     std::uint64_t gpu_gp0_command_count{};
     std::uint64_t gpu_gp1_command_count{};
