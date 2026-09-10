@@ -4,6 +4,7 @@
 #include "core/ps1_boot_runtime.h"
 #include "core/ps1_exe.h"
 #include "core/ps1_installation.h"
+#include "core/ps1_max3_explorer.h"
 
 #include <fstream>
 #include <iterator>
@@ -72,6 +73,27 @@ bool executable_metadata_matches(const ConversionManifest& manifest,
            *manifest.psx_exe_stack_base == metadata.stack_base &&
            manifest.psx_exe_stack_size.has_value() &&
            *manifest.psx_exe_stack_size == metadata.stack_size;
+}
+
+Result<Ps1Executable> load_validated_installed_executable(
+    const InstallationInfo& install) {
+    const auto executable_path = install.generation_dir / "data" / "boot.psxexe";
+    auto bytes = read_local_file(executable_path);
+    if (!bytes) {
+        return Result<Ps1Executable>::failure(bytes.error, bytes.detail);
+    }
+    auto executable = parse_ps1_executable(bytes.value);
+    if (!executable) {
+        return Result<Ps1Executable>::failure(
+            ErrorCode::invalid_installation,
+            "installed PS-X EXE is invalid: " + executable.detail);
+    }
+    if (!executable_metadata_matches(install.manifest, executable.value.metadata)) {
+        return Result<Ps1Executable>::failure(
+            ErrorCode::invalid_installation,
+            "installed PS-X EXE does not match the verified manifest metadata");
+    }
+    return executable;
 }
 
 } // namespace
@@ -188,28 +210,17 @@ Result<InstallationInfo> validate_installation(
             "PS1 installation is missing local data/SYSTEM.CNF");
     }
 
-    const auto executable_path = generation_dir / "data" / "boot.psxexe";
-    auto bytes = read_local_file(executable_path);
-    if (!bytes) {
-        return Result<InstallationInfo>::failure(bytes.error, bytes.detail);
-    }
-    auto executable = parse_ps1_executable(bytes.value);
-    if (!executable) {
-        return Result<InstallationInfo>::failure(
-            ErrorCode::invalid_installation,
-            "installed PS-X EXE is invalid: " + executable.detail);
-    }
-    if (!executable_metadata_matches(manifest.value, executable.value.metadata)) {
-        return Result<InstallationInfo>::failure(
-            ErrorCode::invalid_installation,
-            "installed PS-X EXE does not match the verified manifest metadata");
-    }
-
-    return Result<InstallationInfo>::success(InstallationInfo{
+    InstallationInfo info{
         install_root,
         generation_dir,
         std::move(manifest.value),
-    });
+    };
+    auto executable = load_validated_installed_executable(info);
+    if (!executable) {
+        return Result<InstallationInfo>::failure(executable.error, executable.detail);
+    }
+
+    return Result<InstallationInfo>::success(std::move(info));
 }
 
 Result<Ps1BootReport> bootstrap_runtime_checkpoint(
@@ -220,21 +231,9 @@ Result<Ps1BootReport> bootstrap_runtime_checkpoint(
         return Result<Ps1BootReport>::failure(install.error, install.detail);
     }
 
-    const auto executable_path = install.value.generation_dir / "data" / "boot.psxexe";
-    auto bytes = read_local_file(executable_path);
-    if (!bytes) {
-        return Result<Ps1BootReport>::failure(bytes.error, bytes.detail);
-    }
-    auto executable = parse_ps1_executable(bytes.value);
+    auto executable = load_validated_installed_executable(install.value);
     if (!executable) {
-        return Result<Ps1BootReport>::failure(
-            ErrorCode::invalid_installation,
-            "installed PS-X EXE is invalid: " + executable.detail);
-    }
-    if (!executable_metadata_matches(install.value.manifest, executable.value.metadata)) {
-        return Result<Ps1BootReport>::failure(
-            ErrorCode::invalid_installation,
-            "installed PS-X EXE does not match the verified manifest metadata");
+        return Result<Ps1BootReport>::failure(executable.error, executable.detail);
     }
 
     auto runtime = Ps1BootRuntime::create(executable.value);
@@ -258,11 +257,41 @@ Result<Ps1BootReport> bootstrap_runtime_checkpoint_to_file(
     return report;
 }
 
+Result<Ps1Max3Report> bootstrap_runtime_max3_local_evidence_to_file(
+    const std::filesystem::path& install_root,
+    const std::filesystem::path& report_path,
+    Ps1Max3Options options) {
+    auto install = validate_installation(install_root);
+    if (!install) {
+        return Result<Ps1Max3Report>::failure(install.error, install.detail);
+    }
+
+    auto executable = load_validated_installed_executable(install.value);
+    if (!executable) {
+        return Result<Ps1Max3Report>::failure(executable.error, executable.detail);
+    }
+
+    auto report = explore_ps1_max3(executable.value, options);
+    if (!report) {
+        return Result<Ps1Max3Report>::failure(report.error, report.detail);
+    }
+
+    auto saved = save_ps1_max3_report_atomic(report_path, report.value);
+    if (!saved) {
+        return Result<Ps1Max3Report>::failure(saved.error, saved.detail);
+    }
+    return report;
+}
+
 Result<Ps1BootReport> bootstrap_runtime_local_evidence_to_file(
     const std::filesystem::path& install_root,
     const std::filesystem::path& report_path) {
-    return bootstrap_runtime_checkpoint_to_file(
-        install_root, report_path, ps1_local_evidence_options());
+    auto max3 = bootstrap_runtime_max3_local_evidence_to_file(
+        install_root, report_path, ps1_max3_local_evidence_options());
+    if (!max3) {
+        return Result<Ps1BootReport>::failure(max3.error, max3.detail);
+    }
+    return Result<Ps1BootReport>::success(std::move(max3.value.best_report));
 }
 
 Result<void> bootstrap_runtime(const std::filesystem::path& install_root) {
