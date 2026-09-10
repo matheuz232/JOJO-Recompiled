@@ -12,6 +12,7 @@ constexpr std::uint32_t kBiosA0 = 0x000000A0u;
 constexpr std::uint32_t kBiosB0 = 0x000000B0u;
 constexpr std::uint32_t kBiosA0InitHeap = 0x00000039u;
 constexpr std::uint32_t kBiosB0HookEntryInt = 0x00000019u;
+constexpr std::uint32_t kBiosB0ChangeClearPad = 0x0000005Bu;
 
 bool is_bios_table(std::uint32_t physical) noexcept {
     return physical == 0x000000A0u ||
@@ -54,6 +55,7 @@ void return_from_bios_call(R3000aState& cpu) noexcept {
 bool handle_bios_call(R3000aState& cpu,
                       std::optional<Ps1BiosHeapState>& heap_state,
                       std::optional<std::uint32_t>& interrupt_hook_address,
+                      std::optional<bool>& pad_card_auto_ack_enabled,
                       std::uint32_t table_physical,
                       std::uint32_t selector) noexcept {
     if (table_physical == kBiosA0 && selector == kBiosA0InitHeap) {
@@ -64,6 +66,12 @@ bool handle_bios_call(R3000aState& cpu,
 
     if (table_physical == kBiosB0 && selector == kBiosB0HookEntryInt) {
         interrupt_hook_address = cpu.gpr[4];
+        return_from_bios_call(cpu);
+        return true;
+    }
+
+    if (table_physical == kBiosB0 && selector == kBiosB0ChangeClearPad) {
+        pad_card_auto_ack_enabled = cpu.gpr[4] != 0u;
         return_from_bios_call(cpu);
         return true;
     }
@@ -106,7 +114,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
                 cpu_.gpr[31],
             });
             if (handle_bios_call(cpu_, bios_heap_state_, bios_interrupt_hook_address_,
-                                 *physical_pc, cpu_.gpr[9])) {
+                                 bios_pad_card_auto_ack_enabled_, *physical_pc, cpu_.gpr[9])) {
                 continue;
             }
             report.stop_reason = Ps1BootStopReason::bios_call_unimplemented;
@@ -184,6 +192,11 @@ const std::optional<Ps1BiosHeapState>& Ps1BootRuntime::bios_heap_state() const n
 const std::optional<std::uint32_t>&
 Ps1BootRuntime::bios_interrupt_hook_address() const noexcept {
     return bios_interrupt_hook_address_;
+}
+
+const std::optional<bool>&
+Ps1BootRuntime::bios_pad_card_auto_ack_enabled() const noexcept {
+    return bios_pad_card_auto_ack_enabled_;
 }
 
 Ps1MemoryBus& Ps1BootRuntime::bus() noexcept {
