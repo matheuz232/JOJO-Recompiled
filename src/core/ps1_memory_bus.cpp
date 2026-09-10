@@ -207,7 +207,10 @@ R3000aBusResult Ps1MemoryBus::read16(std::uint32_t address) noexcept {
 R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
-        if (*physical == kInterruptStatusAddress || is_cdrom_register_window(*physical)) {
+        if (*physical == kInterruptStatusAddress) {
+            return {R3000aBusStatus::ok, interrupt_status_};
+        }
+        if (is_cdrom_register_window(*physical)) {
             last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 4u, false, 0u};
             return {R3000aBusStatus::unsupported, 0u};
         }
