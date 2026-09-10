@@ -312,6 +312,90 @@ static void test_observed_cdrom_sequence_is_real_max3_progress() {
     CHECK(left.diagnostic_state_hash() != right.diagnostic_state_hash());
 }
 
+constexpr std::uint32_t mtc0(std::uint8_t rt, std::uint8_t rd) noexcept {
+    return (0x10u << 26) | (0x04u << 21) |
+           (std::uint32_t(rt) << 16) | (std::uint32_t(rd) << 11);
+}
+
+static void append_load32(std::vector<std::uint32_t>& words,
+                          std::uint8_t reg,
+                          std::uint32_t value) {
+    words.push_back(test_mips::i(0x0Fu, 0u, reg,
+        static_cast<std::uint16_t>(value >> 16u)));
+    words.push_back(test_mips::i(0x0Du, reg, reg,
+        static_cast<std::uint16_t>(value)));
+}
+
+static std::vector<std::uint32_t> interrupt_continuation_max3_program() {
+    constexpr std::uint32_t node = 0x80001000u;
+    constexpr std::uint32_t callback = 0x80012000u;
+    std::vector<std::uint32_t> words;
+
+    append_load32(words, 6u, callback);
+    const std::vector<std::uint32_t> callback_words{
+        test_mips::i(0x0Fu, 0u, 8u, 0x1F80u),
+        test_mips::i(0x0Du, 8u, 8u, 0x1070u),
+        test_mips::i(0x2Bu, 8u, 0u, 0u),
+        test_mips::i(0x09u, 0u, 9u, 0x17u),
+        test_mips::j(0x02u, 0x000000B0u >> 2),
+        0x00000000u,
+    };
+    for (std::size_t i = 0u; i < callback_words.size(); ++i) {
+        append_load32(words, 7u, callback_words[i]);
+        words.push_back(test_mips::i(0x2Bu, 6u, 7u,
+            static_cast<std::uint16_t>(i * 4u)));
+    }
+
+    append_load32(words, 5u, node);
+    words.push_back(test_mips::i(0x2Bu, 5u, 0u, 4u));
+    append_load32(words, 7u, callback);
+    words.push_back(test_mips::i(0x2Bu, 5u, 7u, 8u));
+    words.push_back(test_mips::i(0x09u, 0u, 4u, 2u));
+    words.push_back(test_mips::i(0x09u, 0u, 9u, 2u));
+    words.push_back(test_mips::j(0x03u, 0x000000C0u >> 2));
+    words.push_back(0x00000000u);
+
+    append_load32(words, 8u, 0x1F801074u);
+    words.push_back(test_mips::i(0x09u, 0u, 10u, 4u));
+    words.push_back(test_mips::i(0x2Bu, 8u, 10u, 0u));
+    words.push_back(test_mips::i(0x09u, 0u, 13u, 0x0401u));
+    words.push_back(mtc0(13u, 12u));
+
+    append_load32(words, 11u, 0x1F801800u);
+    words.push_back(test_mips::i(0x28u, 11u, 0u, 0u));
+    words.push_back(test_mips::i(0x09u, 0u, 9u, 0x35u));
+    words.push_back(test_mips::i(0x09u, 0u, 12u, 1u));
+    words.push_back(test_mips::i(0x28u, 11u, 12u, 1u));
+
+    const auto loop_pc = 0x80010000u + static_cast<std::uint32_t>(words.size() * 4u);
+    words.push_back(test_mips::j(0x02u, loop_pc >> 2));
+    words.push_back(0x00000000u);
+    return words;
+}
+
+static void test_interrupt_continuation_removes_fake_a035_max3_frontier() {
+    const auto executable = make_executable(interrupt_continuation_max3_program());
+    auto options = fast_options();
+    options.max_nodes = 8u;
+    options.max_branch_depth = 2u;
+    options.max_total_retired = 2000u;
+    options.segment_options.stagnation_instruction_limit = 32u;
+
+    const auto explored = jojo::explore_ps1_max3(executable, options);
+    CHECK(explored);
+    if (!explored) return;
+
+    const auto& report = explored.value;
+    CHECK(report.nodes.size() == 1u);
+    CHECK(report.best_report.interrupts_accepted == 1u);
+    CHECK(report.best_report.cdrom_command_count == 1u);
+    CHECK(std::none_of(report.dependencies.begin(), report.dependencies.end(), [](const auto& dependency) {
+        return dependency.kind == jojo::Ps1Max3DependencyKind::bios_frontier &&
+               dependency.table == 0x000000A0u &&
+               dependency.selector == 0x35u;
+    }));
+}
+
 int main() {
     test_one_frontier_branches_four_ways();
     test_converged_frontier_state_is_expanded_once();
@@ -319,5 +403,6 @@ int main() {
     test_bounds_and_progress_ranking_are_deterministic();
     test_terminal_gpu_mmio_is_recorded_as_dependency_with_value();
     test_observed_cdrom_sequence_is_real_max3_progress();
+    test_interrupt_continuation_removes_fake_a035_max3_frontier();
     return failures ? 1 : 0;
 }
