@@ -84,14 +84,16 @@ struct Ps1BootOptions {
     std::size_t trace_capacity{16u};
     bool diagnostic_mmio_probe{false};
     std::size_t mmio_event_capacity{16u};
+    std::size_t bios_event_capacity{16u};
 };
 
 [[nodiscard]] constexpr Ps1BootOptions ps1_local_evidence_options() noexcept {
     return Ps1BootOptions{
         std::numeric_limits<std::uint64_t>::max(),
-        512u,
+        4096u,
         true,
-        1024u,
+        8192u,
+        4096u,
     };
 }
 
