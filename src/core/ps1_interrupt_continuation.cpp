@@ -1,5 +1,8 @@
 #include "core/ps1_interrupt_continuation.h"
 
+#include "core/ps1_hle_bios.h"
+#include "core/ps1_memory_bus.h"
+
 namespace jojo {
 namespace {
 
@@ -59,6 +62,106 @@ void Ps1InterruptContinuation::return_from_exception(R3000aState& cpu) noexcept 
     cpu.delay_slot = {};
     cpu.gpr[0] = 0u;
     *this = Ps1InterruptContinuation{};
+}
+
+bool Ps1InterruptContinuation::remember_node(std::uint32_t node) noexcept {
+    if (node == 0u || visited_count_ >= visited_nodes_.size()) return false;
+    for (std::size_t i = 0u; i < visited_count_; ++i) {
+        if (visited_nodes_[i] == node) return false;
+    }
+    visited_nodes_[visited_count_++] = node;
+    return true;
+}
+
+void Ps1InterruptContinuation::launch_callback(
+    R3000aState& cpu,
+    std::uint32_t callback,
+    Ps1InterruptContinuationPhase phase) noexcept {
+    cpu.pc = callback;
+    cpu.next_pc = callback + 4u;
+    cpu.delay_slot = {};
+    cpu.pending_load = {};
+    cpu.gpr[31] = callback_return_sentinel;
+    cpu.gpr[0] = 0u;
+    phase_ = phase;
+}
+
+Ps1InterruptDriveResult Ps1InterruptContinuation::drive(
+    R3000aState& cpu,
+    Ps1MemoryBus& bus,
+    const Ps1HleBios& bios) noexcept {
+    if (!active()) return {Ps1InterruptDriveStatus::terminal};
+    if (phase_ == Ps1InterruptContinuationPhase::hook_guest) {
+        return {Ps1InterruptDriveStatus::guest_execution};
+    }
+
+    if (phase_ == Ps1InterruptContinuationPhase::first_callback) {
+        if (cpu.pc != callback_return_sentinel) {
+            return {Ps1InterruptDriveStatus::guest_execution};
+        }
+        if (cpu.gpr[2] != 0u && second_callback_ != 0u) {
+            launch_callback(cpu, second_callback_, Ps1InterruptContinuationPhase::second_callback);
+            return {Ps1InterruptDriveStatus::guest_execution};
+        }
+        current_node_ = next_node_;
+        phase_ = Ps1InterruptContinuationPhase::dispatch;
+    }
+
+    if (phase_ == Ps1InterruptContinuationPhase::second_callback) {
+        if (cpu.pc != callback_return_sentinel) {
+            return {Ps1InterruptDriveStatus::guest_execution};
+        }
+        current_node_ = next_node_;
+        phase_ = Ps1InterruptContinuationPhase::dispatch;
+    }
+
+    while (phase_ == Ps1InterruptContinuationPhase::dispatch) {
+        if (priority_ >= 4u) {
+            return_from_exception(cpu);
+            return {Ps1InterruptDriveStatus::restored};
+        }
+
+        if (!priority_head_loaded_) {
+            current_node_ = bios.interrupt_priority_head(priority_).value_or(0u);
+            priority_head_loaded_ = true;
+        }
+
+        if (current_node_ == 0u) {
+            ++priority_;
+            priority_head_loaded_ = false;
+            continue;
+        }
+
+        if (!remember_node(current_node_)) {
+            return {Ps1InterruptDriveStatus::terminal};
+        }
+
+        const auto next = bus.read32(current_node_ + 0u);
+        if (next.status != R3000aBusStatus::ok) {
+            return {Ps1InterruptDriveStatus::terminal};
+        }
+        const auto second = bus.read32(current_node_ + 4u);
+        if (second.status != R3000aBusStatus::ok) {
+            return {Ps1InterruptDriveStatus::terminal};
+        }
+        const auto first = bus.read32(current_node_ + 8u);
+        if (first.status != R3000aBusStatus::ok) {
+            return {Ps1InterruptDriveStatus::terminal};
+        }
+
+        next_node_ = next.value;
+        second_callback_ = second.value;
+        first_callback_ = first.value;
+        if (first_callback_ == 0u) {
+            current_node_ = next_node_;
+            continue;
+        }
+
+        launch_callback(cpu, first_callback_, Ps1InterruptContinuationPhase::first_callback);
+        return {Ps1InterruptDriveStatus::guest_execution};
+    }
+
+    return {Ps1InterruptDriveStatus::terminal};
 }
 
 bool Ps1InterruptContinuation::active() const noexcept {

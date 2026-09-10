@@ -19,6 +19,16 @@ enum class Ps1InterruptContinuationPhase : std::uint8_t {
     hook_guest,
 };
 
+enum class Ps1InterruptDriveStatus : std::uint8_t {
+    guest_execution,
+    restored,
+    terminal,
+};
+
+struct Ps1InterruptDriveResult {
+    Ps1InterruptDriveStatus status{Ps1InterruptDriveStatus::terminal};
+};
+
 struct Ps1InterruptedContext {
     std::array<std::uint32_t, 32> gpr{};
     std::uint32_t hi{};
@@ -37,12 +47,21 @@ public:
                std::uint32_t resume_pc,
                std::uint32_t resume_next_pc) noexcept;
     void return_from_exception(R3000aState& cpu) noexcept;
+    [[nodiscard]] Ps1InterruptDriveResult drive(
+        R3000aState& cpu,
+        Ps1MemoryBus& bus,
+        const Ps1HleBios& bios) noexcept;
 
     [[nodiscard]] bool active() const noexcept;
     [[nodiscard]] Ps1InterruptContinuationPhase phase() const noexcept;
     [[nodiscard]] std::uint64_t diagnostic_state_hash() const noexcept;
 
 private:
+    [[nodiscard]] bool remember_node(std::uint32_t node) noexcept;
+    void launch_callback(R3000aState& cpu,
+                         std::uint32_t callback,
+                         Ps1InterruptContinuationPhase phase) noexcept;
+
     Ps1InterruptContinuationPhase phase_{Ps1InterruptContinuationPhase::inactive};
     Ps1InterruptedContext saved_{};
     std::uint8_t priority_{};
