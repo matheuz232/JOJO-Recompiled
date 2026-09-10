@@ -14,6 +14,7 @@ constexpr std::uint32_t kDma2BcrAddress = 0x1F8010A4u;
 constexpr std::uint32_t kDma2ChcrAddress = 0x1F8010A8u;
 constexpr std::uint32_t kDmaControlAddress = 0x1F8010F0u;
 constexpr std::uint32_t kDmaInterruptAddress = 0x1F8010F4u;
+constexpr std::uint32_t kTimer1CounterAddress = 0x1F801110u;
 constexpr std::uint32_t kTimer1ModeAddress = 0x1F801114u;
 constexpr std::uint32_t kGpuGp0Address = 0x1F801810u;
 constexpr std::uint32_t kGpuGp1Address = 0x1F801814u;
@@ -185,6 +186,9 @@ R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
         }
         if (*physical == kDmaInterruptAddress) {
             return {R3000aBusStatus::ok, visible_dma_interrupt(dma_interrupt_)};
+        }
+        if (*physical == kTimer1CounterAddress) {
+            return {R3000aBusStatus::ok, timer1_counter_};
         }
         if (*physical == kGpuGp0Address) {
             return {R3000aBusStatus::ok, gpu_.read_gp0()};
