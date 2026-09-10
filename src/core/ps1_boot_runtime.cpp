@@ -18,6 +18,8 @@ constexpr std::uint32_t kBiosA0RemoveIso9660Alias = 0x00000072u;
 constexpr std::uint32_t kBiosB0HookEntryInt = 0x00000019u;
 constexpr std::uint32_t kBiosB0ChangeClearPad = 0x0000005Bu;
 constexpr std::uint32_t kBiosC0ChangeClearRCnt = 0x0000000Au;
+constexpr std::uint64_t kFnvOffset = 14695981039346656037ull;
+constexpr std::uint64_t kFnvPrime = 1099511628211ull;
 
 bool is_bios_table(std::uint32_t physical) noexcept {
     return physical == kBiosA0 ||
@@ -37,6 +39,39 @@ std::uint64_t mmio_dependency_key(const Ps1UnsupportedAccess& access) noexcept {
     return (static_cast<std::uint64_t>(access.physical_address) << 16u) |
            (static_cast<std::uint64_t>(access.width) << 8u) |
            static_cast<std::uint64_t>(access.write ? 1u : 0u);
+}
+
+void hash_byte(std::uint64_t& hash, std::uint8_t value) noexcept {
+    hash ^= value;
+    hash *= kFnvPrime;
+}
+
+void hash_bool(std::uint64_t& hash, bool value) noexcept {
+    hash_byte(hash, static_cast<std::uint8_t>(value ? 1u : 0u));
+}
+
+void hash_u32(std::uint64_t& hash, std::uint32_t value) noexcept {
+    for (unsigned shift = 0; shift < 32u; shift += 8u) {
+        hash_byte(hash, static_cast<std::uint8_t>(value >> shift));
+    }
+}
+
+void hash_u64(std::uint64_t& hash, std::uint64_t value) noexcept {
+    for (unsigned shift = 0; shift < 64u; shift += 8u) {
+        hash_byte(hash, static_cast<std::uint8_t>(value >> shift));
+    }
+}
+
+void hash_optional_u32(std::uint64_t& hash,
+                       const std::optional<std::uint32_t>& value) noexcept {
+    hash_bool(hash, value.has_value());
+    if (value) hash_u32(hash, *value);
+}
+
+void hash_optional_bool(std::uint64_t& hash,
+                        const std::optional<bool>& value) noexcept {
+    hash_bool(hash, value.has_value());
+    if (value) hash_bool(hash, *value);
 }
 
 void record_recent_trace(Ps1BootReport& report,
@@ -275,6 +310,43 @@ bool Ps1BootRuntime::apply_diagnostic_bios_fallback(Ps1BiosFallback fallback) no
     return_from_bios_call(cpu_);
     diagnostic_bios_frontier_pending_ = false;
     return true;
+}
+
+std::uint64_t Ps1BootRuntime::diagnostic_state_hash() const noexcept {
+    std::uint64_t hash = kFnvOffset;
+    hash_u64(hash, bus_.diagnostic_state_hash());
+    for (const auto value : cpu_.gpr) hash_u32(hash, value);
+    hash_u32(hash, cpu_.hi);
+    hash_u32(hash, cpu_.lo);
+    hash_u32(hash, cpu_.pc);
+    hash_u32(hash, cpu_.next_pc);
+    hash_bool(hash, cpu_.pending_load.valid);
+    hash_byte(hash, cpu_.pending_load.reg);
+    hash_u32(hash, cpu_.pending_load.value);
+    hash_bool(hash, cpu_.delay_slot.active);
+    hash_u32(hash, cpu_.delay_slot.branch_pc);
+    hash_bool(hash, cpu_.delay_slot.taken);
+    hash_u32(hash, cpu_.delay_slot.target);
+    hash_u32(hash, cpu_.cop0.target_address);
+    hash_u32(hash, cpu_.cop0.bad_vaddr);
+    hash_u32(hash, cpu_.cop0.status);
+    hash_u32(hash, cpu_.cop0.cause);
+    hash_u32(hash, cpu_.cop0.epc);
+    hash_byte(hash, cpu_.external_interrupt_pending);
+
+    hash_bool(hash, bios_heap_state_.has_value());
+    if (bios_heap_state_) {
+        hash_u32(hash, bios_heap_state_->base);
+        hash_u32(hash, bios_heap_state_->size);
+    }
+    hash_optional_u32(hash, bios_interrupt_hook_address_);
+    hash_optional_bool(hash, bios_pad_card_auto_ack_enabled_);
+    for (const auto& state : bios_root_counter_auto_ack_enabled_) {
+        hash_optional_bool(hash, state);
+    }
+    hash_bool(hash, bios_iso9660_removed_);
+    hash_bool(hash, diagnostic_bios_frontier_pending_);
+    return hash;
 }
 
 const R3000aState& Ps1BootRuntime::cpu_state() const noexcept {
