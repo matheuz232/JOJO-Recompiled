@@ -12,6 +12,8 @@ constexpr std::uint32_t kBiosA0 = 0x000000A0u;
 constexpr std::uint32_t kBiosB0 = 0x000000B0u;
 constexpr std::uint32_t kBiosC0 = 0x000000C0u;
 constexpr std::uint32_t kBiosA0InitHeap = 0x00000039u;
+constexpr std::uint32_t kBiosA0RemoveIso9660 = 0x00000056u;
+constexpr std::uint32_t kBiosA0RemoveIso9660Alias = 0x00000072u;
 constexpr std::uint32_t kBiosB0HookEntryInt = 0x00000019u;
 constexpr std::uint32_t kBiosB0ChangeClearPad = 0x0000005Bu;
 constexpr std::uint32_t kBiosC0ChangeClearRCnt = 0x0000000Au;
@@ -70,10 +72,18 @@ bool handle_bios_call(
     std::optional<std::uint32_t>& interrupt_hook_address,
     std::optional<bool>& pad_card_auto_ack_enabled,
     std::array<std::optional<bool>, 4>& root_counter_auto_ack_enabled,
+    bool& iso9660_removed,
     std::uint32_t table_physical,
     std::uint32_t selector) noexcept {
     if (table_physical == kBiosA0 && selector == kBiosA0InitHeap) {
         heap_state = Ps1BiosHeapState{cpu.gpr[4], cpu.gpr[5]};
+        return_from_bios_call(cpu);
+        return true;
+    }
+
+    if (table_physical == kBiosA0 &&
+        (selector == kBiosA0RemoveIso9660 || selector == kBiosA0RemoveIso9660Alias)) {
+        iso9660_removed = true;
         return_from_bios_call(cpu);
         return true;
     }
@@ -140,7 +150,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
             if (handle_bios_call(cpu_, bios_heap_state_, bios_interrupt_hook_address_,
                                  bios_pad_card_auto_ack_enabled_,
                                  bios_root_counter_auto_ack_enabled_,
-                                 *physical_pc, cpu_.gpr[9])) {
+                                 bios_iso9660_removed_, *physical_pc, cpu_.gpr[9])) {
                 continue;
             }
             report.stop_reason = Ps1BootStopReason::bios_call_unimplemented;
@@ -231,6 +241,10 @@ std::optional<bool> Ps1BootRuntime::bios_root_counter_auto_ack_enabled(
         return std::nullopt;
     }
     return bios_root_counter_auto_ack_enabled_[static_cast<std::size_t>(counter)];
+}
+
+bool Ps1BootRuntime::bios_iso9660_removed() const noexcept {
+    return bios_iso9660_removed_;
 }
 
 Ps1MemoryBus& Ps1BootRuntime::bus() noexcept {
