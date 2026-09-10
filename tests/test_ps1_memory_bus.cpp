@@ -58,6 +58,7 @@ int main() {
     CHECK(bus.write32(0x1F8010F4u, 0x00000000u).status == jojo::R3000aBusStatus::ok);
     CHECK(!bus.last_diagnostic_mmio_probe().has_value());
     CHECK(bus.read32(0x1F8010F4u).value == 0u);
+    bus.set_diagnostic_mmio_probe_enabled(false);
 
     CHECK(bus.write32(0x1F801114u, 0xABCD0100u).status == jojo::R3000aBusStatus::ok);
     CHECK(bus.timer1_mode() == 0x0100u);
