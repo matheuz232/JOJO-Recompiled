@@ -57,14 +57,13 @@ int main() {
         CHECK(s.pc == 0x80000080u && s.next_pc == 0x80000084u);
     }
 
-    const std::array<std::uint32_t, 4> unsupported_with_cu2 = {
+    const std::array<std::uint32_t, 3> unsupported_with_cu2 = {
         cop2(0x00u), // MFC2
-        cop2(0x02u), // CFC2 (implemented in the next task)
         cop2(0x04u), // MTC2
         cop2(0x10u), // COP2 command
     };
 
-    // CU2 set: only the still-unimplemented transfers/math stop explicitly.
+    // CU2 set: only the still-unimplemented data transfers/math stop explicitly.
     for (const auto raw : unsupported_with_cu2) {
         TestR3000aBus bus;
         auto s = base_state();
