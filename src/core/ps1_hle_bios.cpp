@@ -5,6 +5,7 @@ namespace {
 
 constexpr std::uint64_t kFnvOffset = 14695981039346656037ull;
 constexpr std::uint64_t kFnvPrime = 1099511628211ull;
+constexpr std::uint32_t kCriticalMask = (1u << 0) | (1u << 10);
 
 void hash_byte(std::uint64_t& hash, std::uint8_t value) noexcept {
     hash ^= value;
@@ -32,6 +33,13 @@ void hash_optional_bool(std::uint64_t& hash, const std::optional<bool>& value) n
 void return_from_bios_vector(R3000aState& cpu) noexcept {
     cpu.pc = cpu.gpr[31];
     cpu.next_pc = cpu.pc + 4u;
+    cpu.delay_slot = {};
+    cpu.gpr[0] = 0u;
+}
+
+void advance_sys_instruction(R3000aState& cpu) noexcept {
+    cpu.pc = cpu.next_pc;
+    cpu.next_pc += 4u;
     cpu.delay_slot = {};
     cpu.gpr[0] = 0u;
 }
@@ -80,6 +88,24 @@ Ps1HleBiosResult Ps1HleBios::dispatch(const Ps1HleBiosCall& call, R3000aState& c
             }
             break;
         case Ps1HleBiosDomain::sys:
+            switch (call.selector) {
+                case 0u: // SYS(00h) NoFunction
+                    advance_sys_instruction(cpu);
+                    return {Ps1HleBiosDisposition::handled};
+                case 1u: { // SYS(01h) EnterCriticalSection
+                    const bool enabled = (cpu.cop0.status & kCriticalMask) == kCriticalMask;
+                    cpu.cop0.status &= ~kCriticalMask;
+                    cpu.gpr[2] = enabled ? 1u : 0u;
+                    advance_sys_instruction(cpu);
+                    return {Ps1HleBiosDisposition::handled};
+                }
+                case 2u: // SYS(02h) ExitCriticalSection
+                    cpu.cop0.status |= kCriticalMask;
+                    advance_sys_instruction(cpu);
+                    return {Ps1HleBiosDisposition::handled};
+                default:
+                    break;
+            }
             break;
     }
     return {Ps1HleBiosDisposition::unsupported};
