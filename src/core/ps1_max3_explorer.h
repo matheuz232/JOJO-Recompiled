@@ -14,6 +14,7 @@ namespace jojo {
 enum class Ps1Max3DependencyKind : std::uint8_t {
     bios_frontier,
     speculative_mmio,
+    terminal_mmio,
 };
 
 enum class Ps1Max3TerminationReason : std::uint8_t {
@@ -63,6 +64,7 @@ struct Ps1Max3Dependency {
     std::uint32_t address{};
     std::uint8_t width{};
     bool write{};
+    std::uint32_t value{};
 };
 
 struct Ps1Max3Report {
