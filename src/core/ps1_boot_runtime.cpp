@@ -261,6 +261,7 @@ std::uint64_t Ps1BootRuntime::diagnostic_state_hash() const noexcept {
     hash_u32(hash, cpu_.cop0.status);
     hash_u32(hash, cpu_.cop0.cause);
     hash_u32(hash, cpu_.cop0.epc);
+    for (const auto value : cpu_.cop2_gte.control) hash_u32(hash, value);
     hash_byte(hash, cpu_.external_interrupt_pending);
     hash_u64(hash, hle_bios_.diagnostic_state_hash());
     hash_bool(hash, diagnostic_bios_frontier_pending_);
