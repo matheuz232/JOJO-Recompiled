@@ -2,6 +2,7 @@
 
 #include "core/conversion.h"
 #include "core/ps1_boot_report.h"
+#include "core/ps1_max3_explorer.h"
 #include "core/result.h"
 
 #include <filesystem>
@@ -31,6 +32,10 @@ struct InstallationInfo {
     const std::filesystem::path& install_root,
     const std::filesystem::path& report_path,
     const Ps1BootOptions& options = {});
+[[nodiscard]] Result<Ps1Max3Report> bootstrap_runtime_max3_local_evidence_to_file(
+    const std::filesystem::path& install_root,
+    const std::filesystem::path& report_path,
+    Ps1Max3Options options = ps1_max3_local_evidence_options());
 [[nodiscard]] Result<Ps1BootReport> bootstrap_runtime_local_evidence_to_file(
     const std::filesystem::path& install_root,
     const std::filesystem::path& report_path);
