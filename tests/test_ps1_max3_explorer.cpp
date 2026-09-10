@@ -1,3 +1,4 @@
+#include "core/ps1_boot_report_io.h"
 #include "core/ps1_max3_explorer.h"
 #include "core/ps1_exe.h"
 #include "mips_test_encode.h"
@@ -7,6 +8,7 @@
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <string>
 #include <vector>
 
 static int failures = 0;
@@ -209,10 +211,39 @@ static void test_bounds_and_progress_ranking_are_deterministic() {
     }
 }
 
+static void test_terminal_gpu_mmio_is_recorded_as_dependency_with_value() {
+    const auto executable = make_executable({
+        test_mips::i(0x0Fu, 0u, 4u, 0xFF00u),
+        test_mips::i(0x09u, 0u, 9u, 0x0049u),
+        test_mips::i(0x09u, 0u, 10u, 0x00A0u),
+        test_mips::r(10u, 0u, 31u, 0u, 0x09u),
+        0x00000000u,
+    });
+    auto options = fast_options();
+    options.max_branch_depth = 0u;
+    const auto explored = jojo::explore_ps1_max3(executable, options);
+    CHECK(explored);
+    if (!explored) return;
+
+    const auto& report = explored.value;
+    CHECK(report.nodes.size() == 1u);
+    CHECK(report.nodes[0].stop_reason == jojo::Ps1BootStopReason::gpu_command_unimplemented);
+    CHECK(report.dependencies.size() == 1u);
+    if (!report.dependencies.empty()) {
+        CHECK(report.dependencies[0].address == 0x1F801810u);
+        CHECK(report.dependencies[0].width == 4u);
+        CHECK(report.dependencies[0].write);
+    }
+    const auto text = jojo::format_ps1_max3_report(report);
+    CHECK(text.find("dependency_0_kind=terminal_mmio") != std::string::npos);
+    CHECK(text.find("dependency_0_value=0xff000000") != std::string::npos);
+}
+
 int main() {
     test_one_frontier_branches_four_ways();
     test_converged_frontier_state_is_expanded_once();
     test_hle_state_prevents_false_max3_frontier_deduplication();
     test_bounds_and_progress_ranking_are_deterministic();
+    test_terminal_gpu_mmio_is_recorded_as_dependency_with_value();
     return failures ? 1 : 0;
 }
