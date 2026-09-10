@@ -29,10 +29,20 @@ void return_from_bios_vector(R3000aState& cpu) noexcept {
 Ps1HleBiosResult Ps1HleBios::dispatch(
     const Ps1HleBiosCall& call,
     R3000aState& cpu) noexcept {
-    if (call.domain == Ps1HleBiosDomain::a0 && call.selector == 0x39u) {
-        heap_state_ = Ps1BiosHeapState{call.a0, call.a1};
-        return_from_bios_vector(cpu);
-        return {Ps1HleBiosDisposition::handled};
+    if (call.domain == Ps1HleBiosDomain::a0) {
+        switch (call.selector) {
+            case 0x39u:
+                heap_state_ = Ps1BiosHeapState{call.a0, call.a1};
+                return_from_bios_vector(cpu);
+                return {Ps1HleBiosDisposition::handled};
+            case 0x56u:
+            case 0x72u:
+                iso9660_removed_ = true;
+                return_from_bios_vector(cpu);
+                return {Ps1HleBiosDisposition::handled};
+            default:
+                break;
+        }
     }
     return {Ps1HleBiosDisposition::unsupported};
 }
@@ -44,6 +54,7 @@ std::uint64_t Ps1HleBios::diagnostic_state_hash() const noexcept {
         hash_u32(hash, heap_state_->base);
         hash_u32(hash, heap_state_->size);
     }
+    hash_byte(hash, iso9660_removed_ ? 1u : 0u);
     return hash;
 }
 
