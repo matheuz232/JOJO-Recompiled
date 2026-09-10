@@ -85,6 +85,16 @@ void record_recent_mmio(Ps1BootReport& report, const Ps1MmioSummary& event, std:
     report.recent_mmio.push_back(event);
 }
 
+void record_recent_cdrom(Ps1BootReport& report,
+                         const Ps1CdromCommandSummary& event,
+                         std::size_t capacity) {
+    if (capacity == 0u) return;
+    if (report.recent_cdrom_commands.size() == capacity) {
+        report.recent_cdrom_commands.erase(report.recent_cdrom_commands.begin());
+    }
+    report.recent_cdrom_commands.push_back(event);
+}
+
 void return_from_bios_call(R3000aState& cpu) noexcept {
     cpu.pc = cpu.gpr[31];
     cpu.next_pc = cpu.pc + 4u;
@@ -131,10 +141,12 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
     report.last_pc = cpu_.pc;
     report.diagnostic_probe_mode = options.diagnostic_mmio_probe;
     bus_.set_diagnostic_mmio_probe_enabled(options.diagnostic_mmio_probe);
+    const auto cdrom_commands_before = bus_.cdrom().command_count();
     const auto gp0_before = bus_.gpu().gp0_command_count();
     const auto gp1_before = bus_.gpu().gp1_command_count();
     const auto finish = [&](Ps1BootStopReason reason) {
         report.stop_reason = reason;
+        report.cdrom_command_count = bus_.cdrom().command_count() - cdrom_commands_before;
         report.gpu_gp0_command_count = bus_.gpu().gp0_command_count() - gp0_before;
         report.gpu_gp1_command_count = bus_.gpu().gp1_command_count() - gp1_before;
         return report;
@@ -218,10 +230,20 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
             }
         }
 
+        const auto command_count_before_step = bus_.cdrom().command_count();
+        bus_.clear_last_unsupported_cdrom_command();
         const auto step = step_r3000a(cpu_, bus_);
         if (step.status == R3000aStepStatus::retired) {
             ++report.instructions_retired;
             ++instructions_since_progress;
+            if (bus_.cdrom().command_count() != command_count_before_step) {
+                if (const auto& event = bus_.cdrom().last_command_event(); event) {
+                    record_recent_cdrom(report,
+                        Ps1CdromCommandSummary{event->command, event->index, event->status},
+                        options.mmio_event_capacity);
+                }
+                instructions_since_progress = 0u;
+            }
             if (const auto& probe = bus_.last_diagnostic_mmio_probe(); probe) {
                 ++report.speculative_mmio_count;
                 record_recent_mmio(report, Ps1MmioSummary{
@@ -239,6 +261,19 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
         report.unsupported_access = bus_.last_unsupported_access();
         if (step.status == R3000aStepStatus::exception && step.diagnostic.exception_code == R3000aExceptionCode::interrupt) {
             ++report.interrupts_accepted;
+        }
+        if (bus_.last_unsupported_cdrom_command()) {
+            if (report.unsupported_access) {
+                const auto physical = Ps1MemoryBus::guest_to_physical(report.unsupported_access->guest_address);
+                if (physical && is_initial_mmio_window(*physical)) {
+                    record_recent_mmio(report, Ps1MmioSummary{
+                        step.diagnostic.pc, report.unsupported_access->guest_address,
+                        report.unsupported_access->width, report.unsupported_access->write,
+                        report.unsupported_access->value, false,
+                    }, options.mmio_event_capacity);
+                }
+            }
+            return finish(Ps1BootStopReason::device_command_unimplemented);
         }
         if (report.unsupported_access) {
             const auto physical = Ps1MemoryBus::guest_to_physical(report.unsupported_access->guest_address);
