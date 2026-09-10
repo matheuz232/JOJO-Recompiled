@@ -52,8 +52,8 @@ int main() {
     CHECK(!bus.last_diagnostic_mmio_probe().has_value());
     const auto dicr_written = bus.read32(0x1F8010F4u);
     CHECK(dicr_written.status == jojo::R3000aBusStatus::ok);
-    CHECK(dicr_written.value == 0x00FF807Fu);
-    CHECK(bus.dma_interrupt() == 0x00FF807Fu);
+    CHECK(dicr_written.value == 0x80FF807Fu);
+    CHECK(bus.dma_interrupt() == 0x80FF807Fu);
     bus.clear_last_diagnostic_mmio_probe();
     CHECK(bus.write32(0x1F8010F4u, 0x00000000u).status == jojo::R3000aBusStatus::ok);
     CHECK(!bus.last_diagnostic_mmio_probe().has_value());
