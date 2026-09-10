@@ -39,6 +39,10 @@ bool is_cdrom_port(std::uint32_t physical) noexcept {
            physical == kCdromRequestInterrupt;
 }
 
+bool is_cdrom_register_window(std::uint32_t physical) noexcept {
+    return physical >= 0x1F801800u && physical <= 0x1F801803u;
+}
+
 std::uint8_t* mapped_bytes(std::uint32_t physical,
                            std::size_t width,
                            std::span<std::uint8_t> main_ram,
@@ -168,6 +172,10 @@ R3000aBusResult Ps1MemoryBus::read8(std::uint32_t address) noexcept {
 R3000aBusResult Ps1MemoryBus::read16(std::uint32_t address) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (is_cdrom_register_window(*physical)) {
+            last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 2u, false, 0u};
+            return {R3000aBusStatus::unsupported, 0u};
+        }
         if (*physical == kInterruptStatusAddress) {
             return {R3000aBusStatus::ok, interrupt_status_};
         }
@@ -194,6 +202,10 @@ R3000aBusResult Ps1MemoryBus::read16(std::uint32_t address) noexcept {
 R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (*physical == kInterruptStatusAddress || is_cdrom_register_window(*physical)) {
+            last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 4u, false, 0u};
+            return {R3000aBusStatus::unsupported, 0u};
+        }
         if (*physical == kInterruptMaskAddress) {
             return {R3000aBusStatus::ok, interrupt_mask_};
         }
@@ -274,6 +286,10 @@ R3000aBusResult Ps1MemoryBus::write8(std::uint32_t address, std::uint8_t value) 
 R3000aBusResult Ps1MemoryBus::write16(std::uint32_t address, std::uint16_t value) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (is_cdrom_register_window(*physical)) {
+            last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 2u, true, value};
+            return {R3000aBusStatus::unsupported, 0u};
+        }
         if (*physical == kInterruptStatusAddress) {
             interrupt_status_ = static_cast<std::uint16_t>(interrupt_status_ & value & kInterruptValidBits);
             return {R3000aBusStatus::ok, 0u};
@@ -303,6 +319,10 @@ R3000aBusResult Ps1MemoryBus::write16(std::uint32_t address, std::uint16_t value
 R3000aBusResult Ps1MemoryBus::write32(std::uint32_t address, std::uint32_t value) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (is_cdrom_register_window(*physical)) {
+            last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 4u, true, value};
+            return {R3000aBusStatus::unsupported, 0u};
+        }
         if (*physical == kCommonDelayAddress) {
             common_delay_ = value;
             return {R3000aBusStatus::ok, 0u};
