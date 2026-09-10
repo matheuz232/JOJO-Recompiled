@@ -8,6 +8,7 @@ namespace {
 
 constexpr std::uint64_t kFnvOffset = 14695981039346656037ull;
 constexpr std::uint64_t kFnvPrime = 1099511628211ull;
+constexpr std::uint32_t kDefaultEntryInt = 0x00006CF4u;
 
 void hash_byte(std::uint64_t& hash, std::uint8_t value) noexcept {
     hash ^= value;
@@ -117,8 +118,34 @@ Ps1InterruptDriveResult Ps1InterruptContinuation::drive(
 
     while (phase_ == Ps1InterruptContinuationPhase::dispatch) {
         if (priority_ >= 4u) {
-            return_from_exception(cpu);
-            return {Ps1InterruptDriveStatus::restored};
+            const auto& hook = bios.interrupt_hook_address();
+            if (!hook || *hook == kDefaultEntryInt) {
+                return_from_exception(cpu);
+                return {Ps1InterruptDriveStatus::restored};
+            }
+
+            std::array<std::uint32_t, 12> words{};
+            for (std::size_t i = 0u; i < words.size(); ++i) {
+                const auto word = bus.read32(*hook + static_cast<std::uint32_t>(i * 4u));
+                if (word.status != R3000aBusStatus::ok) {
+                    return {Ps1InterruptDriveStatus::terminal};
+                }
+                words[i] = word.value;
+            }
+
+            cpu.gpr[31] = words[0];
+            cpu.gpr[29] = words[1];
+            cpu.gpr[30] = words[2];
+            for (std::size_t i = 0u; i < 8u; ++i) cpu.gpr[16u + i] = words[3u + i];
+            cpu.gpr[28] = words[11];
+            cpu.gpr[2] = 1u;
+            cpu.pc = words[0];
+            cpu.next_pc = words[0] + 4u;
+            cpu.pending_load = {};
+            cpu.delay_slot = {};
+            cpu.gpr[0] = 0u;
+            phase_ = Ps1InterruptContinuationPhase::hook_guest;
+            return {Ps1InterruptDriveStatus::guest_execution};
         }
 
         if (!priority_head_loaded_) {
