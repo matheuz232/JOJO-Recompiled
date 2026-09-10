@@ -112,6 +112,53 @@ static void test_converged_frontier_state_is_expanded_once() {
     CHECK(report.dependencies[1].selector == 0x00000034u);
 }
 
+static std::vector<std::uint32_t> hle_state_splits_converged_frontier() {
+    return {
+        test_mips::i(0x09u, 0u, 2u, 5u),
+        test_mips::i(0x09u, 0u, 9u, 0x0033u),
+        test_mips::i(0x09u, 0u, 10u, 0x00A0u),
+        test_mips::r(10u, 0u, 31u, 0u, 0x09u),
+        0x00000000u,
+        test_mips::i(0x05u, 2u, 0u, 6u),
+        0x00000000u,
+        test_mips::i(0x09u, 0u, 4u, 0x4000u),
+        test_mips::i(0x09u, 0u, 5u, 0x1000u),
+        test_mips::i(0x09u, 0u, 9u, 0x0039u),
+        test_mips::r(10u, 0u, 31u, 0u, 0x09u),
+        0x00000000u,
+        test_mips::i(0x09u, 0u, 2u, 7u),
+        test_mips::i(0x09u, 0u, 4u, 0u),
+        test_mips::i(0x09u, 0u, 5u, 0u),
+        test_mips::i(0x09u, 0u, 9u, 0x0034u),
+        test_mips::r(10u, 0u, 31u, 0u, 0x09u),
+        0x00000000u,
+        test_mips::j(0x02u, 0x80010048u >> 2),
+        0x00000000u,
+    };
+}
+
+static void test_hle_state_prevents_false_max3_frontier_deduplication() {
+    const auto executable = make_executable(hle_state_splits_converged_frontier());
+    auto options = fast_options();
+    options.max_branch_depth = 2u;
+    options.max_nodes = 32u;
+    const auto explored = jojo::explore_ps1_max3(executable, options);
+    CHECK(explored);
+    if (!explored) return;
+
+    const auto& report = explored.value;
+    CHECK(report.nodes.size() == 13u);
+    CHECK(std::count_if(report.nodes.begin(), report.nodes.end(), [](const auto& node) {
+        return node.depth == 1u && node.deduplicated;
+    }) == 2);
+    CHECK(std::count_if(report.nodes.begin(), report.nodes.end(), [](const auto& node) {
+        return node.depth == 2u;
+    }) == 8);
+    CHECK(report.dependencies.size() == 2u);
+    CHECK(report.dependencies[0].selector == 0x00000033u);
+    CHECK(report.dependencies[1].selector == 0x00000034u);
+}
+
 static void test_bounds_and_progress_ranking_are_deterministic() {
     const auto executable = make_executable(one_frontier_then_loop());
 
@@ -165,6 +212,7 @@ static void test_bounds_and_progress_ranking_are_deterministic() {
 int main() {
     test_one_frontier_branches_four_ways();
     test_converged_frontier_state_is_expanded_once();
+    test_hle_state_prevents_false_max3_frontier_deduplication();
     test_bounds_and_progress_ranking_are_deterministic();
     return failures ? 1 : 0;
 }
