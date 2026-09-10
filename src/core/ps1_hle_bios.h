@@ -43,6 +43,13 @@ struct Ps1BiosHeapState {
     std::uint32_t size{};
 };
 
+struct Ps1BiosEventState {
+    std::uint32_t event_class{};
+    std::uint32_t spec{};
+    std::uint32_t mode{};
+    std::uint32_t function{};
+};
+
 class Ps1HleBios {
 public:
     [[nodiscard]] Ps1HleBiosResult dispatch(
@@ -73,6 +80,10 @@ private:
     std::optional<std::uint32_t> interrupt_hook_address_{};
     std::optional<bool> pad_card_auto_ack_enabled_{};
     std::array<std::optional<bool>, 4> root_counter_auto_ack_enabled_{};
+    std::optional<bool> memory_card_pad_enabled_{};
+    bool memory_card_started_{};
+    bool backup_unit_initialized_{};
+    std::array<std::optional<Ps1BiosEventState>, 16> events_{};
     bool iso9660_removed_{};
     bool c0_table_materialized_{};
 };
