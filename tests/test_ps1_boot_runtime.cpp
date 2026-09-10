@@ -57,9 +57,10 @@ static void test_budget_exhaustion_keeps_bounded_recent_trace() {
 static void test_local_evidence_options_grow_monotonically() {
     const auto options = jojo::ps1_local_evidence_options();
     CHECK(options.instruction_budget == std::numeric_limits<std::uint64_t>::max());
-    CHECK(options.trace_capacity == 512u);
+    CHECK(options.trace_capacity == 4096u);
     CHECK(options.diagnostic_mmio_probe);
-    CHECK(options.mmio_event_capacity == 1024u);
+    CHECK(options.mmio_event_capacity == 8192u);
+    CHECK(options.bios_event_capacity == 4096u);
 }
 
 static void test_bios_entry_stops_before_executing_bios_bytes() {
