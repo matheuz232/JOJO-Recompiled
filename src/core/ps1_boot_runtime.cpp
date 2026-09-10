@@ -12,6 +12,7 @@ namespace {
 constexpr std::uint32_t kBiosA0 = 0x000000A0u;
 constexpr std::uint32_t kBiosB0 = 0x000000B0u;
 constexpr std::uint32_t kBiosC0 = 0x000000C0u;
+constexpr std::uint32_t kGpuGp0Address = 0x1F801810u;
 constexpr std::uint32_t kSyscallEncodingMask = 0xFC00003Fu;
 constexpr std::uint32_t kSyscallEncoding = 0x0000000Cu;
 constexpr std::uint32_t kInterruptEnableCurrent = 1u << 0;
@@ -154,6 +155,26 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
             if (hle.disposition == Ps1HleBiosDisposition::handled) {
                 diagnostic_bios_frontier_pending_ = false;
                 continue;
+            }
+            if (hle.disposition == Ps1HleBiosDisposition::terminal) {
+                diagnostic_bios_frontier_pending_ = false;
+                report.unsupported_access = bus_.last_unsupported_access();
+                if (report.unsupported_access) {
+                    const auto physical = Ps1MemoryBus::guest_to_physical(
+                        report.unsupported_access->guest_address);
+                    if (physical && is_initial_mmio_window(*physical)) {
+                        record_recent_mmio(report, Ps1MmioSummary{
+                            call.pc, report.unsupported_access->guest_address,
+                            report.unsupported_access->width, report.unsupported_access->write,
+                            report.unsupported_access->value, false,
+                        }, options.mmio_event_capacity);
+                        if (*physical == kGpuGp0Address) {
+                            return finish(Ps1BootStopReason::gpu_command_unimplemented);
+                        }
+                        return finish(Ps1BootStopReason::mmio_unimplemented);
+                    }
+                }
+                return finish(Ps1BootStopReason::fatal_runtime_error);
             }
             diagnostic_bios_frontier_pending_ = true;
             return finish(Ps1BootStopReason::bios_call_unimplemented);
