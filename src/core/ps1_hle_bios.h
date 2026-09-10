@@ -81,6 +81,7 @@ private:
     std::optional<std::uint32_t> interrupt_hook_address_{};
     std::optional<bool> pad_card_auto_ack_enabled_{};
     std::array<std::optional<bool>, 4> root_counter_auto_ack_enabled_{};
+    std::array<std::optional<std::uint32_t>, 4> interrupt_priority_heads_{};
     std::optional<bool> memory_card_pad_enabled_{};
     bool memory_card_started_{};
     bool backup_unit_initialized_{};
