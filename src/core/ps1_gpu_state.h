@@ -6,10 +6,13 @@ namespace jojo {
 
 class Ps1GpuState {
 public:
+    [[nodiscard]] bool write_gp0(std::uint32_t value) noexcept;
+    [[nodiscard]] std::uint32_t read_gp0() const noexcept;
     [[nodiscard]] bool write_gp1(std::uint32_t value) noexcept;
     [[nodiscard]] std::uint32_t gpu_stat() const noexcept;
     [[nodiscard]] std::uint64_t diagnostic_state_hash() const noexcept;
 
+    [[nodiscard]] std::uint64_t gp0_command_count() const noexcept;
     [[nodiscard]] std::uint64_t gp1_command_count() const noexcept;
     [[nodiscard]] std::uint64_t command_buffer_reset_count() const noexcept;
     [[nodiscard]] bool display_disabled() const noexcept;
@@ -35,6 +38,9 @@ private:
     std::uint16_t vertical_end_{0x0100u};
     std::uint8_t display_mode_{};
     bool irq1_{};
+    std::uint32_t gp0_read_latch_{};
+    std::uint32_t draw_mode_{};
+    std::uint64_t gp0_command_count_{};
     std::uint64_t gp1_command_count_{};
     std::uint64_t command_buffer_reset_count_{};
 };
