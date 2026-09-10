@@ -37,6 +37,11 @@ static jojo::Ps1BootRuntime make_unknown_bios_runtime() {
     });
 }
 
+static constexpr std::uint32_t mtc0(std::uint8_t rt, std::uint8_t rd) noexcept {
+    return (0x10u << 26) | (0x04u << 21) |
+           (std::uint32_t(rt) << 16) | (std::uint32_t(rd) << 11);
+}
+
 static void test_unknown_bios_frontier_can_branch_from_snapshot() {
     auto stopped = make_unknown_bios_runtime();
     CHECK(!stopped.apply_diagnostic_bios_fallback(jojo::Ps1BiosFallback::return_zero));
@@ -117,9 +122,79 @@ static void test_diagnostic_state_fingerprint_tracks_guest_state() {
     CHECK(zero.diagnostic_state_hash() != one.diagnostic_state_hash());
 }
 
+static void test_sys00_nofunction_continues_without_clobbering_v0() {
+    auto runtime = make_runtime({
+        test_mips::i(0x09u, 0u, 2u, 0x1234u),
+        test_mips::i(0x09u, 0u, 4u, 0x0000u),
+        0x0000000Cu,
+        test_mips::i(0x09u, 0u, 16u, 0x5678u),
+        test_mips::j(0x02u, 0x80010010u >> 2),
+        0x00000000u,
+    });
+
+    const auto report = runtime.run({12u});
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(runtime.cpu_state().gpr[2] == 0x00001234u);
+    CHECK(runtime.cpu_state().gpr[16] == 0x00005678u);
+}
+
+static void test_sys01_entercriticalsection_disables_interrupts_and_returns_prior_state() {
+    auto runtime = make_runtime({
+        test_mips::i(0x09u, 0u, 8u, 0x0401u),
+        mtc0(8u, 12u),
+        test_mips::i(0x09u, 0u, 4u, 0x0001u),
+        0x0000000Cu,
+        test_mips::j(0x02u, 0x80010010u >> 2),
+        0x00000000u,
+    });
+
+    const auto report = runtime.run({12u});
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(runtime.cpu_state().gpr[2] == 1u);
+    CHECK((runtime.cpu_state().cop0.status & 0x00000401u) == 0u);
+}
+
+static void test_sys02_exitcriticalsection_enables_interrupts_and_preserves_v0() {
+    auto runtime = make_runtime({
+        test_mips::i(0x09u, 0u, 8u, 0x0000u),
+        mtc0(8u, 12u),
+        test_mips::i(0x09u, 0u, 2u, 0x1234u),
+        test_mips::i(0x09u, 0u, 4u, 0x0002u),
+        0x0000000Cu,
+        test_mips::j(0x02u, 0x80010014u >> 2),
+        0x00000000u,
+    });
+
+    const auto report = runtime.run({12u});
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(runtime.cpu_state().gpr[2] == 0x00001234u);
+    CHECK((runtime.cpu_state().cop0.status & 0x00000401u) == 0x00000401u);
+}
+
+static void test_sys03_remains_a_cpu_boundary_until_threads_are_modeled() {
+    auto runtime = make_runtime({
+        test_mips::i(0x09u, 0u, 4u, 0x0003u),
+        0x0000000Cu,
+        test_mips::j(0x02u, 0x80010008u >> 2),
+        0x00000000u,
+    });
+
+    const auto report = runtime.run({12u});
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::cpu_boundary);
+    CHECK(report.cpu_diagnostic.has_value());
+    if (report.cpu_diagnostic) {
+        CHECK(report.cpu_diagnostic->exception_code == jojo::R3000aExceptionCode::syscall);
+        CHECK(report.cpu_diagnostic->pc == 0x80010004u);
+    }
+}
+
 int main() {
     test_unknown_bios_frontier_can_branch_from_snapshot();
     test_stagnation_watchdog_stops_tight_loop();
     test_diagnostic_state_fingerprint_tracks_guest_state();
+    test_sys00_nofunction_continues_without_clobbering_v0();
+    test_sys01_entercriticalsection_disables_interrupts_and_returns_prior_state();
+    test_sys02_exitcriticalsection_enables_interrupts_and_preserves_v0();
+    test_sys03_remains_a_cpu_boundary_until_threads_are_modeled();
     return failures ? 1 : 0;
 }
