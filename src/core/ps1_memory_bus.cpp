@@ -12,6 +12,7 @@ constexpr std::uint32_t kInterruptMaskAddress = 0x1F801074u;
 constexpr std::uint32_t kDmaControlAddress = 0x1F8010F0u;
 constexpr std::uint32_t kDmaInterruptAddress = 0x1F8010F4u;
 constexpr std::uint32_t kTimer1ModeAddress = 0x1F801114u;
+constexpr std::uint32_t kGpuGp1Address = 0x1F801814u;
 constexpr std::uint16_t kInterruptValidBits = 0x07FFu;
 constexpr std::uint32_t kDmaInterruptControlMask = 0x00FF807Fu;
 constexpr std::uint32_t kDmaInterruptFlagMask = 0x7F000000u;
@@ -97,6 +98,12 @@ void hash_u32(std::uint64_t& hash, std::uint32_t value) noexcept {
     }
 }
 
+void hash_u64(std::uint64_t& hash, std::uint64_t value) noexcept {
+    for (unsigned shift = 0; shift < 64u; shift += 8u) {
+        hash_byte(hash, static_cast<std::uint8_t>(value >> shift));
+    }
+}
+
 void hash_bytes(std::uint64_t& hash, std::span<const std::uint8_t> bytes) noexcept {
     for (const auto value : bytes) {
         hash_byte(hash, value);
@@ -164,6 +171,9 @@ R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
         }
         if (*physical == kDmaInterruptAddress) {
             return {R3000aBusStatus::ok, visible_dma_interrupt(dma_interrupt_)};
+        }
+        if (*physical == kGpuGp1Address) {
+            return {R3000aBusStatus::ok, gpu_.gpu_stat()};
         }
         if (auto* p = mapped_bytes(*physical, 4u, main_ram_, scratchpad_)) {
             return {R3000aBusStatus::ok, read_little_endian(p, 4u)};
@@ -250,6 +260,13 @@ R3000aBusResult Ps1MemoryBus::write32(std::uint32_t address, std::uint32_t value
             timer1_counter_ = 0u;
             return {R3000aBusStatus::ok, 0u};
         }
+        if (*physical == kGpuGp1Address) {
+            if (gpu_.write_gp1(value)) {
+                return {R3000aBusStatus::ok, 0u};
+            }
+            last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 4u, true, value};
+            return {R3000aBusStatus::unsupported, 0u};
+        }
         if (auto* p = mapped_bytes(*physical, 4u, main_ram_, scratchpad_)) {
             write_little_endian(p, 4u, value);
             return {R3000aBusStatus::ok, 0u};
@@ -298,6 +315,14 @@ std::uint16_t Ps1MemoryBus::timer1_mode() const noexcept {
     return timer1_mode_;
 }
 
+Ps1GpuState& Ps1MemoryBus::gpu() noexcept {
+    return gpu_;
+}
+
+const Ps1GpuState& Ps1MemoryBus::gpu() const noexcept {
+    return gpu_;
+}
+
 std::uint64_t Ps1MemoryBus::diagnostic_state_hash() const noexcept {
     std::uint64_t hash = kFnvOffset;
     hash_bytes(hash, std::span<const std::uint8_t>{main_ram_.data(), main_ram_.size()});
@@ -308,6 +333,7 @@ std::uint64_t Ps1MemoryBus::diagnostic_state_hash() const noexcept {
     hash_u32(hash, dma_interrupt_);
     hash_u16(hash, timer1_counter_);
     hash_u16(hash, timer1_mode_);
+    hash_u64(hash, gpu_.diagnostic_state_hash());
     hash_bytes(hash, std::span<const std::uint8_t>{
         diagnostic_mmio_shadow_.data(), diagnostic_mmio_shadow_.size()});
     return hash;
