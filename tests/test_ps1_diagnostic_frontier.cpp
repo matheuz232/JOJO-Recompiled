@@ -83,8 +83,43 @@ static void test_stagnation_watchdog_stops_tight_loop() {
     CHECK(report.recent_trace.size() == 8u);
 }
 
+static void test_diagnostic_state_fingerprint_tracks_guest_state() {
+    const std::vector<std::uint32_t> loop{
+        test_mips::j(0x02u, 0x80010000u >> 2),
+        0x00000000u,
+    };
+    auto baseline = make_runtime(loop);
+    auto identical = make_runtime(loop);
+    CHECK(baseline.diagnostic_state_hash() == identical.diagnostic_state_hash());
+
+    auto ram_changed = baseline;
+    CHECK(ram_changed.bus().write32(0x00000200u, 0x12345678u).status ==
+          jojo::R3000aBusStatus::ok);
+    CHECK(ram_changed.diagnostic_state_hash() != baseline.diagnostic_state_hash());
+
+    auto dicr_changed = baseline;
+    CHECK(dicr_changed.bus().write32(0x1F8010F4u, 0x00000001u).status ==
+          jojo::R3000aBusStatus::ok);
+    CHECK(dicr_changed.diagnostic_state_hash() != baseline.diagnostic_state_hash());
+
+    auto shadow_changed = baseline;
+    shadow_changed.bus().set_diagnostic_mmio_probe_enabled(true);
+    CHECK(shadow_changed.bus().write32(0x1F801080u, 0xA5A55A5Au).status ==
+          jojo::R3000aBusStatus::ok);
+    CHECK(shadow_changed.diagnostic_state_hash() != baseline.diagnostic_state_hash());
+
+    auto frontier = make_unknown_bios_runtime();
+    CHECK(frontier.run({16u}).stop_reason == jojo::Ps1BootStopReason::bios_call_unimplemented);
+    auto zero = frontier;
+    auto one = frontier;
+    CHECK(zero.apply_diagnostic_bios_fallback(jojo::Ps1BiosFallback::return_zero));
+    CHECK(one.apply_diagnostic_bios_fallback(jojo::Ps1BiosFallback::return_one));
+    CHECK(zero.diagnostic_state_hash() != one.diagnostic_state_hash());
+}
+
 int main() {
     test_unknown_bios_frontier_can_branch_from_snapshot();
     test_stagnation_watchdog_stops_tight_loop();
+    test_diagnostic_state_fingerprint_tracks_guest_state();
     return failures ? 1 : 0;
 }
