@@ -32,6 +32,7 @@ enum class Ps1HleBiosDisposition : std::uint8_t {
     handled,
     unsupported,
     terminal,
+    return_from_exception,
 };
 
 struct Ps1HleBiosResult {
@@ -66,6 +67,8 @@ public:
 
     [[nodiscard]] const std::optional<Ps1BiosHeapState>& heap_state() const noexcept;
     [[nodiscard]] const std::optional<std::uint32_t>& interrupt_hook_address() const noexcept;
+    [[nodiscard]] std::optional<std::uint32_t> interrupt_priority_head(
+        std::uint32_t priority) const noexcept;
     [[nodiscard]] const std::optional<bool>& pad_card_auto_ack_enabled() const noexcept;
     [[nodiscard]] std::optional<bool> root_counter_auto_ack_enabled(
         std::uint32_t counter) const noexcept;

@@ -162,7 +162,7 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
             break;
         case Ps1HleBiosDomain::b0:
             switch (call.selector) {
-                case 0x08u: { // OpenEvent(class,spec,mode,func)
+                case 0x08u: {
                     std::size_t slot = kFirstUserEventSlot;
                     for (; slot < events_.size(); ++slot) {
                         if (!events_[slot]) break;
@@ -177,10 +177,10 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
                 }
-                case 0x0Bu: // TestEvent(event): no ready producer exists yet, so observed enabled event remains busy.
+                case 0x0Bu:
                     return_zero_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
-                case 0x0Cu: { // EnableEvent(event): valid EvCB becomes enabled/busy; BIOS returns 1 always.
+                case 0x0Cu: {
                     const auto limit = kEventDescriptorBase + static_cast<std::uint32_t>(events_.size());
                     if (call.a0 >= kEventDescriptorBase && call.a0 < limit) {
                         const auto slot = static_cast<std::size_t>(call.a0 - kEventDescriptorBase);
@@ -190,7 +190,9 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
                 }
-                case 0x18u: { // ResetEntryInt
+                case 0x17u: // ReturnFromException: Ps1BootRuntime owns context restoration.
+                    return {Ps1HleBiosDisposition::return_from_exception};
+                case 0x18u: {
                     if (!bus) return {Ps1HleBiosDisposition::unsupported};
                     for (std::uint32_t word = 0u; word < 12u; ++word) {
                         std::uint32_t value = 0u;
@@ -209,7 +211,7 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
                     interrupt_hook_address_ = call.a0;
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
-                case 0x35u: // write(fd,src,length): support only BIOS dummy std_out.
+                case 0x35u:
                     if (!bus || call.a0 != kStdOutFd) {
                         return {Ps1HleBiosDisposition::unsupported};
                     }
@@ -219,16 +221,16 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
                     cpu.gpr[2] = call.a2;
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
-                case 0x4Au: // InitCARD2(pad_enable)
+                case 0x4Au:
                     memory_card_pad_enabled_ = call.a0 != 0u;
                     memory_card_started_ = false;
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
-                case 0x4Bu: // StartCARD2()
+                case 0x4Bu:
                     memory_card_started_ = true;
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
-                case 0x56u: { // GetC0Table
+                case 0x56u: {
                     if (!bus) return {Ps1HleBiosDisposition::unsupported};
                     if (!c0_table_materialized_) {
                         for (std::uint32_t word = 0u; word < kC0TableWords; ++word) {
@@ -243,7 +245,7 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
                 }
-                case 0x57u: // GetB0Table
+                case 0x57u:
                     cpu.gpr[2] = kB0Table;
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
@@ -256,7 +258,7 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
             }
             break;
         case Ps1HleBiosDomain::c0:
-            if (call.selector == 0x02u) { // SysEnqIntRP(priority,struc)
+            if (call.selector == 0x02u) {
                 if (!bus || call.a0 >= interrupt_priority_heads_.size()) {
                     return {Ps1HleBiosDisposition::unsupported};
                 }
@@ -268,7 +270,7 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
                 return_zero_from_bios_vector(cpu);
                 return {Ps1HleBiosDisposition::handled};
             }
-            if (call.selector == 0x03u) { // SysDeqIntRP(priority,struc)
+            if (call.selector == 0x03u) {
                 if (call.a0 >= interrupt_priority_heads_.size()) {
                     return {Ps1HleBiosDisposition::unsupported};
                 }
@@ -303,17 +305,17 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
             break;
         case Ps1HleBiosDomain::sys:
             switch (call.selector) {
-                case 0u: // SYS(00h) NoFunction
+                case 0u:
                     advance_sys_instruction(cpu);
                     return {Ps1HleBiosDisposition::handled};
-                case 1u: { // SYS(01h) EnterCriticalSection
+                case 1u: {
                     const bool enabled = (cpu.cop0.status & kCriticalMask) == kCriticalMask;
                     cpu.cop0.status &= ~kCriticalMask;
                     cpu.gpr[2] = enabled ? 1u : 0u;
                     advance_sys_instruction(cpu);
                     return {Ps1HleBiosDisposition::handled};
                 }
-                case 2u: // SYS(02h) ExitCriticalSection
+                case 2u:
                     cpu.cop0.status |= kCriticalMask;
                     advance_sys_instruction(cpu);
                     return {Ps1HleBiosDisposition::handled};
@@ -356,8 +358,11 @@ std::uint64_t Ps1HleBios::diagnostic_state_hash() const noexcept {
 
 const std::optional<Ps1BiosHeapState>& Ps1HleBios::heap_state() const noexcept { return heap_state_; }
 const std::optional<std::uint32_t>& Ps1HleBios::interrupt_hook_address() const noexcept { return interrupt_hook_address_; }
+std::optional<std::uint32_t> Ps1HleBios::interrupt_priority_head(std::uint32_t priority) const noexcept {
+    if (priority >= interrupt_priority_heads_.size()) return std::nullopt;
+    return interrupt_priority_heads_[static_cast<std::size_t>(priority)];
+}
 const std::optional<bool>& Ps1HleBios::pad_card_auto_ack_enabled() const noexcept { return pad_card_auto_ack_enabled_; }
-
 std::optional<bool> Ps1HleBios::root_counter_auto_ack_enabled(std::uint32_t counter) const noexcept {
     if (counter >= root_counter_auto_ack_enabled_.size()) return std::nullopt;
     return root_counter_auto_ack_enabled_[static_cast<std::size_t>(counter)];
