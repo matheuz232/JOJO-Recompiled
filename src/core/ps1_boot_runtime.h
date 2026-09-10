@@ -6,6 +6,7 @@
 #include "core/r3000a_state.h"
 #include "core/result.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 
@@ -29,6 +30,8 @@ public:
     [[nodiscard]] const std::optional<Ps1BiosHeapState>& bios_heap_state() const noexcept;
     [[nodiscard]] const std::optional<std::uint32_t>& bios_interrupt_hook_address() const noexcept;
     [[nodiscard]] const std::optional<bool>& bios_pad_card_auto_ack_enabled() const noexcept;
+    [[nodiscard]] std::optional<bool> bios_root_counter_auto_ack_enabled(
+        std::uint32_t counter) const noexcept;
     [[nodiscard]] Ps1MemoryBus& bus() noexcept;
     [[nodiscard]] const Ps1MemoryBus& bus() const noexcept;
 
@@ -38,6 +41,7 @@ private:
     std::optional<Ps1BiosHeapState> bios_heap_state_{};
     std::optional<std::uint32_t> bios_interrupt_hook_address_{};
     std::optional<bool> bios_pad_card_auto_ack_enabled_{};
+    std::array<std::optional<bool>, 4> bios_root_counter_auto_ack_enabled_{};
 };
 
 } // namespace jojo
