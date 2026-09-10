@@ -41,6 +41,11 @@ void Ps1CdromState::seed_post_bios(std::uint8_t drive_status,
 }
 
 Ps1CdromIoResult Ps1CdromState::read8(std::uint32_t physical) noexcept {
+    if (physical == kCdromIndexStatus) {
+        const auto result_ready = response_ ? 0x20u : 0u;
+        return {Ps1CdromIoStatus::ok,
+                static_cast<std::uint8_t>(0x18u | result_ready | (index_ & 3u))};
+    }
     if (physical == kCdromRequestInterrupt && index_ == 1u) {
         return {Ps1CdromIoStatus::ok,
                 static_cast<std::uint8_t>(0xE0u | (interrupt_status_ & 0x1Fu))};
