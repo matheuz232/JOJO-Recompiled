@@ -17,6 +17,13 @@ struct Ps1BiosHeapState {
     std::uint32_t size{};
 };
 
+enum class Ps1BiosFallback : std::uint8_t {
+    return_zero,
+    return_one,
+    return_minus_one,
+    preserve_v0,
+};
+
 class Ps1BootRuntime {
 public:
     Ps1BootRuntime() = default;
@@ -25,6 +32,7 @@ public:
         const Ps1Executable& executable);
 
     [[nodiscard]] Ps1BootReport run(const Ps1BootOptions& options) noexcept;
+    [[nodiscard]] bool apply_diagnostic_bios_fallback(Ps1BiosFallback fallback) noexcept;
 
     [[nodiscard]] const R3000aState& cpu_state() const noexcept;
     [[nodiscard]] const std::optional<Ps1BiosHeapState>& bios_heap_state() const noexcept;
@@ -44,6 +52,7 @@ private:
     std::optional<bool> bios_pad_card_auto_ack_enabled_{};
     std::array<std::optional<bool>, 4> bios_root_counter_auto_ack_enabled_{};
     bool bios_iso9660_removed_{};
+    bool diagnostic_bios_frontier_pending_{};
 };
 
 } // namespace jojo
