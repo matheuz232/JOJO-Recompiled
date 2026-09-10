@@ -68,14 +68,16 @@ static void test_runtime_seeds_post_bios_cdrom_state() {
     CHECK(runtime.bus().cdrom().interrupt_enable() == 0x1Fu);
 }
 
-static void test_enabled_cdrom_irq_reaches_r3000a_ip2() {
+static void test_enabled_cdrom_irq_enters_exception_handler_without_terminal_stop() {
     auto runtime = make_runtime(irq_program(0x0004u));
     const auto report = runtime.run({32u});
 
-    CHECK(report.stop_reason == jojo::Ps1BootStopReason::cpu_boundary);
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
     CHECK(report.interrupts_accepted == 1u);
     CHECK(runtime.bus().interrupt_status() == 0x0004u);
     CHECK((runtime.cpu_state().cop0.cause & 0x00000400u) != 0u);
+    CHECK(runtime.cpu_state().cop0.epc == 0x80010030u);
+    CHECK(runtime.cpu_state().pc >= 0x80000080u && runtime.cpu_state().pc < 0x80000100u);
 }
 
 static void test_masked_cdrom_irq_latches_without_preemption() {
@@ -141,7 +143,7 @@ static void test_unsupported_cdrom_command_has_device_stop_reason() {
 
 int main() {
     test_runtime_seeds_post_bios_cdrom_state();
-    test_enabled_cdrom_irq_reaches_r3000a_ip2();
+    test_enabled_cdrom_irq_enters_exception_handler_without_terminal_stop();
     test_masked_cdrom_irq_latches_without_preemption();
     test_supported_cdrom_command_reports_progress();
     test_cdrom_command_count_survives_zero_event_capacity();
