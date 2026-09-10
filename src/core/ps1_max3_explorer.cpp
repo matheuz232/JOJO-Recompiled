@@ -60,6 +60,15 @@ DependencyKey dependency_key(const Ps1Max3Dependency& dependency) noexcept {
     if (dependency.kind == Ps1Max3DependencyKind::bios_frontier) {
         return DependencyKey{dependency.kind, dependency.table, dependency.selector, 0u, false};
     }
+    if (dependency.kind == Ps1Max3DependencyKind::terminal_mmio) {
+        return DependencyKey{
+            dependency.kind,
+            dependency.address,
+            dependency.value,
+            dependency.width,
+            dependency.write,
+        };
+    }
     return DependencyKey{
         dependency.kind,
         dependency.address,
@@ -175,6 +184,20 @@ private:
                                mmio.address,
                                mmio.width,
                                mmio.write,
+                           });
+        }
+
+        if (segment.unsupported_access) {
+            const auto& access = *segment.unsupported_access;
+            add_dependency(report_, global_dependencies_, path_dependencies,
+                           Ps1Max3Dependency{
+                               Ps1Max3DependencyKind::terminal_mmio,
+                               0u,
+                               0u,
+                               access.physical_address,
+                               access.width,
+                               access.write,
+                               access.value,
                            });
         }
 
