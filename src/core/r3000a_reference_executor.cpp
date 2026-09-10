@@ -58,6 +58,27 @@ std::uint32_t normalize_gte_control_write(std::uint8_t rd, std::uint32_t value) 
     }
 }
 
+std::uint32_t read_gte_control(const R3000aState& state, std::uint8_t rd) noexcept {
+    const auto value = state.cop2_gte.control[rd];
+    switch (rd) {
+        case 4u:
+        case 12u:
+        case 20u:
+        case 26u:
+        case 27u:
+        case 29u:
+        case 30u:
+            return sign_extend_low16(value);
+        case 31u: {
+            auto flags = value & kGteFlagWritableMask;
+            if ((flags & kGteFlagSummarySourceMask) != 0u) flags |= 0x80000000u;
+            return flags;
+        }
+        default:
+            return value;
+    }
+}
+
 std::int32_t signed_view(std::uint32_t value) noexcept {
     return std::bit_cast<std::int32_t>(value);
 }
@@ -553,8 +574,15 @@ R3000aStepResult step_r3000a(R3000aState& state, R3000aBus& bus) noexcept {
             }
             state.cop2_gte.control[instruction.rd] = normalize_gte_control_write(instruction.rd, rt);
             break;
-        case MipsOp::mfc2:
         case MipsOp::cfc2:
+            if ((state.cop0.status & kStatusCu2) == 0u) {
+                return enter_exception(state, R3000aExceptionCode::coprocessor_unusable,
+                                       R3000aStage::cop2, instruction_pc, current_delay,
+                                       instruction.raw, std::nullopt, 2u);
+            }
+            queue_load(instruction.rt, read_gte_control(state, instruction.rd));
+            break;
+        case MipsOp::mfc2:
         case MipsOp::mtc2:
         case MipsOp::cop2_command:
             if ((state.cop0.status & kStatusCu2) == 0u) {
