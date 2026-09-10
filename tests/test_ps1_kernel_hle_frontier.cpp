@@ -136,10 +136,54 @@ static void test_b0_0c_enableevent_matches_observed_handle_and_is_idempotent() {
     CHECK(bios.diagnostic_state_hash() == before_invalid);
 }
 
+static void test_b0_0b_testevent_returns_zero_for_observed_busy_event() {
+    jojo::Ps1HleBios bios;
+    jojo::R3000aState cpu{};
+    std::uint32_t handle = 0u;
+
+    for (std::uint32_t i = 0u; i < 7u; ++i) {
+        cpu.pc = 0x000000B0u;
+        cpu.next_pc = 0x000000B4u;
+        cpu.gpr[4] = 0xF4000001u;
+        cpu.gpr[5] = 0x00008000u;
+        cpu.gpr[6] = 0x00001000u;
+        cpu.gpr[7] = 0x80047AE4u + i * 4u;
+        cpu.gpr[31] = 0x80047BF4u;
+        CHECK(bios.dispatch(call(jojo::Ps1HleBiosDomain::b0, 0x08u, cpu), cpu).disposition ==
+              jojo::Ps1HleBiosDisposition::handled);
+        handle = cpu.gpr[2];
+    }
+    CHECK(handle == 0xF100000Bu);
+
+    cpu.pc = 0x000000B0u;
+    cpu.next_pc = 0x000000B4u;
+    cpu.gpr[4] = handle;
+    cpu.gpr[31] = 0x80047D40u;
+    CHECK(bios.dispatch(call(jojo::Ps1HleBiosDomain::b0, 0x0Cu, cpu), cpu).disposition ==
+          jojo::Ps1HleBiosDisposition::handled);
+    CHECK(cpu.gpr[2] == 1u);
+
+    const auto before_test = bios.diagnostic_state_hash();
+    cpu.pc = 0x000000B0u;
+    cpu.next_pc = 0x000000B4u;
+    cpu.gpr[2] = 0xDEADBEEFu;
+    cpu.gpr[4] = handle;
+    cpu.gpr[5] = 0x00002000u;
+    cpu.gpr[6] = 0x00001000u;
+    cpu.gpr[7] = 0x80047B5Cu;
+    cpu.gpr[31] = 0x80047EC8u;
+    CHECK(bios.dispatch(call(jojo::Ps1HleBiosDomain::b0, 0x0Bu, cpu), cpu).disposition ==
+          jojo::Ps1HleBiosDisposition::handled);
+    CHECK(cpu.gpr[2] == 0u);
+    CHECK(cpu.pc == 0x80047EC8u);
+    CHECK(bios.diagnostic_state_hash() == before_test);
+}
+
 int main() {
     test_a0_44_flushcache_is_void_for_reference_interpreter();
     test_b0_18_resetentryint_materializes_default_jmpbuf();
     test_b0_56_getc0table_seeds_once_and_preserves_guest_patch();
     test_b0_0c_enableevent_matches_observed_handle_and_is_idempotent();
+    test_b0_0b_testevent_returns_zero_for_observed_busy_event();
     return failures ? 1 : 0;
 }
