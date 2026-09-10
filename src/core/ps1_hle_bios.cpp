@@ -256,6 +256,38 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
             }
             break;
         case Ps1HleBiosDomain::c0:
+            if (call.selector == 0x02u) { // SysEnqIntRP(priority,struc)
+                if (!bus || call.a0 >= interrupt_priority_heads_.size()) {
+                    return {Ps1HleBiosDisposition::unsupported};
+                }
+                auto& head = interrupt_priority_heads_[static_cast<std::size_t>(call.a0)];
+                if (!write32_ok(*bus, call.a1, head.value_or(0u))) {
+                    return {Ps1HleBiosDisposition::terminal};
+                }
+                head = call.a1;
+                return_zero_from_bios_vector(cpu);
+                return {Ps1HleBiosDisposition::handled};
+            }
+            if (call.selector == 0x03u) { // SysDeqIntRP(priority,struc)
+                if (call.a0 >= interrupt_priority_heads_.size()) {
+                    return {Ps1HleBiosDisposition::unsupported};
+                }
+                auto& head = interrupt_priority_heads_[static_cast<std::size_t>(call.a0)];
+                if (head && *head != call.a1) {
+                    return {Ps1HleBiosDisposition::unsupported};
+                }
+                if (head) {
+                    if (!bus) return {Ps1HleBiosDisposition::unsupported};
+                    const auto next = bus->read32(*head);
+                    if (next.status != R3000aBusStatus::ok) {
+                        return {Ps1HleBiosDisposition::terminal};
+                    }
+                    if (next.value == 0u) head.reset();
+                    else head = next.value;
+                }
+                return_zero_from_bios_vector(cpu);
+                return {Ps1HleBiosDisposition::handled};
+            }
             if (call.selector == 0x0Au && call.a0 < root_counter_auto_ack_enabled_.size()) {
                 const auto index = static_cast<std::size_t>(call.a0);
                 const bool previous = root_counter_auto_ack_enabled_[index].value_or(false);
@@ -303,6 +335,7 @@ std::uint64_t Ps1HleBios::diagnostic_state_hash() const noexcept {
     hash_optional_u32(hash, interrupt_hook_address_);
     hash_optional_bool(hash, pad_card_auto_ack_enabled_);
     for (const auto& state : root_counter_auto_ack_enabled_) hash_optional_bool(hash, state);
+    for (const auto& head : interrupt_priority_heads_) hash_optional_u32(hash, head);
     hash_optional_bool(hash, memory_card_pad_enabled_);
     hash_bool(hash, memory_card_started_);
     hash_bool(hash, backup_unit_initialized_);
