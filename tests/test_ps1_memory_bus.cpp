@@ -127,5 +127,51 @@ int main() {
     CHECK(bus.read8(0xA0200000u).status == jojo::R3000aBusStatus::unsupported);
     CHECK(bus.read32(0xC0000000u).status == jojo::R3000aBusStatus::unsupported);
 
+    {
+        jojo::Ps1MemoryBus cd_bus;
+        cd_bus.cdrom().seed_post_bios(0x02u, 0x1Fu);
+        cd_bus.set_diagnostic_mmio_probe_enabled(true);
+
+        cd_bus.clear_last_diagnostic_mmio_probe();
+        CHECK(cd_bus.write8(0x1F801800u, 0x01u).status == jojo::R3000aBusStatus::ok);
+        CHECK(!cd_bus.last_diagnostic_mmio_probe());
+        const auto hintsts = cd_bus.read8(0x1F801803u);
+        CHECK(hintsts.status == jojo::R3000aBusStatus::ok);
+        CHECK(hintsts.value == 0xE0u);
+        CHECK(!cd_bus.last_diagnostic_mmio_probe());
+
+        CHECK(cd_bus.write8(0x1F801800u, 0x00u).status == jojo::R3000aBusStatus::ok);
+        CHECK(cd_bus.write8(0x1F801803u, 0x00u).status == jojo::R3000aBusStatus::ok);
+        CHECK(cd_bus.write8(0x1F801800u, 0x00u).status == jojo::R3000aBusStatus::ok);
+        CHECK(cd_bus.write8(0x1F801801u, 0x01u).status == jojo::R3000aBusStatus::ok);
+        CHECK(cd_bus.interrupt_status() == 0x0004u);
+        CHECK(!cd_bus.last_diagnostic_mmio_probe());
+
+        const auto istat16 = cd_bus.read16(0x1F801070u);
+        CHECK(istat16.status == jojo::R3000aBusStatus::ok);
+        CHECK(istat16.value == 0x0004u);
+        CHECK(cd_bus.read32(0x1F801070u).status == jojo::R3000aBusStatus::unsupported);
+
+        CHECK(cd_bus.write16(0x1F801070u, 0x0000u).status == jojo::R3000aBusStatus::ok);
+        CHECK(cd_bus.interrupt_status() == 0u);
+
+        cd_bus.clear_last_unsupported_cdrom_command();
+        CHECK(cd_bus.write8(0x1F801801u, 0x02u).status == jojo::R3000aBusStatus::unsupported);
+        CHECK(cd_bus.last_unsupported_cdrom_command().has_value());
+        CHECK(cd_bus.read16(0x1F801800u).status == jojo::R3000aBusStatus::unsupported);
+        CHECK(cd_bus.read32(0x1F801800u).status == jojo::R3000aBusStatus::unsupported);
+    }
+
+    {
+        jojo::Ps1MemoryBus left;
+        jojo::Ps1MemoryBus right;
+        for (auto* candidate : {&left, &right}) {
+            candidate->cdrom().seed_post_bios(0x02u, 0x1Fu);
+            CHECK(candidate->write8(0x1F801800u, 0x00u).status == jojo::R3000aBusStatus::ok);
+            CHECK(candidate->write8(0x1F801801u, 0x01u).status == jojo::R3000aBusStatus::ok);
+        }
+        CHECK(left.diagnostic_state_hash() == right.diagnostic_state_hash());
+    }
+
     return failures ? 1 : 0;
 }
