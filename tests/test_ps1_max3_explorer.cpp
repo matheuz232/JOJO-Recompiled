@@ -1,5 +1,6 @@
 #include "core/ps1_boot_report_io.h"
 #include "core/ps1_max3_explorer.h"
+#include "core/ps1_memory_bus.h"
 #include "core/ps1_exe.h"
 #include "mips_test_encode.h"
 #include "ps1_fixture.h"
@@ -239,11 +240,84 @@ static void test_terminal_gpu_mmio_is_recorded_as_dependency_with_value() {
     CHECK(text.find("dependency_0_value=0xff000000") != std::string::npos);
 }
 
+static std::vector<std::uint32_t> observed_cdrom_sequence_program() {
+    return {
+        test_mips::i(0x0Fu, 0u, 8u, 0x1F80u),
+        test_mips::i(0x0Du, 8u, 8u, 0x1800u),
+        test_mips::i(0x09u, 0u, 9u, 0x0001u),
+        test_mips::i(0x28u, 8u, 9u, 0x0000u),
+        test_mips::i(0x24u, 8u, 10u, 0x0003u),
+        test_mips::i(0x09u, 0u, 11u, 0x0000u),
+        test_mips::i(0x28u, 8u, 11u, 0x0000u),
+        test_mips::i(0x28u, 8u, 11u, 0x0003u),
+        test_mips::i(0x28u, 8u, 11u, 0x0000u),
+        test_mips::i(0x28u, 8u, 9u, 0x0001u),
+        test_mips::j(0x02u, 0x80010028u >> 2),
+        0x00000000u,
+    };
+}
+
+static void apply_observed_cdrom_sequence(jojo::Ps1MemoryBus& bus) {
+    bus.cdrom().seed_post_bios(0x02u, 0x1Fu);
+    CHECK(bus.write8(0x1F801800u, 0x01u).status == jojo::R3000aBusStatus::ok);
+    const auto hintsts = bus.read8(0x1F801803u);
+    CHECK(hintsts.status == jojo::R3000aBusStatus::ok);
+    CHECK(hintsts.value == 0xE0u);
+    CHECK(bus.write8(0x1F801800u, 0x00u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.write8(0x1F801803u, 0x00u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.write8(0x1F801800u, 0x00u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.write8(0x1F801801u, 0x01u).status == jojo::R3000aBusStatus::ok);
+}
+
+static void test_observed_cdrom_sequence_is_real_max3_progress() {
+    const auto executable = make_executable(observed_cdrom_sequence_program());
+    auto options = fast_options();
+    options.max_branch_depth = 0u;
+    options.max_nodes = 4u;
+
+    const auto explored = jojo::explore_ps1_max3(executable, options);
+    CHECK(explored);
+    if (!explored) return;
+
+    const auto& report = explored.value;
+    CHECK(report.nodes.size() == 1u);
+    if (!report.nodes.empty()) {
+        CHECK(report.nodes[0].path_cdrom_command_count == 1u);
+    }
+    CHECK(report.best_report.cdrom_command_count == 1u);
+    CHECK(std::none_of(report.dependencies.begin(), report.dependencies.end(), [](const auto& dependency) {
+        if (dependency.kind != jojo::Ps1Max3DependencyKind::speculative_mmio) return false;
+        return dependency.address == 0x1F801800u ||
+               dependency.address == 0x1F801801u ||
+               dependency.address == 0x1F801803u;
+    }));
+
+    auto no_history_options = options;
+    no_history_options.segment_options.mmio_event_capacity = 0u;
+    const auto no_history = jojo::explore_ps1_max3(executable, no_history_options);
+    CHECK(no_history);
+    if (no_history && !no_history.value.nodes.empty()) {
+        CHECK(no_history.value.best_report.cdrom_command_count == 1u);
+        CHECK(no_history.value.nodes[0].path_cdrom_command_count == 1u);
+    }
+
+    jojo::Ps1MemoryBus left;
+    jojo::Ps1MemoryBus right;
+    apply_observed_cdrom_sequence(left);
+    apply_observed_cdrom_sequence(right);
+    CHECK(left.diagnostic_state_hash() == right.diagnostic_state_hash());
+    const auto result = left.read8(0x1F801801u);
+    CHECK(result.status == jojo::R3000aBusStatus::ok);
+    CHECK(result.value == 0x02u);
+    CHECK(left.diagnostic_state_hash() != right.diagnostic_state_hash());
+}
+
 int main() {
     test_one_frontier_branches_four_ways();
     test_converged_frontier_state_is_expanded_once();
     test_hle_state_prevents_false_max3_frontier_deduplication();
     test_bounds_and_progress_ranking_are_deterministic();
     test_terminal_gpu_mmio_is_recorded_as_dependency_with_value();
+    test_observed_cdrom_sequence_is_real_max3_progress();
     return failures ? 1 : 0;
 }
