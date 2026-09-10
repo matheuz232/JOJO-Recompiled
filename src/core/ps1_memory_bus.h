@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/ps1_cdrom_state.h"
 #include "core/ps1_gpu_state.h"
 #include "core/r3000a_bus.h"
 #include "core/result.h"
@@ -40,10 +41,13 @@ public:
     Result<void> load_main_ram(std::uint32_t guest_address,
                                std::span<const std::uint8_t> bytes);
 
+    [[nodiscard]] std::uint16_t interrupt_status() const noexcept;
     [[nodiscard]] std::uint16_t interrupt_mask() const noexcept;
     [[nodiscard]] std::uint32_t dma_interrupt() const noexcept;
     [[nodiscard]] std::uint16_t timer1_counter() const noexcept;
     [[nodiscard]] std::uint16_t timer1_mode() const noexcept;
+    [[nodiscard]] Ps1CdromState& cdrom() noexcept;
+    [[nodiscard]] const Ps1CdromState& cdrom() const noexcept;
     [[nodiscard]] Ps1GpuState& gpu() noexcept;
     [[nodiscard]] const Ps1GpuState& gpu() const noexcept;
     [[nodiscard]] std::uint64_t diagnostic_state_hash() const noexcept;
@@ -55,6 +59,8 @@ public:
 
     const std::optional<Ps1UnsupportedAccess>& last_unsupported_access() const noexcept;
     void clear_last_unsupported_access() noexcept;
+    const std::optional<std::uint8_t>& last_unsupported_cdrom_command() const noexcept;
+    void clear_last_unsupported_cdrom_command() noexcept;
 
 private:
     static constexpr std::size_t diagnostic_mmio_shadow_size = 0x2000u;
@@ -71,11 +77,13 @@ private:
     std::uint32_t dma_interrupt_{};
     std::uint16_t timer1_counter_{};
     std::uint16_t timer1_mode_{};
+    Ps1CdromState cdrom_{};
     Ps1GpuState gpu_{};
     bool diagnostic_mmio_probe_enabled_{};
     std::array<std::uint8_t, diagnostic_mmio_shadow_size> diagnostic_mmio_shadow_{};
     std::optional<Ps1UnsupportedAccess> last_diagnostic_mmio_probe_{};
     std::optional<Ps1UnsupportedAccess> last_unsupported_{};
+    std::optional<std::uint8_t> last_unsupported_cdrom_command_{};
 };
 
 } // namespace jojo
