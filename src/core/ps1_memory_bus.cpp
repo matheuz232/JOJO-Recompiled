@@ -18,6 +18,8 @@ constexpr std::uint32_t kDmaInterruptFlagMask = 0x7F000000u;
 constexpr std::uint32_t kDmaInterruptMasterFlag = 0x80000000u;
 constexpr std::uint32_t kDmaInterruptMasterEnable = 0x00800000u;
 constexpr std::uint32_t kDmaInterruptBusError = 0x00008000u;
+constexpr std::uint64_t kFnvOffset = 14695981039346656037ull;
+constexpr std::uint64_t kFnvPrime = 1099511628211ull;
 
 std::uint8_t* mapped_bytes(std::uint32_t physical,
                            std::size_t width,
@@ -77,6 +79,28 @@ std::uint32_t visible_dma_interrupt(std::uint32_t state) noexcept {
         value |= kDmaInterruptMasterFlag;
     }
     return value;
+}
+
+void hash_byte(std::uint64_t& hash, std::uint8_t value) noexcept {
+    hash ^= value;
+    hash *= kFnvPrime;
+}
+
+void hash_u16(std::uint64_t& hash, std::uint16_t value) noexcept {
+    hash_byte(hash, static_cast<std::uint8_t>(value));
+    hash_byte(hash, static_cast<std::uint8_t>(value >> 8u));
+}
+
+void hash_u32(std::uint64_t& hash, std::uint32_t value) noexcept {
+    for (unsigned shift = 0; shift < 32u; shift += 8u) {
+        hash_byte(hash, static_cast<std::uint8_t>(value >> shift));
+    }
+}
+
+void hash_bytes(std::uint64_t& hash, std::span<const std::uint8_t> bytes) noexcept {
+    for (const auto value : bytes) {
+        hash_byte(hash, value);
+    }
 }
 
 } // namespace
@@ -272,6 +296,21 @@ std::uint16_t Ps1MemoryBus::timer1_counter() const noexcept {
 
 std::uint16_t Ps1MemoryBus::timer1_mode() const noexcept {
     return timer1_mode_;
+}
+
+std::uint64_t Ps1MemoryBus::diagnostic_state_hash() const noexcept {
+    std::uint64_t hash = kFnvOffset;
+    hash_bytes(hash, std::span<const std::uint8_t>{main_ram_.data(), main_ram_.size()});
+    hash_bytes(hash, std::span<const std::uint8_t>{scratchpad_.data(), scratchpad_.size()});
+    hash_u16(hash, interrupt_status_);
+    hash_u16(hash, interrupt_mask_);
+    hash_u32(hash, dma_control_);
+    hash_u32(hash, dma_interrupt_);
+    hash_u16(hash, timer1_counter_);
+    hash_u16(hash, timer1_mode_);
+    hash_bytes(hash, std::span<const std::uint8_t>{
+        diagnostic_mmio_shadow_.data(), diagnostic_mmio_shadow_.size()});
+    return hash;
 }
 
 void Ps1MemoryBus::set_diagnostic_mmio_probe_enabled(bool enabled) noexcept {
