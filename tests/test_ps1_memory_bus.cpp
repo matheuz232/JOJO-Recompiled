@@ -51,7 +51,9 @@ int main() {
     bus.set_diagnostic_mmio_probe_enabled(false);
 
     CHECK(bus.write16(0x1F801070u, 0x0000u).status == jojo::R3000aBusStatus::ok);
-    CHECK(bus.read16(0x1F801070u).status == jojo::R3000aBusStatus::unsupported);
+    const auto istat_cleared = bus.read16(0x1F801070u);
+    CHECK(istat_cleared.status == jojo::R3000aBusStatus::ok);
+    CHECK(istat_cleared.value == 0x0000u);
     CHECK(bus.read32(0x1F801070u).status == jojo::R3000aBusStatus::unsupported);
     CHECK(bus.read32(0x1F801020u).status == jojo::R3000aBusStatus::unsupported);
 
@@ -153,6 +155,8 @@ int main() {
         CHECK(cd_bus.read32(0x1F801070u).status == jojo::R3000aBusStatus::unsupported);
 
         CHECK(cd_bus.write16(0x1F801070u, 0x0000u).status == jojo::R3000aBusStatus::ok);
+        CHECK(cd_bus.interrupt_status() == 0u);
+        CHECK(cd_bus.write8(0x1F801800u, 0x00u).status == jojo::R3000aBusStatus::ok);
         CHECK(cd_bus.interrupt_status() == 0u);
 
         cd_bus.clear_last_unsupported_cdrom_command();
