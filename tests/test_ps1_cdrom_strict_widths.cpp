@@ -22,6 +22,13 @@ int main() {
         CHECK(bus.write32(address, 0x12345678u).status == jojo::R3000aBusStatus::unsupported);
     }
 
+    bus.clear_last_diagnostic_mmio_probe();
+    CHECK(bus.read8(0x1F801802u).status == jojo::R3000aBusStatus::unsupported);
+    CHECK(!bus.last_diagnostic_mmio_probe().has_value());
+    bus.clear_last_diagnostic_mmio_probe();
+    CHECK(bus.write8(0x1F801802u, 0x12u).status == jojo::R3000aBusStatus::unsupported);
+    CHECK(!bus.last_diagnostic_mmio_probe().has_value());
+
     CHECK(bus.read32(0x1F801070u).status == jojo::R3000aBusStatus::unsupported);
     return failures ? 1 : 0;
 }
