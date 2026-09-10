@@ -43,6 +43,21 @@ static void test_hsts_reflects_index_and_result_fifo() {
     CHECK(hsts.value == 0x18u);
 }
 
+static void test_result_fifo_is_readable_in_bank1() {
+    jojo::Ps1CdromState cdrom;
+    cdrom.seed_post_bios(0x02u, 0x1Fu);
+
+    CHECK(cdrom.write8(0x1F801800u, 0x00u).status == jojo::Ps1CdromIoStatus::ok);
+    CHECK(cdrom.write8(0x1F801801u, 0x01u).status == jojo::Ps1CdromIoStatus::ok);
+    CHECK(cdrom.write8(0x1F801800u, 0x01u).status == jojo::Ps1CdromIoStatus::ok);
+    CHECK(cdrom.read8(0x1F801800u).value == 0x39u);
+
+    const auto result = cdrom.read8(0x1F801801u);
+    CHECK(result.status == jojo::Ps1CdromIoStatus::ok);
+    CHECK(result.value == 0x02u);
+    CHECK(cdrom.read8(0x1F801800u).value == 0x19u);
+}
+
 int main() {
     jojo::Ps1CdromState first;
     CHECK(first.index() == 0u);
@@ -93,5 +108,6 @@ int main() {
     CHECK(bank1.write8(0x1F801803u, 0x00u).status == jojo::Ps1CdromIoStatus::unsupported_register);
 
     test_hsts_reflects_index_and_result_fifo();
+    test_result_fifo_is_readable_in_bank1();
     return failures ? 1 : 0;
 }
