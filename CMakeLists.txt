@@ -72,7 +72,7 @@ if(WIN32)
 
   add_executable(jojo_win32_input_tests tests/test_win32_input.cpp)
   target_compile_definitions(jojo_win32_input_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
-  target_link_libraries(jojo_win32_input_tests PRIVATE jojo_win32_input_host)
+  target_link_libraries(jojo_win32_input_tests PRIVATE jojo_win32_input_host setupapi hid user32)
   add_test(NAME jojo_win32_input_tests COMMAND jojo_win32_input_tests)
 endif()
 
@@ -96,6 +96,7 @@ add_jojo_test(jojo_ps1_executable_loader_tests tests/test_ps1_executable_loader.
 add_jojo_test(jojo_ps1_boot_runtime_tests tests/test_ps1_boot_runtime.cpp)
 add_jojo_test(jojo_ps1_changeclearrcnt_tests tests/test_ps1_changeclearrcnt.cpp)
 add_jojo_test(jojo_ps1_96_remove_tests tests/test_ps1_96_remove.cpp)
+add_jojo_test(jojo_ps1_diagnostic_frontier_tests tests/test_ps1_diagnostic_frontier.cpp)
 add_jojo_test(jojo_ps1_boot_report_io_tests tests/test_ps1_boot_report_io.cpp)
 add_jojo_test(jojo_ps1_local_evidence_tests tests/test_ps1_local_evidence.cpp)
 add_jojo_test(jojo_mips_decoder_tests tests/test_mips_decoder.cpp)
