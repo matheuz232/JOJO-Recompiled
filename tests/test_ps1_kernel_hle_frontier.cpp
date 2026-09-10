@@ -179,11 +179,64 @@ static void test_b0_0b_testevent_returns_zero_for_observed_busy_event() {
     CHECK(bios.diagnostic_state_hash() == before_test);
 }
 
+static void test_c0_02_03_interrupt_priority_chain_frontiers() {
+    jojo::Ps1HleBios bios;
+    jojo::Ps1MemoryBus bus;
+    jojo::R3000aState cpu{};
+
+    const auto initial_hash = bios.diagnostic_state_hash();
+    cpu.pc = 0x000000C0u;
+    cpu.next_pc = 0x000000C4u;
+    cpu.gpr[2] = 0xDEADBEEFu;
+    cpu.gpr[4] = 0u;
+    cpu.gpr[5] = 0x80001000u;
+    cpu.gpr[31] = 0x80014000u;
+    CHECK(bios.dispatch(call(jojo::Ps1HleBiosDomain::c0, 0x03u, cpu), cpu, bus).disposition ==
+          jojo::Ps1HleBiosDisposition::handled);
+    CHECK(cpu.gpr[2] == 0u);
+    CHECK(cpu.pc == 0x80014000u);
+    CHECK(bios.diagnostic_state_hash() == initial_hash);
+
+    cpu.pc = 0x000000C0u;
+    cpu.next_pc = 0x000000C4u;
+    cpu.gpr[2] = 0xDEADBEEFu;
+    cpu.gpr[4] = 0u;
+    cpu.gpr[5] = 0x80001000u;
+    cpu.gpr[31] = 0x80014020u;
+    CHECK(bios.dispatch(call(jojo::Ps1HleBiosDomain::c0, 0x02u, cpu), cpu, bus).disposition ==
+          jojo::Ps1HleBiosDisposition::handled);
+    CHECK(cpu.gpr[2] == 0u);
+    CHECK(cpu.pc == 0x80014020u);
+    CHECK(bus.read32(0x80001000u).value == 0u);
+    const auto after_enqueue = bios.diagnostic_state_hash();
+    CHECK(after_enqueue != initial_hash);
+
+    cpu.pc = 0x000000C0u;
+    cpu.next_pc = 0x000000C4u;
+    cpu.gpr[2] = 0xDEADBEEFu;
+    cpu.gpr[4] = 0u;
+    cpu.gpr[5] = 0x80001000u;
+    cpu.gpr[31] = 0x80014040u;
+    CHECK(bios.dispatch(call(jojo::Ps1HleBiosDomain::c0, 0x03u, cpu), cpu, bus).disposition ==
+          jojo::Ps1HleBiosDisposition::handled);
+    CHECK(cpu.gpr[2] == 0u);
+    CHECK(cpu.pc == 0x80014040u);
+    CHECK(bios.diagnostic_state_hash() == initial_hash);
+
+    cpu.pc = 0x000000C0u;
+    cpu.next_pc = 0x000000C4u;
+    cpu.gpr[4] = 4u;
+    cpu.gpr[5] = 0x80001000u;
+    CHECK(bios.dispatch(call(jojo::Ps1HleBiosDomain::c0, 0x02u, cpu), cpu, bus).disposition ==
+          jojo::Ps1HleBiosDisposition::unsupported);
+}
+
 int main() {
     test_a0_44_flushcache_is_void_for_reference_interpreter();
     test_b0_18_resetentryint_materializes_default_jmpbuf();
     test_b0_56_getc0table_seeds_once_and_preserves_guest_patch();
     test_b0_0c_enableevent_matches_observed_handle_and_is_idempotent();
     test_b0_0b_testevent_returns_zero_for_observed_busy_event();
+    test_c0_02_03_interrupt_priority_chain_frontiers();
     return failures ? 1 : 0;
 }
