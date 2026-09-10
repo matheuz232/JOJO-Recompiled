@@ -96,7 +96,7 @@ PathMetrics accumulate_metrics(const PathMetrics& prior,
     result.vram_write_count += segment.vram_write_count;
     result.gpu_gp0_command_count += segment.gpu_gp0_command_count;
     result.gpu_gp1_command_count += segment.gpu_gp1_command_count;
-    result.cdrom_command_count += static_cast<std::uint64_t>(segment.recent_cdrom_commands.size());
+    result.cdrom_command_count += segment.cdrom_command_count;
     result.dma_transfer_count += segment.dma_transfer_count;
     return result;
 }
