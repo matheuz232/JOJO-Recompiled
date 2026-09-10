@@ -10,14 +10,16 @@ namespace {
 
 constexpr std::uint32_t kBiosA0 = 0x000000A0u;
 constexpr std::uint32_t kBiosB0 = 0x000000B0u;
+constexpr std::uint32_t kBiosC0 = 0x000000C0u;
 constexpr std::uint32_t kBiosA0InitHeap = 0x00000039u;
 constexpr std::uint32_t kBiosB0HookEntryInt = 0x00000019u;
 constexpr std::uint32_t kBiosB0ChangeClearPad = 0x0000005Bu;
+constexpr std::uint32_t kBiosC0ChangeClearRCnt = 0x0000000Au;
 
 bool is_bios_table(std::uint32_t physical) noexcept {
-    return physical == 0x000000A0u ||
-           physical == 0x000000B0u ||
-           physical == 0x000000C0u;
+    return physical == kBiosA0 ||
+           physical == kBiosB0 ||
+           physical == kBiosC0;
 }
 
 bool is_initial_mmio_window(std::uint32_t physical) noexcept {
@@ -33,6 +35,16 @@ void record_recent_trace(Ps1BootReport& report,
         report.recent_trace.pop_front();
     }
     report.recent_trace.push_back(Ps1TraceSample{pc, opcode});
+}
+
+void record_recent_bios(Ps1BootReport& report,
+                        const Ps1BiosCallSummary& event,
+                        std::size_t capacity) {
+    if (capacity == 0u) return;
+    if (report.recent_bios_calls.size() == capacity) {
+        report.recent_bios_calls.erase(report.recent_bios_calls.begin());
+    }
+    report.recent_bios_calls.push_back(event);
 }
 
 void record_recent_mmio(Ps1BootReport& report,
@@ -52,12 +64,14 @@ void return_from_bios_call(R3000aState& cpu) noexcept {
     cpu.gpr[0] = 0u;
 }
 
-bool handle_bios_call(R3000aState& cpu,
-                      std::optional<Ps1BiosHeapState>& heap_state,
-                      std::optional<std::uint32_t>& interrupt_hook_address,
-                      std::optional<bool>& pad_card_auto_ack_enabled,
-                      std::uint32_t table_physical,
-                      std::uint32_t selector) noexcept {
+bool handle_bios_call(
+    R3000aState& cpu,
+    std::optional<Ps1BiosHeapState>& heap_state,
+    std::optional<std::uint32_t>& interrupt_hook_address,
+    std::optional<bool>& pad_card_auto_ack_enabled,
+    std::array<std::optional<bool>, 4>& root_counter_auto_ack_enabled,
+    std::uint32_t table_physical,
+    std::uint32_t selector) noexcept {
     if (table_physical == kBiosA0 && selector == kBiosA0InitHeap) {
         heap_state = Ps1BiosHeapState{cpu.gpr[4], cpu.gpr[5]};
         return_from_bios_call(cpu);
@@ -72,6 +86,16 @@ bool handle_bios_call(R3000aState& cpu,
 
     if (table_physical == kBiosB0 && selector == kBiosB0ChangeClearPad) {
         pad_card_auto_ack_enabled = cpu.gpr[4] != 0u;
+        return_from_bios_call(cpu);
+        return true;
+    }
+
+    if (table_physical == kBiosC0 && selector == kBiosC0ChangeClearRCnt &&
+        cpu.gpr[4] < root_counter_auto_ack_enabled.size()) {
+        const auto index = static_cast<std::size_t>(cpu.gpr[4]);
+        const bool previous = root_counter_auto_ack_enabled[index].value_or(false);
+        root_counter_auto_ack_enabled[index] = cpu.gpr[5] != 0u;
+        cpu.gpr[2] = previous ? 1u : 0u;
         return_from_bios_call(cpu);
         return true;
     }
@@ -103,7 +127,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
         const auto physical_pc = Ps1MemoryBus::guest_to_physical(cpu_.pc);
         if (physical_pc && is_bios_table(*physical_pc)) {
             ++report.bios_call_count;
-            report.recent_bios_calls.push_back(Ps1BiosCallSummary{
+            record_recent_bios(report, Ps1BiosCallSummary{
                 cpu_.pc,
                 *physical_pc,
                 cpu_.gpr[9],
@@ -112,9 +136,11 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
                 cpu_.gpr[6],
                 cpu_.gpr[7],
                 cpu_.gpr[31],
-            });
+            }, options.bios_event_capacity);
             if (handle_bios_call(cpu_, bios_heap_state_, bios_interrupt_hook_address_,
-                                 bios_pad_card_auto_ack_enabled_, *physical_pc, cpu_.gpr[9])) {
+                                 bios_pad_card_auto_ack_enabled_,
+                                 bios_root_counter_auto_ack_enabled_,
+                                 *physical_pc, cpu_.gpr[9])) {
                 continue;
             }
             report.stop_reason = Ps1BootStopReason::bios_call_unimplemented;
@@ -197,6 +223,14 @@ Ps1BootRuntime::bios_interrupt_hook_address() const noexcept {
 const std::optional<bool>&
 Ps1BootRuntime::bios_pad_card_auto_ack_enabled() const noexcept {
     return bios_pad_card_auto_ack_enabled_;
+}
+
+std::optional<bool> Ps1BootRuntime::bios_root_counter_auto_ack_enabled(
+    std::uint32_t counter) const noexcept {
+    if (counter >= bios_root_counter_auto_ack_enabled_.size()) {
+        return std::nullopt;
+    }
+    return bios_root_counter_auto_ack_enabled_[static_cast<std::size_t>(counter)];
 }
 
 Ps1MemoryBus& Ps1BootRuntime::bus() noexcept {
