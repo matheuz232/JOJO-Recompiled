@@ -32,6 +32,7 @@ public:
     [[nodiscard]] const std::optional<bool>& bios_pad_card_auto_ack_enabled() const noexcept;
     [[nodiscard]] std::optional<bool> bios_root_counter_auto_ack_enabled(
         std::uint32_t counter) const noexcept;
+    [[nodiscard]] bool bios_iso9660_removed() const noexcept;
     [[nodiscard]] Ps1MemoryBus& bus() noexcept;
     [[nodiscard]] const Ps1MemoryBus& bus() const noexcept;
 
@@ -42,6 +43,7 @@ private:
     std::optional<std::uint32_t> bios_interrupt_hook_address_{};
     std::optional<bool> bios_pad_card_auto_ack_enabled_{};
     std::array<std::optional<bool>, 4> bios_root_counter_auto_ack_enabled_{};
+    bool bios_iso9660_removed_{};
 };
 
 } // namespace jojo
