@@ -12,9 +12,6 @@ namespace {
 constexpr std::uint32_t kBiosA0 = 0x000000A0u;
 constexpr std::uint32_t kBiosB0 = 0x000000B0u;
 constexpr std::uint32_t kBiosC0 = 0x000000C0u;
-constexpr std::uint32_t kBiosB0HookEntryInt = 0x00000019u;
-constexpr std::uint32_t kBiosB0ChangeClearPad = 0x0000005Bu;
-constexpr std::uint32_t kBiosC0ChangeClearRCnt = 0x0000000Au;
 constexpr std::uint32_t kSyscallEncodingMask = 0xFC00003Fu;
 constexpr std::uint32_t kSyscallEncoding = 0x0000000Cu;
 constexpr std::uint32_t kInterruptEnableCurrent = 1u << 0;
@@ -62,49 +59,27 @@ void hash_bool(std::uint64_t& hash, bool value) noexcept {
 }
 
 void hash_u32(std::uint64_t& hash, std::uint32_t value) noexcept {
-    for (unsigned shift = 0; shift < 32u; shift += 8u) {
-        hash_byte(hash, static_cast<std::uint8_t>(value >> shift));
-    }
+    for (unsigned shift = 0; shift < 32u; shift += 8u) hash_byte(hash, static_cast<std::uint8_t>(value >> shift));
 }
 
 void hash_u64(std::uint64_t& hash, std::uint64_t value) noexcept {
-    for (unsigned shift = 0; shift < 64u; shift += 8u) {
-        hash_byte(hash, static_cast<std::uint8_t>(value >> shift));
-    }
+    for (unsigned shift = 0; shift < 64u; shift += 8u) hash_byte(hash, static_cast<std::uint8_t>(value >> shift));
 }
 
-void hash_optional_u32(std::uint64_t& hash,
-                       const std::optional<std::uint32_t>& value) noexcept {
-    hash_bool(hash, value.has_value());
-    if (value) hash_u32(hash, *value);
-}
-
-void hash_optional_bool(std::uint64_t& hash,
-                        const std::optional<bool>& value) noexcept {
-    hash_bool(hash, value.has_value());
-    if (value) hash_bool(hash, *value);
-}
-
-void record_recent_trace(Ps1BootReport& report,
-                         std::uint32_t pc,
-                         const std::optional<std::uint32_t>& opcode,
-                         std::size_t capacity) {
+void record_recent_trace(Ps1BootReport& report, std::uint32_t pc,
+                         const std::optional<std::uint32_t>& opcode, std::size_t capacity) {
     if (capacity == 0u) return;
     if (report.recent_trace.size() == capacity) report.recent_trace.pop_front();
     report.recent_trace.push_back(Ps1TraceSample{pc, opcode});
 }
 
-void record_recent_bios(Ps1BootReport& report,
-                        const Ps1BiosCallSummary& event,
-                        std::size_t capacity) {
+void record_recent_bios(Ps1BootReport& report, const Ps1BiosCallSummary& event, std::size_t capacity) {
     if (capacity == 0u) return;
     if (report.recent_bios_calls.size() == capacity) report.recent_bios_calls.erase(report.recent_bios_calls.begin());
     report.recent_bios_calls.push_back(event);
 }
 
-void record_recent_mmio(Ps1BootReport& report,
-                        const Ps1MmioSummary& event,
-                        std::size_t capacity) {
+void record_recent_mmio(Ps1BootReport& report, const Ps1MmioSummary& event, std::size_t capacity) {
     if (capacity == 0u) return;
     if (report.recent_mmio.size() == capacity) report.recent_mmio.erase(report.recent_mmio.begin());
     report.recent_mmio.push_back(event);
@@ -164,35 +139,6 @@ bool handle_syscall_hle(R3000aState& cpu, std::uint32_t opcode) noexcept {
     return true;
 }
 
-bool handle_legacy_b0_c0_call(
-    R3000aState& cpu,
-    std::optional<std::uint32_t>& interrupt_hook_address,
-    std::optional<bool>& pad_card_auto_ack_enabled,
-    std::array<std::optional<bool>, 4>& root_counter_auto_ack_enabled,
-    std::uint32_t table_physical,
-    std::uint32_t selector) noexcept {
-    if (table_physical == kBiosB0 && selector == kBiosB0HookEntryInt) {
-        interrupt_hook_address = cpu.gpr[4];
-        return_from_bios_call(cpu);
-        return true;
-    }
-    if (table_physical == kBiosB0 && selector == kBiosB0ChangeClearPad) {
-        pad_card_auto_ack_enabled = cpu.gpr[4] != 0u;
-        return_from_bios_call(cpu);
-        return true;
-    }
-    if (table_physical == kBiosC0 && selector == kBiosC0ChangeClearRCnt &&
-        cpu.gpr[4] < root_counter_auto_ack_enabled.size()) {
-        const auto index = static_cast<std::size_t>(cpu.gpr[4]);
-        const bool previous = root_counter_auto_ack_enabled[index].value_or(false);
-        root_counter_auto_ack_enabled[index] = cpu.gpr[5] != 0u;
-        cpu.gpr[2] = previous ? 1u : 0u;
-        return_from_bios_call(cpu);
-        return true;
-    }
-    return false;
-}
-
 } // namespace
 
 Result<Ps1BootRuntime> Ps1BootRuntime::create(const Ps1Executable& executable) {
@@ -235,13 +181,6 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
                 diagnostic_bios_frontier_pending_ = false;
                 continue;
             }
-            if (handle_legacy_b0_c0_call(cpu_, bios_interrupt_hook_address_,
-                                         bios_pad_card_auto_ack_enabled_,
-                                         bios_root_counter_auto_ack_enabled_,
-                                         *physical_pc, cpu_.gpr[9])) {
-                diagnostic_bios_frontier_pending_ = false;
-                continue;
-            }
             diagnostic_bios_frontier_pending_ = true;
             report.stop_reason = Ps1BootStopReason::bios_call_unimplemented;
             return report;
@@ -258,8 +197,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
         if (report.last_opcode && handle_syscall_hle(cpu_, *report.last_opcode)) {
             ++report.instructions_retired;
             ++instructions_since_progress;
-            if (options.stagnation_instruction_limit != 0u &&
-                instructions_since_progress >= options.stagnation_instruction_limit) {
+            if (options.stagnation_instruction_limit != 0u && instructions_since_progress >= options.stagnation_instruction_limit) {
                 report.stop_reason = Ps1BootStopReason::diagnostic_stall;
                 return report;
             }
@@ -277,8 +215,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
                 }, options.mmio_event_capacity);
                 if (observed_mmio_dependencies.insert(mmio_dependency_key(*probe)).second) instructions_since_progress = 0u;
             }
-            if (options.stagnation_instruction_limit != 0u &&
-                instructions_since_progress >= options.stagnation_instruction_limit) {
+            if (options.stagnation_instruction_limit != 0u && instructions_since_progress >= options.stagnation_instruction_limit) {
                 report.stop_reason = Ps1BootStopReason::diagnostic_stall;
                 return report;
             }
@@ -287,8 +224,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
 
         report.cpu_diagnostic = step.diagnostic;
         report.unsupported_access = bus_.last_unsupported_access();
-        if (step.status == R3000aStepStatus::exception &&
-            step.diagnostic.exception_code == R3000aExceptionCode::interrupt) {
+        if (step.status == R3000aStepStatus::exception && step.diagnostic.exception_code == R3000aExceptionCode::interrupt) {
             ++report.interrupts_accepted;
         }
         if (report.unsupported_access) {
@@ -350,42 +286,17 @@ std::uint64_t Ps1BootRuntime::diagnostic_state_hash() const noexcept {
     hash_u32(hash, cpu_.cop0.cause);
     hash_u32(hash, cpu_.cop0.epc);
     hash_byte(hash, cpu_.external_interrupt_pending);
-
-    const auto& heap = hle_bios_.heap_state();
-    hash_bool(hash, heap.has_value());
-    if (heap) {
-        hash_u32(hash, heap->base);
-        hash_u32(hash, heap->size);
-    }
-    hash_optional_u32(hash, bios_interrupt_hook_address_);
-    hash_optional_bool(hash, bios_pad_card_auto_ack_enabled_);
-    for (const auto& state : bios_root_counter_auto_ack_enabled_) hash_optional_bool(hash, state);
-    hash_bool(hash, hle_bios_.iso9660_removed());
+    hash_u64(hash, hle_bios_.diagnostic_state_hash());
     hash_bool(hash, diagnostic_bios_frontier_pending_);
     return hash;
 }
 
 const R3000aState& Ps1BootRuntime::cpu_state() const noexcept { return cpu_; }
-
-const std::optional<Ps1BiosHeapState>& Ps1BootRuntime::bios_heap_state() const noexcept {
-    return hle_bios_.heap_state();
-}
-
-const std::optional<std::uint32_t>& Ps1BootRuntime::bios_interrupt_hook_address() const noexcept {
-    return bios_interrupt_hook_address_;
-}
-
-const std::optional<bool>& Ps1BootRuntime::bios_pad_card_auto_ack_enabled() const noexcept {
-    return bios_pad_card_auto_ack_enabled_;
-}
-
-std::optional<bool> Ps1BootRuntime::bios_root_counter_auto_ack_enabled(std::uint32_t counter) const noexcept {
-    if (counter >= bios_root_counter_auto_ack_enabled_.size()) return std::nullopt;
-    return bios_root_counter_auto_ack_enabled_[static_cast<std::size_t>(counter)];
-}
-
+const std::optional<Ps1BiosHeapState>& Ps1BootRuntime::bios_heap_state() const noexcept { return hle_bios_.heap_state(); }
+const std::optional<std::uint32_t>& Ps1BootRuntime::bios_interrupt_hook_address() const noexcept { return hle_bios_.interrupt_hook_address(); }
+const std::optional<bool>& Ps1BootRuntime::bios_pad_card_auto_ack_enabled() const noexcept { return hle_bios_.pad_card_auto_ack_enabled(); }
+std::optional<bool> Ps1BootRuntime::bios_root_counter_auto_ack_enabled(std::uint32_t counter) const noexcept { return hle_bios_.root_counter_auto_ack_enabled(counter); }
 bool Ps1BootRuntime::bios_iso9660_removed() const noexcept { return hle_bios_.iso9660_removed(); }
-
 Ps1MemoryBus& Ps1BootRuntime::bus() noexcept { return bus_; }
 const Ps1MemoryBus& Ps1BootRuntime::bus() const noexcept { return bus_; }
 
