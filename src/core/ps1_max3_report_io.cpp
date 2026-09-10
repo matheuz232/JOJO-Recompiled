@@ -29,6 +29,7 @@ const char* dependency_kind_name(Ps1Max3DependencyKind kind) noexcept {
     switch (kind) {
         case Ps1Max3DependencyKind::bios_frontier: return "bios_frontier";
         case Ps1Max3DependencyKind::speculative_mmio: return "speculative_mmio";
+        case Ps1Max3DependencyKind::terminal_mmio: return "terminal_mmio";
     }
     return "unknown";
 }
@@ -119,12 +120,18 @@ std::string format_ps1_max3_report(const Ps1Max3Report& report) {
             out << "dependency_" << i << "_address=none\n";
             out << "dependency_" << i << "_width=none\n";
             out << "dependency_" << i << "_write=none\n";
+            out << "dependency_" << i << "_value=none\n";
         } else {
             out << "dependency_" << i << "_table=none\n";
             out << "dependency_" << i << "_selector=none\n";
             out << "dependency_" << i << "_address=" << hex32_max3(dependency.address) << '\n';
             out << "dependency_" << i << "_width=" << static_cast<unsigned>(dependency.width) << '\n';
             out << "dependency_" << i << "_write=" << (dependency.write ? 1 : 0) << '\n';
+            if (dependency.kind == Ps1Max3DependencyKind::terminal_mmio) {
+                out << "dependency_" << i << "_value=" << hex32_max3(dependency.value) << '\n';
+            } else {
+                out << "dependency_" << i << "_value=none\n";
+            }
         }
     }
 
