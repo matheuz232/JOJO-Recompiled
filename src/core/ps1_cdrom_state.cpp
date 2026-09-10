@@ -66,7 +66,7 @@ Ps1CdromIoResult Ps1CdromState::write8(std::uint32_t physical,
         return {};
     }
     if (physical == kCdromResponseCommand && index_ == 0u) {
-        if (value != 0x01u) {
+        if (value != 0x01u || response_) {
             return {Ps1CdromIoStatus::unsupported_command, 0u};
         }
         response_ = drive_status_;
