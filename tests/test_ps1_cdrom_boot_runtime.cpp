@@ -46,6 +46,19 @@ static std::vector<std::uint32_t> irq_program(std::uint16_t interrupt_mask) {
     };
 }
 
+static std::vector<std::uint32_t> command_program(std::uint16_t command) {
+    return {
+        test_mips::i(0x0Fu, 0u, 8u, 0x1F80u),
+        test_mips::i(0x0Du, 8u, 8u, 0x1800u),
+        test_mips::i(0x09u, 0u, 9u, 0u),
+        test_mips::i(0x28u, 8u, 9u, 0u),
+        test_mips::i(0x09u, 0u, 10u, command),
+        test_mips::i(0x28u, 8u, 10u, 1u),
+        test_mips::j(0x02u, 0x80010018u >> 2),
+        0x00000000u,
+    };
+}
+
 static void test_runtime_seeds_post_bios_cdrom_state() {
     auto runtime = make_runtime({
         test_mips::j(0x02u, 0x80010000u >> 2),
@@ -75,9 +88,63 @@ static void test_masked_cdrom_irq_latches_without_preemption() {
     CHECK((runtime.cpu_state().external_interrupt_pending & 0x04u) == 0u);
 }
 
+static void test_supported_cdrom_command_reports_progress() {
+    auto runtime = make_runtime(command_program(0x01u));
+    jojo::Ps1BootOptions options{};
+    options.instruction_budget = 32u;
+    options.diagnostic_mmio_probe = true;
+    options.mmio_event_capacity = 4u;
+    const auto report = runtime.run(options);
+
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(report.cdrom_command_count == 1u);
+    CHECK(report.recent_cdrom_commands.size() == 1u);
+    if (!report.recent_cdrom_commands.empty()) {
+        const auto& event = report.recent_cdrom_commands.back();
+        CHECK(event.command == 0x01u);
+        CHECK(event.index == 0u);
+        CHECK(event.status == 0x02u);
+    }
+    CHECK(report.speculative_mmio_count == 0u);
+}
+
+static void test_cdrom_command_count_survives_zero_event_capacity() {
+    auto runtime = make_runtime(command_program(0x01u));
+    jojo::Ps1BootOptions options{};
+    options.instruction_budget = 32u;
+    options.diagnostic_mmio_probe = true;
+    options.mmio_event_capacity = 0u;
+    const auto report = runtime.run(options);
+
+    CHECK(report.cdrom_command_count == 1u);
+    CHECK(report.recent_cdrom_commands.empty());
+}
+
+static void test_unsupported_cdrom_command_has_device_stop_reason() {
+    auto runtime = make_runtime(command_program(0x02u));
+    jojo::Ps1BootOptions options{};
+    options.instruction_budget = 32u;
+    options.diagnostic_mmio_probe = true;
+    options.mmio_event_capacity = 4u;
+    const auto report = runtime.run(options);
+
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::device_command_unimplemented);
+    CHECK(report.cdrom_command_count == 0u);
+    CHECK(report.unsupported_access.has_value());
+    if (report.unsupported_access) {
+        CHECK(report.unsupported_access->guest_address == 0x1F801801u);
+        CHECK(report.unsupported_access->width == 1u);
+        CHECK(report.unsupported_access->write);
+        CHECK(report.unsupported_access->value == 0x02u);
+    }
+}
+
 int main() {
     test_runtime_seeds_post_bios_cdrom_state();
     test_enabled_cdrom_irq_reaches_r3000a_ip2();
     test_masked_cdrom_irq_latches_without_preemption();
+    test_supported_cdrom_command_reports_progress();
+    test_cdrom_command_count_survives_zero_event_capacity();
+    test_unsupported_cdrom_command_has_device_stop_reason();
     return failures ? 1 : 0;
 }
