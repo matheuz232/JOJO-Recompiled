@@ -3,6 +3,7 @@
 #include "core/ps1_executable_loader.h"
 #include "core/r3000a_reference_executor.h"
 
+#include <set>
 #include <utility>
 
 namespace jojo {
@@ -26,6 +27,16 @@ bool is_bios_table(std::uint32_t physical) noexcept {
 
 bool is_initial_mmio_window(std::uint32_t physical) noexcept {
     return physical >= 0x1F801000u && physical < 0x1F803000u;
+}
+
+std::uint64_t bios_dependency_key(std::uint32_t table, std::uint32_t selector) noexcept {
+    return (static_cast<std::uint64_t>(table) << 32u) | selector;
+}
+
+std::uint64_t mmio_dependency_key(const Ps1UnsupportedAccess& access) noexcept {
+    return (static_cast<std::uint64_t>(access.physical_address) << 16u) |
+           (static_cast<std::uint64_t>(access.width) << 8u) |
+           static_cast<std::uint64_t>(access.write ? 1u : 0u);
 }
 
 void record_recent_trace(Ps1BootReport& report,
@@ -131,11 +142,19 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
     report.diagnostic_probe_mode = options.diagnostic_mmio_probe;
     bus_.set_diagnostic_mmio_probe_enabled(options.diagnostic_mmio_probe);
 
+    std::uint64_t instructions_since_progress = 0u;
+    std::set<std::uint64_t> observed_bios_dependencies;
+    std::set<std::uint64_t> observed_mmio_dependencies;
+
     while (report.instructions_retired < options.instruction_budget) {
         report.last_pc = cpu_.pc;
 
         const auto physical_pc = Ps1MemoryBus::guest_to_physical(cpu_.pc);
         if (physical_pc && is_bios_table(*physical_pc)) {
+            if (observed_bios_dependencies.insert(
+                    bios_dependency_key(*physical_pc, cpu_.gpr[9])).second) {
+                instructions_since_progress = 0u;
+            }
             ++report.bios_call_count;
             record_recent_bios(report, Ps1BiosCallSummary{
                 cpu_.pc,
@@ -151,12 +170,15 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
                                  bios_pad_card_auto_ack_enabled_,
                                  bios_root_counter_auto_ack_enabled_,
                                  bios_iso9660_removed_, *physical_pc, cpu_.gpr[9])) {
+                diagnostic_bios_frontier_pending_ = false;
                 continue;
             }
+            diagnostic_bios_frontier_pending_ = true;
             report.stop_reason = Ps1BootStopReason::bios_call_unimplemented;
             return report;
         }
 
+        diagnostic_bios_frontier_pending_ = false;
         const auto observed_opcode = bus_.read32(cpu_.pc);
         if (observed_opcode.status == R3000aBusStatus::ok) {
             report.last_opcode = observed_opcode.value;
@@ -169,6 +191,8 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
 
         const auto step = step_r3000a(cpu_, bus_);
         if (step.status == R3000aStepStatus::retired) {
+            ++report.instructions_retired;
+            ++instructions_since_progress;
             if (const auto& probe = bus_.last_diagnostic_mmio_probe(); probe) {
                 ++report.speculative_mmio_count;
                 record_recent_mmio(report, Ps1MmioSummary{
@@ -179,8 +203,15 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
                     probe->value,
                     true,
                 }, options.mmio_event_capacity);
+                if (observed_mmio_dependencies.insert(mmio_dependency_key(*probe)).second) {
+                    instructions_since_progress = 0u;
+                }
             }
-            ++report.instructions_retired;
+            if (options.stagnation_instruction_limit != 0u &&
+                instructions_since_progress >= options.stagnation_instruction_limit) {
+                report.stop_reason = Ps1BootStopReason::diagnostic_stall;
+                return report;
+            }
             continue;
         }
 
@@ -215,6 +246,35 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
 
     report.stop_reason = Ps1BootStopReason::execution_budget_exhausted;
     return report;
+}
+
+bool Ps1BootRuntime::apply_diagnostic_bios_fallback(Ps1BiosFallback fallback) noexcept {
+    if (!diagnostic_bios_frontier_pending_) {
+        return false;
+    }
+    const auto physical_pc = Ps1MemoryBus::guest_to_physical(cpu_.pc);
+    if (!physical_pc || !is_bios_table(*physical_pc)) {
+        diagnostic_bios_frontier_pending_ = false;
+        return false;
+    }
+
+    switch (fallback) {
+        case Ps1BiosFallback::return_zero:
+            cpu_.gpr[2] = 0u;
+            break;
+        case Ps1BiosFallback::return_one:
+            cpu_.gpr[2] = 1u;
+            break;
+        case Ps1BiosFallback::return_minus_one:
+            cpu_.gpr[2] = 0xFFFFFFFFu;
+            break;
+        case Ps1BiosFallback::preserve_v0:
+            break;
+    }
+
+    return_from_bios_call(cpu_);
+    diagnostic_bios_frontier_pending_ = false;
+    return true;
 }
 
 const R3000aState& Ps1BootRuntime::cpu_state() const noexcept {
