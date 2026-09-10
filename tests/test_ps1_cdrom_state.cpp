@@ -16,6 +16,33 @@ static void run_observed_sequence(jojo::Ps1CdromState& cdrom) {
     CHECK(cdrom.write8(0x1F801801u, 0x01u).status == jojo::Ps1CdromIoStatus::ok);
 }
 
+static void test_hsts_reflects_index_and_result_fifo() {
+    jojo::Ps1CdromState cdrom;
+    cdrom.seed_post_bios(0x02u, 0x1Fu);
+
+    auto hsts = cdrom.read8(0x1F801800u);
+    CHECK(hsts.status == jojo::Ps1CdromIoStatus::ok);
+    CHECK(hsts.value == 0x18u);
+
+    CHECK(cdrom.write8(0x1F801800u, 0x01u).status == jojo::Ps1CdromIoStatus::ok);
+    hsts = cdrom.read8(0x1F801800u);
+    CHECK(hsts.status == jojo::Ps1CdromIoStatus::ok);
+    CHECK(hsts.value == 0x19u);
+
+    CHECK(cdrom.write8(0x1F801800u, 0x00u).status == jojo::Ps1CdromIoStatus::ok);
+    CHECK(cdrom.write8(0x1F801801u, 0x01u).status == jojo::Ps1CdromIoStatus::ok);
+    hsts = cdrom.read8(0x1F801800u);
+    CHECK(hsts.status == jojo::Ps1CdromIoStatus::ok);
+    CHECK(hsts.value == 0x38u);
+
+    const auto result = cdrom.read8(0x1F801801u);
+    CHECK(result.status == jojo::Ps1CdromIoStatus::ok);
+    CHECK(result.value == 0x02u);
+    hsts = cdrom.read8(0x1F801800u);
+    CHECK(hsts.status == jojo::Ps1CdromIoStatus::ok);
+    CHECK(hsts.value == 0x18u);
+}
+
 int main() {
     jojo::Ps1CdromState first;
     CHECK(first.index() == 0u);
@@ -64,5 +91,7 @@ int main() {
     bank1.seed_post_bios(0x02u, 0x1Fu);
     CHECK(bank1.write8(0x1F801800u, 0x01u).status == jojo::Ps1CdromIoStatus::ok);
     CHECK(bank1.write8(0x1F801803u, 0x00u).status == jojo::Ps1CdromIoStatus::unsupported_register);
+
+    test_hsts_reflects_index_and_result_fifo();
     return failures ? 1 : 0;
 }
