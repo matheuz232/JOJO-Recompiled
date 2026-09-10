@@ -17,9 +17,13 @@ constexpr std::uint32_t kDmaControlAddress = 0x1F8010F0u;
 constexpr std::uint32_t kDmaInterruptAddress = 0x1F8010F4u;
 constexpr std::uint32_t kTimer1CounterAddress = 0x1F801110u;
 constexpr std::uint32_t kTimer1ModeAddress = 0x1F801114u;
+constexpr std::uint32_t kCdromIndexStatus = 0x1F801800u;
+constexpr std::uint32_t kCdromResponseCommand = 0x1F801801u;
+constexpr std::uint32_t kCdromRequestInterrupt = 0x1F801803u;
 constexpr std::uint32_t kGpuGp0Address = 0x1F801810u;
 constexpr std::uint32_t kGpuGp1Address = 0x1F801814u;
 constexpr std::uint16_t kInterruptValidBits = 0x07FFu;
+constexpr std::uint16_t kInterruptCdrom = 1u << 2;
 constexpr std::uint32_t kDmaInterruptControlMask = 0x00FF807Fu;
 constexpr std::uint32_t kDmaInterruptFlagMask = 0x7F000000u;
 constexpr std::uint32_t kDmaInterruptMasterFlag = 0x80000000u;
@@ -28,6 +32,12 @@ constexpr std::uint32_t kDmaInterruptBusError = 0x00008000u;
 constexpr std::uint32_t kDmaStartBusy = 0x01000000u;
 constexpr std::uint64_t kFnvOffset = 14695981039346656037ull;
 constexpr std::uint64_t kFnvPrime = 1099511628211ull;
+
+bool is_cdrom_port(std::uint32_t physical) noexcept {
+    return physical == kCdromIndexStatus ||
+           physical == kCdromResponseCommand ||
+           physical == kCdromRequestInterrupt;
+}
 
 std::uint8_t* mapped_bytes(std::uint32_t physical,
                            std::size_t width,
@@ -130,6 +140,14 @@ std::optional<std::uint32_t> Ps1MemoryBus::guest_to_physical(std::uint32_t guest
 R3000aBusResult Ps1MemoryBus::read8(std::uint32_t address) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (is_cdrom_port(*physical)) {
+            const auto result = cdrom_.read8(*physical);
+            if (result.status == Ps1CdromIoStatus::ok) {
+                return {R3000aBusStatus::ok, result.value};
+            }
+            last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 1u, false, 0u};
+            return {R3000aBusStatus::unsupported, 0u};
+        }
         if (auto* p = mapped_bytes(*physical, 1u, main_ram_, scratchpad_)) {
             return {R3000aBusStatus::ok, read_little_endian(p, 1u)};
         }
@@ -150,6 +168,9 @@ R3000aBusResult Ps1MemoryBus::read8(std::uint32_t address) noexcept {
 R3000aBusResult Ps1MemoryBus::read16(std::uint32_t address) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (*physical == kInterruptStatusAddress) {
+            return {R3000aBusStatus::ok, interrupt_status_};
+        }
         if (*physical == kInterruptMaskAddress) {
             return {R3000aBusStatus::ok, interrupt_mask_};
         }
@@ -220,6 +241,18 @@ R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
 R3000aBusResult Ps1MemoryBus::write8(std::uint32_t address, std::uint8_t value) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (is_cdrom_port(*physical)) {
+            const auto result = cdrom_.write8(*physical, value);
+            if (result.status == Ps1CdromIoStatus::ok) {
+                if (cdrom_.take_irq_rising_edge()) interrupt_status_ |= kInterruptCdrom;
+                return {R3000aBusStatus::ok, 0u};
+            }
+            if (result.status == Ps1CdromIoStatus::unsupported_command) {
+                last_unsupported_cdrom_command_ = value;
+            }
+            last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 1u, true, value};
+            return {R3000aBusStatus::unsupported, 0u};
+        }
         if (auto* p = mapped_bytes(*physical, 1u, main_ram_, scratchpad_)) {
             write_little_endian(p, 1u, value);
             return {R3000aBusStatus::ok, 0u};
@@ -360,6 +393,10 @@ Result<void> Ps1MemoryBus::load_main_ram(
     return Result<void>::success();
 }
 
+std::uint16_t Ps1MemoryBus::interrupt_status() const noexcept {
+    return interrupt_status_;
+}
+
 std::uint16_t Ps1MemoryBus::interrupt_mask() const noexcept {
     return interrupt_mask_;
 }
@@ -374,6 +411,14 @@ std::uint16_t Ps1MemoryBus::timer1_counter() const noexcept {
 
 std::uint16_t Ps1MemoryBus::timer1_mode() const noexcept {
     return timer1_mode_;
+}
+
+Ps1CdromState& Ps1MemoryBus::cdrom() noexcept {
+    return cdrom_;
+}
+
+const Ps1CdromState& Ps1MemoryBus::cdrom() const noexcept {
+    return cdrom_;
 }
 
 Ps1GpuState& Ps1MemoryBus::gpu() noexcept {
@@ -398,6 +443,7 @@ std::uint64_t Ps1MemoryBus::diagnostic_state_hash() const noexcept {
     hash_u32(hash, dma_interrupt_);
     hash_u16(hash, timer1_counter_);
     hash_u16(hash, timer1_mode_);
+    hash_u64(hash, cdrom_.diagnostic_state_hash());
     hash_u64(hash, gpu_.diagnostic_state_hash());
     hash_bytes(hash, std::span<const std::uint8_t>{
         diagnostic_mmio_shadow_.data(), diagnostic_mmio_shadow_.size()});
@@ -432,6 +478,15 @@ Ps1MemoryBus::last_unsupported_access() const noexcept {
 
 void Ps1MemoryBus::clear_last_unsupported_access() noexcept {
     last_unsupported_.reset();
+}
+
+const std::optional<std::uint8_t>&
+Ps1MemoryBus::last_unsupported_cdrom_command() const noexcept {
+    return last_unsupported_cdrom_command_;
+}
+
+void Ps1MemoryBus::clear_last_unsupported_cdrom_command() noexcept {
+    last_unsupported_cdrom_command_.reset();
 }
 
 } // namespace jojo
