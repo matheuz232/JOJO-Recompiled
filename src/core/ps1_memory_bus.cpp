@@ -7,6 +7,7 @@ namespace jojo {
 namespace {
 
 constexpr std::uint32_t kDiagnosticMmioBase = 0x1F801000u;
+constexpr std::uint32_t kCommonDelayAddress = 0x1F801020u;
 constexpr std::uint32_t kInterruptStatusAddress = 0x1F801070u;
 constexpr std::uint32_t kInterruptMaskAddress = 0x1F801074u;
 constexpr std::uint32_t kDma2MadrAddress = 0x1F8010A0u;
@@ -172,6 +173,15 @@ R3000aBusResult Ps1MemoryBus::read16(std::uint32_t address) noexcept {
 R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (*physical == kCommonDelayAddress) {
+            return {R3000aBusStatus::ok, common_delay_};
+        }
+        if (*physical == kInterruptStatusAddress) {
+            return {R3000aBusStatus::ok, interrupt_status_};
+        }
+        if (*physical == kInterruptMaskAddress) {
+            return {R3000aBusStatus::ok, interrupt_mask_};
+        }
         if (*physical == kDma2MadrAddress) {
             return {R3000aBusStatus::ok, dma2_madr_};
         }
@@ -266,6 +276,19 @@ R3000aBusResult Ps1MemoryBus::write16(std::uint32_t address, std::uint16_t value
 R3000aBusResult Ps1MemoryBus::write32(std::uint32_t address, std::uint32_t value) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (*physical == kCommonDelayAddress) {
+            common_delay_ = value;
+            return {R3000aBusStatus::ok, 0u};
+        }
+        if (*physical == kInterruptStatusAddress) {
+            interrupt_status_ = static_cast<std::uint16_t>(
+                interrupt_status_ & static_cast<std::uint16_t>(value) & kInterruptValidBits);
+            return {R3000aBusStatus::ok, 0u};
+        }
+        if (*physical == kInterruptMaskAddress) {
+            interrupt_mask_ = static_cast<std::uint16_t>(value & kInterruptValidBits);
+            return {R3000aBusStatus::ok, 0u};
+        }
         if (*physical == kDma2MadrAddress) {
             dma2_madr_ = value & 0x00FFFFFFu;
             return {R3000aBusStatus::ok, 0u};
@@ -371,6 +394,7 @@ std::uint64_t Ps1MemoryBus::diagnostic_state_hash() const noexcept {
     std::uint64_t hash = kFnvOffset;
     hash_bytes(hash, std::span<const std::uint8_t>{main_ram_.data(), main_ram_.size()});
     hash_bytes(hash, std::span<const std::uint8_t>{scratchpad_.data(), scratchpad_.size()});
+    hash_u32(hash, common_delay_);
     hash_u16(hash, interrupt_status_);
     hash_u16(hash, interrupt_mask_);
     hash_u32(hash, dma2_madr_);
