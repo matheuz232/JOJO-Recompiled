@@ -120,9 +120,11 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
     report.last_pc = cpu_.pc;
     report.diagnostic_probe_mode = options.diagnostic_mmio_probe;
     bus_.set_diagnostic_mmio_probe_enabled(options.diagnostic_mmio_probe);
+    const auto gp0_before = bus_.gpu().gp0_command_count();
     const auto gp1_before = bus_.gpu().gp1_command_count();
     const auto finish = [&](Ps1BootStopReason reason) {
         report.stop_reason = reason;
+        report.gpu_gp0_command_count = bus_.gpu().gp0_command_count() - gp0_before;
         report.gpu_gp1_command_count = bus_.gpu().gp1_command_count() - gp1_before;
         return report;
     };
