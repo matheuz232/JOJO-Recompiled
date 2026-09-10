@@ -231,6 +231,34 @@ static void test_c0_02_03_interrupt_priority_chain_frontiers() {
           jojo::Ps1HleBiosDisposition::unsupported);
 }
 
+static void test_interrupt_metadata_and_return_from_exception_signal() {
+    jojo::Ps1HleBios bios;
+    jojo::Ps1MemoryBus bus;
+    jojo::R3000aState cpu{};
+
+    cpu.pc = 0x000000C0u;
+    cpu.next_pc = 0x000000C4u;
+    cpu.gpr[4] = 2u;
+    cpu.gpr[5] = 0x80001000u;
+    cpu.gpr[31] = 0x80014000u;
+    CHECK(bios.dispatch(call(jojo::Ps1HleBiosDomain::c0, 0x02u, cpu), cpu, bus).disposition ==
+          jojo::Ps1HleBiosDisposition::handled);
+    CHECK(bios.interrupt_priority_head(2u).value_or(0u) == 0x80001000u);
+    CHECK(!bios.interrupt_priority_head(4u).has_value());
+
+    cpu.pc = 0x000000B0u;
+    cpu.next_pc = 0x000000B4u;
+    cpu.gpr[2] = 0x12345678u;
+    cpu.gpr[31] = 0x80015000u;
+    const auto before = cpu;
+    const auto result = bios.dispatch(call(jojo::Ps1HleBiosDomain::b0, 0x17u, cpu), cpu, bus);
+    CHECK(result.disposition == jojo::Ps1HleBiosDisposition::return_from_exception);
+    CHECK(cpu.pc == before.pc);
+    CHECK(cpu.next_pc == before.next_pc);
+    CHECK(cpu.gpr[2] == before.gpr[2]);
+    CHECK(cpu.gpr[31] == before.gpr[31]);
+}
+
 int main() {
     test_a0_44_flushcache_is_void_for_reference_interpreter();
     test_b0_18_resetentryint_materializes_default_jmpbuf();
@@ -238,5 +266,6 @@ int main() {
     test_b0_0c_enableevent_matches_observed_handle_and_is_idempotent();
     test_b0_0b_testevent_returns_zero_for_observed_busy_event();
     test_c0_02_03_interrupt_priority_chain_frontiers();
+    test_interrupt_metadata_and_return_from_exception_signal();
     return failures ? 1 : 0;
 }
