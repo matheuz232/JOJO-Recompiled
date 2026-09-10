@@ -2,6 +2,7 @@
 
 #include "core/ps1_boot_report.h"
 #include "core/ps1_exe.h"
+#include "core/ps1_hle_bios.h"
 #include "core/ps1_memory_bus.h"
 #include "core/r3000a_state.h"
 #include "core/result.h"
@@ -11,11 +12,6 @@
 #include <optional>
 
 namespace jojo {
-
-struct Ps1BiosHeapState {
-    std::uint32_t base{};
-    std::uint32_t size{};
-};
 
 enum class Ps1BiosFallback : std::uint8_t {
     return_zero,
@@ -48,11 +44,10 @@ public:
 private:
     Ps1MemoryBus bus_{};
     R3000aState cpu_{};
-    std::optional<Ps1BiosHeapState> bios_heap_state_{};
+    Ps1HleBios hle_bios_{};
     std::optional<std::uint32_t> bios_interrupt_hook_address_{};
     std::optional<bool> bios_pad_card_auto_ack_enabled_{};
     std::array<std::optional<bool>, 4> bios_root_counter_auto_ack_enabled_{};
-    bool bios_iso9660_removed_{};
     bool diagnostic_bios_frontier_pending_{};
 };
 
