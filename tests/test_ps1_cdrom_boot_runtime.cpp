@@ -72,6 +72,22 @@ static std::vector<std::uint32_t> registered_irq_program() {
     };
 }
 
+static std::vector<std::uint32_t> hook_pending_load_program() {
+    return {
+        test_mips::i(0x0Fu, 0u, 4u, 0x8000u),
+        test_mips::i(0x0Du, 4u, 4u, 0x3000u),
+        test_mips::i(0x09u, 0u, 9u, 0x19u),
+        test_mips::j(0x03u, 0x000000B0u >> 2),
+        0x00000000u,
+        test_mips::i(0x09u, 0u, 13u, 0x0401u),
+        mtc0(13u, 12u),
+        test_mips::i(0x0Fu, 0u, 8u, 0x8001u),
+        test_mips::i(0x23u, 8u, 14u, 0x0200u),
+        test_mips::j(0x02u, 0x80010024u >> 2),
+        0x00000000u,
+    };
+}
+
 static std::vector<std::uint32_t> command_program(std::uint16_t command) {
     return {
         test_mips::i(0x0Fu, 0u, 8u, 0x1F80u),
@@ -98,6 +114,34 @@ static void write_return_from_exception_callback(jojo::Ps1BootRuntime& runtime,
     CHECK(runtime.bus().write32(address + 4u,
         test_mips::j(0x02u, 0x000000B0u >> 2)).status == jojo::R3000aBusStatus::ok);
     CHECK(runtime.bus().write32(address + 8u, 0u).status == jojo::R3000aBusStatus::ok);
+}
+
+static void write_hook_buffer(jojo::Ps1BootRuntime& runtime,
+                              std::uint32_t hook,
+                              std::uint32_t target) {
+    CHECK(runtime.bus().write32(hook + 0x00u, target).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(hook + 0x04u, 0x801FF000u).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(hook + 0x08u, 0x80003F00u).status == jojo::R3000aBusStatus::ok);
+    for (std::uint32_t i = 0u; i < 8u; ++i) {
+        CHECK(runtime.bus().write32(hook + 0x0Cu + i * 4u, 0x16000000u + i).status ==
+              jojo::R3000aBusStatus::ok);
+    }
+    CHECK(runtime.bus().write32(hook + 0x2Cu, 0x80004000u).status == jojo::R3000aBusStatus::ok);
+}
+
+static void write_ack_and_return_hook(jojo::Ps1BootRuntime& runtime,
+                                      std::uint32_t address) {
+    CHECK(runtime.bus().write32(address + 0x00u,
+        test_mips::i(0x0Fu, 0u, 8u, 0x1F80u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x04u,
+        test_mips::i(0x0Du, 8u, 8u, 0x1070u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x08u,
+        test_mips::i(0x2Bu, 8u, 0u, 0u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x0Cu,
+        test_mips::i(0x09u, 0u, 9u, 0x17u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x10u,
+        test_mips::j(0x02u, 0x000000B0u >> 2)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 0x14u, 0u).status == jojo::R3000aBusStatus::ok);
 }
 
 static void test_runtime_seeds_post_bios_cdrom_state() {
@@ -252,6 +296,46 @@ static void test_nested_interrupt_while_callback_active_is_terminal() {
     }
 }
 
+static void test_custom_hook_guest_can_ack_irq_and_return_with_pending_load_retired() {
+    auto runtime = make_runtime(hook_pending_load_program());
+    constexpr std::uint32_t hook = 0x80003000u;
+    constexpr std::uint32_t hook_target = 0x80014000u;
+    write_hook_buffer(runtime, hook, hook_target);
+    write_ack_and_return_hook(runtime, hook_target);
+    CHECK(runtime.bus().write32(0x80010200u, 0xCAFEBABEu).status == jojo::R3000aBusStatus::ok);
+
+    jojo::Ps1BootOptions setup{};
+    setup.instruction_budget = 9u;
+    setup.bios_event_capacity = 16u;
+    const auto before_irq = runtime.run(setup);
+    CHECK(before_irq.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(runtime.cpu_state().pending_load.valid);
+    CHECK(runtime.cpu_state().gpr[14] != 0xCAFEBABEu);
+    CHECK(runtime.bios_interrupt_hook_address().has_value());
+    if (runtime.bios_interrupt_hook_address()) CHECK(*runtime.bios_interrupt_hook_address() == hook);
+
+    CHECK(runtime.bus().write32(0x1F801074u, 0x00000004u).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write8(0x1F801800u, 0x00u).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write8(0x1F801801u, 0x01u).status == jojo::R3000aBusStatus::ok);
+
+    jojo::Ps1BootOptions options{};
+    options.instruction_budget = 16u;
+    options.bios_event_capacity = 32u;
+    const auto report = runtime.run(options);
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(report.interrupts_accepted == 1u);
+    CHECK(runtime.cpu_state().gpr[14] == 0xCAFEBABEu);
+    CHECK(!runtime.cpu_state().pending_load.valid);
+    CHECK(runtime.bus().interrupt_status() == 0u);
+    bool saw_return_from_exception = false;
+    for (const auto& event : report.recent_bios_calls) {
+        if (event.table_physical == 0xB0u && event.selector == 0x17u) {
+            saw_return_from_exception = true;
+        }
+    }
+    CHECK(saw_return_from_exception);
+}
+
 int main() {
     test_runtime_seeds_post_bios_cdrom_state();
     test_enabled_cdrom_irq_enters_exception_handler_without_terminal_stop();
@@ -262,5 +346,6 @@ int main() {
     test_zero_exception_vector_dispatches_registered_handler_without_fake_a0();
     test_custom_exception_vector_remains_guest_owned();
     test_nested_interrupt_while_callback_active_is_terminal();
+    test_custom_hook_guest_can_ack_irq_and_return_with_pending_load_retired();
     return failures ? 1 : 0;
 }
