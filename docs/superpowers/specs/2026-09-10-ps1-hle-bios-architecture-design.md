@@ -103,18 +103,48 @@ The exact names above are normative for the first implementation plan unless a c
 
 ### State ownership
 
-Move the current BIOS-specific state out of `Ps1BootRuntime` and into `Ps1HleBios`:
+Move the current BIOS-specific persistent state out of `Ps1BootRuntime` and into `Ps1HleBios`:
 
 - heap initialization state (`base`, `size`)
 - interrupt hook address
 - PAD/card auto-ack state
 - root-counter/VBlank auto-ack state for indices 0..3
 - logical ISO9660-remove state
-- critical-section/SYS state needed for SYS01/SYS02 compatibility
 
-`Ps1BootRuntime` retains CPU, PS1 memory bus, and the diagnostic frontier flag.
+SYS01/SYS02 critical-section state remains represented by the guest CPU COP0 status register; do not duplicate it inside `Ps1HleBios`.
 
-The HLE state must participate in `diagnostic_state_hash()` so MAX3 never deduplicates two branches whose BIOS state differs.
+`Ps1BootRuntime` retains CPU, PS1 memory bus, diagnostic frontier state, and policy checks that decide whether a platform-specific HLE interception is safe before dispatch.
+
+The HLE-owned persistent state must participate in `diagnostic_state_hash()` so MAX3 never deduplicates two branches whose BIOS state differs.
+
+## Return mechanisms
+
+A0/B0/C0 and SYS do not share the same return mechanism.
+
+### A0/B0/C0 return
+
+A handled A0/B0/C0 service performs the BIOS-call return used by the current runtime:
+
+- set `PC = R31/RA`;
+- set `next_pc = PC + 4`;
+- clear delay-slot state;
+- preserve architectural zero register semantics.
+
+Handlers may modify documented return registers before this return.
+
+### SYS return
+
+A handled SYS service represents the platform HLE completion of a `syscall` instruction, not an A0/B0/C0 jump-table return. It must preserve the already-tested runtime behavior:
+
+- retire any pending delayed load exactly once before applying the SYS service;
+- apply the SYS selector's documented register/COP0 effects;
+- advance from the syscall instruction to its sequential continuation (`PC = next_pc`, then advance `next_pc` by four);
+- clear delay-slot state;
+- preserve `R0 = 0`.
+
+`Ps1BootRuntime` remains responsible for pre-dispatch safety checks such as rejecting HLE interception when the syscall is in a delay slot or when an interrupt would preempt it. `Ps1HleBios` owns the selector-specific SYS behavior once dispatch is authorized.
+
+This distinction is normative: do not reuse the A0/B0/C0 `return via RA` helper for SYS.
 
 ## Runtime data flow
 
@@ -124,20 +154,23 @@ The HLE state must participate in `diagnostic_state_hash()` so MAX3 never dedupl
 2. It records the BIOS call in the existing `Ps1BootReport` history.
 3. It builds a `Ps1HleBiosCall` from table, selector, arguments, and RA.
 4. It calls `Ps1HleBios::dispatch()`.
-5. `handled`: the HLE updates guest state and returns control according to the service contract.
+5. `handled`: the HLE updates guest state and performs the A0/B0/C0 return mechanism.
 6. `unsupported`: runtime emits `bios_call_unimplemented` and exposes a MAX3 frontier.
 7. `terminal`: runtime stops with a distinct terminal BIOS reason once such a service is introduced; this tranche need not add a terminal service unless required by a migrated handler.
 
 ### SYS
 
-The generic R3000A executor continues to raise the architectural syscall exception.
+The generic R3000A executor continues to raise the architectural syscall exception whenever it executes a syscall normally.
 
-Before classifying that exception as `cpu_boundary`, `Ps1BootRuntime` may recognize a PS1 BIOS SYS service only when all of these are true:
+For PS1 runtime HLE, before invoking the generic executor for the current instruction, `Ps1BootRuntime` may intercept a SYS service only when all of these are true:
 
-- the executed opcode is `syscall`;
-- the runtime is not trying to mask another higher-priority architectural condition;
-- the syscall selector is one handled by `Ps1HleBios`;
+- the observed opcode is `syscall`;
+- the call is not in a delay slot;
+- no enabled pending interrupt would preempt that instruction;
+- the selector is one handled by `Ps1HleBios`;
 - the platform-specific service can be applied without executing original BIOS ROM code.
+
+If those conditions are not all satisfied, the runtime falls through to the generic R3000A executor and retains normal architectural exception/boundary behavior.
 
 SYS services must retain the already-tested PS1 semantics for SYS00/SYS01/SYS02. SYS03 and SYS04+ remain unsupported in this tranche because they depend on thread/event behavior.
 
@@ -220,7 +253,8 @@ For an unsupported A0/B0/C0 call:
 
 For an unsupported SYS call:
 
-- preserve the architectural CPU exception/boundary behavior already used by the runtime;
+- do not apply SYS HLE mutation;
+- let the generic R3000A executor retain the architectural syscall exception/boundary behavior;
 - do not fabricate an A0/B0/C0-style return.
 
 A handler must be deterministic for identical input CPU/HLE state.
@@ -237,9 +271,10 @@ Add `tests/test_ps1_hle_bios.cpp` covering:
 - migration of every currently supported BIOS service
 - all safe return-zero selectors in the closed list
 - unknown selector leaves CPU/HLE state unchanged and reports `unsupported`
-- SYS00 register preservation
-- SYS01 return value and interrupt-state transition
-- SYS02 interrupt-state transition and required register preservation
+- A0/B0/C0 return via RA
+- SYS00 register preservation and sequential return
+- SYS01 return value, COP0 transition, and sequential return
+- SYS02 COP0 transition, required register preservation, and sequential return
 - state hash changes when HLE-owned state changes
 - copied HLE objects produce identical state hashes until mutated
 
@@ -249,9 +284,10 @@ Existing tests must remain green. Add integration assertions that:
 
 - `Ps1BootRuntime` delegates A0/B0/C0 to `Ps1HleBios`;
 - an unsupported BIOS call still creates the same MAX3 frontier;
-- SYS03 still produces a boundary;
+- SYS03 still produces a boundary through the generic executor;
 - generic `step_r3000a()` syscall exception tests remain unchanged and green;
-- MAX3 dedup remains sensitive to HLE state.
+- MAX3 dedup remains sensitive to HLE state;
+- pending-load and interrupt-preemption SYS guards remain green after migration.
 
 ### Commercial evidence gate
 
