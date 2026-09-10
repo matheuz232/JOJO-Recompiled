@@ -1,11 +1,91 @@
+#include "core/ps1_exe.h"
+#include "core/ps1_max3_explorer.h"
 #include "core/ps1_memory_bus.h"
+#include "mips_test_encode.h"
+#include "ps1_fixture.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <iostream>
+#include <limits>
+#include <vector>
 
 static int failures = 0;
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__ << " CHECK failed: " #x "\n"; ++failures; } } while (0)
+
+static jojo::Ps1Executable make_executable(const std::vector<std::uint32_t>& words) {
+    auto parsed = jojo::parse_ps1_executable(test_ps1::make_psx_exe_from_words(words));
+    CHECK(parsed);
+    return parsed ? std::move(parsed.value) : jojo::Ps1Executable{};
+}
+
+static std::vector<std::uint32_t> cdrom_irq_then_read_istat32_program() {
+    return {
+        test_mips::i(0x0Fu, 0u, 8u, 0x1F80u),
+        test_mips::i(0x0Du, 8u, 8u, 0x1800u),
+        test_mips::i(0x09u, 0u, 9u, 0u),
+        test_mips::i(0x28u, 8u, 9u, 0u),
+        test_mips::i(0x09u, 0u, 9u, 1u),
+        test_mips::i(0x28u, 8u, 9u, 1u),
+        test_mips::i(0x0Fu, 0u, 10u, 0x1F80u),
+        test_mips::i(0x0Du, 10u, 10u, 0x1070u),
+        test_mips::i(0x23u, 10u, 11u, 0u),
+        0x00000000u,
+        test_mips::j(0x02u, 0x80010028u >> 2),
+        0x00000000u,
+    };
+}
+
+static void test_istat_read32_returns_latched_irq_without_probe() {
+    jojo::Ps1MemoryBus bus;
+    bus.cdrom().seed_post_bios(0x02u, 0x1Fu);
+    bus.set_diagnostic_mmio_probe_enabled(true);
+
+    CHECK(bus.write8(0x1F801800u, 0x00u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.write8(0x1F801801u, 0x01u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.interrupt_status() == 0x0004u);
+
+    bus.clear_last_diagnostic_mmio_probe();
+    const auto istat32 = bus.read32(0x1F801070u);
+    CHECK(istat32.status == jojo::R3000aBusStatus::ok);
+    CHECK(istat32.value == 0x00000004u);
+    CHECK(!bus.last_diagnostic_mmio_probe().has_value());
+
+    const auto istat16 = bus.read16(0x1F801070u);
+    CHECK(istat16.status == jojo::R3000aBusStatus::ok);
+    CHECK(istat16.value == 0x0004u);
+
+    CHECK(bus.write16(0x1F801070u, 0x0000u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.read32(0x1F801070u).value == 0u);
+}
+
+static void test_istat_read32_is_not_a_max3_dependency() {
+    const auto executable = make_executable(cdrom_irq_then_read_istat32_program());
+    jojo::Ps1Max3Options options{};
+    options.max_nodes = 4u;
+    options.max_branch_depth = 0u;
+    options.max_total_retired = 1000u;
+    options.segment_options.instruction_budget = std::numeric_limits<std::uint64_t>::max();
+    options.segment_options.trace_capacity = 16u;
+    options.segment_options.diagnostic_mmio_probe = true;
+    options.segment_options.mmio_event_capacity = 32u;
+    options.segment_options.bios_event_capacity = 32u;
+    options.segment_options.stagnation_instruction_limit = 16u;
+
+    const auto explored = jojo::explore_ps1_max3(executable, options);
+    CHECK(explored);
+    if (!explored) return;
+
+    const auto& report = explored.value;
+    CHECK(report.nodes.size() == 1u);
+    CHECK(std::none_of(report.dependencies.begin(), report.dependencies.end(), [](const auto& dependency) {
+        return dependency.address == 0x1F801070u &&
+               dependency.width == 4u &&
+               !dependency.write;
+    }));
+    CHECK(report.best_report.cdrom_command_count == 1u);
+}
 
 int main() {
     jojo::Ps1MemoryBus bus;
@@ -29,6 +109,7 @@ int main() {
     CHECK(bus.write8(0x1F801802u, 0x12u).status == jojo::R3000aBusStatus::unsupported);
     CHECK(!bus.last_diagnostic_mmio_probe().has_value());
 
-    CHECK(bus.read32(0x1F801070u).status == jojo::R3000aBusStatus::unsupported);
+    test_istat_read32_returns_latched_irq_without_probe();
+    test_istat_read32_is_not_a_max3_dependency();
     return failures ? 1 : 0;
 }
