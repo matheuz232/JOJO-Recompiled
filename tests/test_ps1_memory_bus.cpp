@@ -54,7 +54,9 @@ int main() {
     const auto istat_cleared = bus.read16(0x1F801070u);
     CHECK(istat_cleared.status == jojo::R3000aBusStatus::ok);
     CHECK(istat_cleared.value == 0x0000u);
-    CHECK(bus.read32(0x1F801070u).status == jojo::R3000aBusStatus::unsupported);
+    const auto istat32_cleared = bus.read32(0x1F801070u);
+    CHECK(istat32_cleared.status == jojo::R3000aBusStatus::ok);
+    CHECK(istat32_cleared.value == 0x00000000u);
     CHECK(bus.read32(0x1F801020u).status == jojo::R3000aBusStatus::unsupported);
 
     const auto dpcr_reset = bus.read32(0x1F8010F0u);
@@ -152,7 +154,10 @@ int main() {
         const auto istat16 = cd_bus.read16(0x1F801070u);
         CHECK(istat16.status == jojo::R3000aBusStatus::ok);
         CHECK(istat16.value == 0x0004u);
-        CHECK(cd_bus.read32(0x1F801070u).status == jojo::R3000aBusStatus::unsupported);
+        const auto istat32 = cd_bus.read32(0x1F801070u);
+        CHECK(istat32.status == jojo::R3000aBusStatus::ok);
+        CHECK(istat32.value == 0x00000004u);
+        CHECK(!cd_bus.last_diagnostic_mmio_probe());
 
         CHECK(cd_bus.write16(0x1F801070u, 0x0000u).status == jojo::R3000aBusStatus::ok);
         CHECK(cd_bus.interrupt_status() == 0u);
