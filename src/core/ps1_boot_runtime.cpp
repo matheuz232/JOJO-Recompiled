@@ -18,6 +18,12 @@ constexpr std::uint32_t kBiosA0RemoveIso9660Alias = 0x00000072u;
 constexpr std::uint32_t kBiosB0HookEntryInt = 0x00000019u;
 constexpr std::uint32_t kBiosB0ChangeClearPad = 0x0000005Bu;
 constexpr std::uint32_t kBiosC0ChangeClearRCnt = 0x0000000Au;
+constexpr std::uint32_t kSyscallEncodingMask = 0xFC00003Fu;
+constexpr std::uint32_t kSyscallEncoding = 0x0000000Cu;
+constexpr std::uint32_t kInterruptEnableCurrent = 1u << 0;
+constexpr std::uint32_t kInterruptMaskBit10 = 1u << 10;
+constexpr std::uint32_t kCauseExternalMask = 0x0000FC00u;
+constexpr std::uint32_t kCauseInterruptMask = 0x0000FF00u;
 constexpr std::uint64_t kFnvOffset = 14695981039346656037ull;
 constexpr std::uint64_t kFnvPrime = 1099511628211ull;
 
@@ -29,6 +35,10 @@ bool is_bios_table(std::uint32_t physical) noexcept {
 
 bool is_initial_mmio_window(std::uint32_t physical) noexcept {
     return physical >= 0x1F801000u && physical < 0x1F803000u;
+}
+
+bool is_syscall_opcode(std::uint32_t opcode) noexcept {
+    return (opcode & kSyscallEncodingMask) == kSyscallEncoding;
 }
 
 std::uint64_t bios_dependency_key(std::uint32_t table, std::uint32_t selector) noexcept {
@@ -110,6 +120,61 @@ void return_from_bios_call(R3000aState& cpu) noexcept {
     cpu.next_pc = cpu.pc + 4u;
     cpu.delay_slot = {};
     cpu.gpr[0] = 0u;
+}
+
+void retire_pending_load_for_hle(R3000aState& cpu) noexcept {
+    if (!cpu.pending_load.valid) return;
+    if (cpu.pending_load.reg != 0u) {
+        cpu.gpr[cpu.pending_load.reg] = cpu.pending_load.value;
+    }
+    cpu.pending_load = {};
+    cpu.gpr[0] = 0u;
+}
+
+void advance_hle_instruction(R3000aState& cpu) noexcept {
+    cpu.pc = cpu.next_pc;
+    cpu.next_pc += 4u;
+    cpu.delay_slot = {};
+    cpu.gpr[0] = 0u;
+}
+
+bool interrupt_would_preempt_syscall(const R3000aState& cpu) noexcept {
+    const auto cause = (cpu.cop0.cause & ~kCauseExternalMask) |
+                       (static_cast<std::uint32_t>(cpu.external_interrupt_pending & 0xFCu) << 8);
+    return (cpu.cop0.status & kInterruptEnableCurrent) != 0u &&
+           (cause & cpu.cop0.status & kCauseInterruptMask) != 0u;
+}
+
+bool handle_syscall_hle(R3000aState& cpu, std::uint32_t opcode) noexcept {
+    if (!is_syscall_opcode(opcode) || cpu.delay_slot.active ||
+        interrupt_would_preempt_syscall(cpu)) {
+        return false;
+    }
+
+    const std::uint32_t selector = cpu.gpr[4];
+    if (selector > 2u) return false;
+
+    retire_pending_load_for_hle(cpu);
+    const std::uint32_t critical_mask = kInterruptEnableCurrent | kInterruptMaskBit10;
+
+    switch (selector) {
+        case 0u: // SYS(00h) NoFunction
+            break;
+        case 1u: { // SYS(01h) EnterCriticalSection
+            const bool enabled = (cpu.cop0.status & critical_mask) == critical_mask;
+            cpu.cop0.status &= ~critical_mask;
+            cpu.gpr[2] = enabled ? 1u : 0u;
+            break;
+        }
+        case 2u: // SYS(02h) ExitCriticalSection
+            cpu.cop0.status |= critical_mask;
+            break;
+        default:
+            return false;
+    }
+
+    advance_hle_instruction(cpu);
+    return true;
 }
 
 bool handle_bios_call(
@@ -223,6 +288,17 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
         record_recent_trace(report, cpu_.pc, report.last_opcode, options.trace_capacity);
         bus_.clear_last_unsupported_access();
         bus_.clear_last_diagnostic_mmio_probe();
+
+        if (report.last_opcode && handle_syscall_hle(cpu_, *report.last_opcode)) {
+            ++report.instructions_retired;
+            ++instructions_since_progress;
+            if (options.stagnation_instruction_limit != 0u &&
+                instructions_since_progress >= options.stagnation_instruction_limit) {
+                report.stop_reason = Ps1BootStopReason::diagnostic_stall;
+                return report;
+            }
+            continue;
+        }
 
         const auto step = step_r3000a(cpu_, bus_);
         if (step.status == R3000aStepStatus::retired) {
