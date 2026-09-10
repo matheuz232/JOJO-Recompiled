@@ -48,25 +48,25 @@ static std::vector<std::uint32_t> irq_program(std::uint16_t interrupt_mask) {
 
 static std::vector<std::uint32_t> registered_irq_program() {
     return {
-        test_mips::i(0x09u, 0u, 4u, 2u),                         // priority=2
-        test_mips::i(0x0Fu, 0u, 5u, 0x8000u),                   // a1=0x80001000
+        test_mips::i(0x09u, 0u, 4u, 2u),
+        test_mips::i(0x0Fu, 0u, 5u, 0x8000u),
         test_mips::i(0x0Du, 5u, 5u, 0x1000u),
-        test_mips::i(0x09u, 0u, 9u, 0x02u),                     // C0:02
-        test_mips::j(0x03u, 0x000000C0u >> 2),                  // jal 0x800000C0
+        test_mips::i(0x09u, 0u, 9u, 0x02u),
+        test_mips::j(0x03u, 0x000000C0u >> 2),
         0x00000000u,
         test_mips::i(0x0Fu, 0u, 8u, 0x1F80u),
-        test_mips::i(0x0Du, 8u, 8u, 0x1074u),                   // I_MASK
+        test_mips::i(0x0Du, 8u, 8u, 0x1074u),
         test_mips::i(0x09u, 0u, 10u, 4u),
         test_mips::i(0x2Bu, 8u, 10u, 0u),
         test_mips::i(0x09u, 0u, 13u, 0x0401u),
-        mtc0(13u, 12u),                                         // IEc + IM2
+        mtc0(13u, 12u),
         test_mips::i(0x0Fu, 0u, 11u, 0x1F80u),
-        test_mips::i(0x0Du, 11u, 11u, 0x1800u),                 // CD-ROM index port
+        test_mips::i(0x0Du, 11u, 11u, 0x1800u),
         test_mips::i(0x09u, 0u, 12u, 0u),
-        test_mips::i(0x28u, 11u, 12u, 0u),                      // bank 0
-        test_mips::i(0x09u, 0u, 9u, 0x35u),                     // residual selector
+        test_mips::i(0x28u, 11u, 12u, 0u),
+        test_mips::i(0x09u, 0u, 9u, 0x35u),
         test_mips::i(0x09u, 0u, 12u, 1u),
-        test_mips::i(0x28u, 11u, 12u, 1u),                      // command 01 -> IRQ2
+        test_mips::i(0x28u, 11u, 12u, 1u),
         test_mips::j(0x02u, 0x8001004Cu >> 2),
         0x00000000u,
     };
@@ -199,8 +199,8 @@ static void test_zero_exception_vector_dispatches_registered_handler_without_fak
     CHECK(report.interrupts_accepted >= 1u);
     bool saw_return_from_exception = false;
     for (const auto& event : report.recent_bios_calls) {
-        CHECK(!(event.table == 0xA0u && event.selector == 0x35u));
-        if (event.table == 0xB0u && event.selector == 0x17u) {
+        CHECK(!(event.table_physical == 0xA0u && event.selector == 0x35u));
+        if (event.table_physical == 0xB0u && event.selector == 0x17u) {
             saw_return_from_exception = true;
         }
     }
@@ -223,7 +223,7 @@ static void test_custom_exception_vector_remains_guest_owned() {
     CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
     CHECK(report.interrupts_accepted == 1u);
     for (const auto& event : report.recent_bios_calls) {
-        CHECK(!(event.table == 0xB0u && event.selector == 0x17u));
+        CHECK(!(event.table_physical == 0xB0u && event.selector == 0x17u));
     }
     CHECK(runtime.cpu_state().pc == 0x80000080u || runtime.cpu_state().pc == 0x80000084u);
 }
