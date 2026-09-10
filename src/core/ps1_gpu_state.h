@@ -39,7 +39,6 @@ private:
     std::uint8_t display_mode_{};
     bool irq1_{};
     std::uint32_t gp0_read_latch_{};
-    std::uint32_t draw_mode_{};
     std::uint64_t gp0_command_count_{};
     std::uint64_t gp1_command_count_{};
     std::uint64_t command_buffer_reset_count_{};
