@@ -63,6 +63,9 @@ private:
     std::array<std::uint8_t, scratchpad_size> scratchpad_{};
     std::uint16_t interrupt_status_{};
     std::uint16_t interrupt_mask_{};
+    std::uint32_t dma2_madr_{};
+    std::uint32_t dma2_bcr_{};
+    std::uint32_t dma2_chcr_{};
     std::uint32_t dma_control_{0x07654321u};
     std::uint32_t dma_interrupt_{};
     std::uint16_t timer1_counter_{};
