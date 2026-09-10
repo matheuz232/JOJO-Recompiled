@@ -65,6 +65,14 @@ int main() {
     CHECK(bus.timer1_counter() == 0x0000u);
     CHECK(bus.read32(0x1F801114u).status == jojo::R3000aBusStatus::unsupported);
 
+    bus.set_diagnostic_mmio_probe_enabled(true);
+    bus.clear_last_diagnostic_mmio_probe();
+    const auto timer1_counter = bus.read32(0x1F801110u);
+    CHECK(timer1_counter.status == jojo::R3000aBusStatus::ok);
+    CHECK(timer1_counter.value == 0x00000000u);
+    CHECK(!bus.last_diagnostic_mmio_probe().has_value());
+    bus.set_diagnostic_mmio_probe_enabled(false);
+
     bus.clear_last_unsupported_access();
     bus.set_diagnostic_mmio_probe_enabled(true);
     const auto probe_zero = bus.read32(0x1F801080u);
