@@ -125,6 +125,15 @@ void sync_interrupt_controller_to_cpu(R3000aState& cpu, const Ps1MemoryBus& bus)
     }
 }
 
+std::optional<bool> zero_default_exception_vector(Ps1MemoryBus& bus) noexcept {
+    for (std::uint32_t address = 0x80000080u; address <= 0x8000008Cu; address += 4u) {
+        const auto word = bus.read32(address);
+        if (word.status != R3000aBusStatus::ok) return std::nullopt;
+        if (word.value != 0u) return false;
+    }
+    return true;
+}
+
 } // namespace
 
 Result<Ps1BootRuntime> Ps1BootRuntime::create(const Ps1Executable& executable) {
@@ -157,6 +166,15 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
     std::set<std::uint64_t> observed_mmio_dependencies;
 
     while (report.instructions_retired < options.instruction_budget) {
+        if (interrupt_continuation_.active()) {
+            const auto driven = interrupt_continuation_.drive(cpu_, bus_, hle_bios_);
+            if (driven.status == Ps1InterruptDriveStatus::terminal) {
+                report.unsupported_access = bus_.last_unsupported_access();
+                return finish(Ps1BootStopReason::fatal_runtime_error);
+            }
+            if (driven.status == Ps1InterruptDriveStatus::restored) continue;
+        }
+
         report.last_pc = cpu_.pc;
         const auto physical_pc = Ps1MemoryBus::guest_to_physical(cpu_.pc);
         if (physical_pc && is_bios_table(*physical_pc)) {
@@ -174,6 +192,15 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
                 cpu_.gpr[4], cpu_.gpr[5], cpu_.gpr[6], cpu_.gpr[7], cpu_.gpr[31],
             };
             const auto hle = hle_bios_.dispatch(call, cpu_, bus_);
+            if (hle.disposition == Ps1HleBiosDisposition::return_from_exception) {
+                if (!interrupt_continuation_.active()) {
+                    diagnostic_bios_frontier_pending_ = true;
+                    return finish(Ps1BootStopReason::bios_call_unimplemented);
+                }
+                interrupt_continuation_.return_from_exception(cpu_);
+                diagnostic_bios_frontier_pending_ = false;
+                continue;
+            }
             if (hle.disposition == Ps1HleBiosDisposition::handled) {
                 diagnostic_bios_frontier_pending_ = false;
                 continue;
@@ -232,6 +259,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
 
         const auto command_count_before_step = bus_.cdrom().command_count();
         bus_.clear_last_unsupported_cdrom_command();
+        const auto pre_step_status = cpu_.cop0.status;
         const auto step = step_r3000a(cpu_, bus_);
         if (step.status == R3000aStepStatus::retired) {
             ++report.instructions_retired;
@@ -261,6 +289,21 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
             step.diagnostic.exception_code == R3000aExceptionCode::interrupt) {
             ++report.interrupts_accepted;
             instructions_since_progress = 0u;
+
+            if (interrupt_continuation_.active()) {
+                report.cpu_diagnostic = step.diagnostic;
+                return finish(Ps1BootStopReason::cpu_boundary);
+            }
+
+            const auto zero_vector = zero_default_exception_vector(bus_);
+            if (!zero_vector.has_value()) {
+                report.unsupported_access = bus_.last_unsupported_access();
+                return finish(Ps1BootStopReason::fatal_runtime_error);
+            }
+            if (*zero_vector && cpu_.pc == 0x80000080u) {
+                interrupt_continuation_.begin(
+                    cpu_, pre_step_status, cpu_.cop0.epc, cpu_.cop0.epc + 4u);
+            }
             continue;
         }
 
@@ -337,6 +380,7 @@ std::uint64_t Ps1BootRuntime::diagnostic_state_hash() const noexcept {
     for (const auto value : cpu_.cop2_gte.control) hash_u32(hash, value);
     hash_byte(hash, cpu_.external_interrupt_pending);
     hash_u64(hash, hle_bios_.diagnostic_state_hash());
+    hash_u64(hash, interrupt_continuation_.diagnostic_state_hash());
     hash_bool(hash, diagnostic_bios_frontier_pending_);
     return hash;
 }

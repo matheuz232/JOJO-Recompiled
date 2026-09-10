@@ -3,6 +3,7 @@
 #include "core/ps1_boot_report.h"
 #include "core/ps1_exe.h"
 #include "core/ps1_hle_bios.h"
+#include "core/ps1_interrupt_continuation.h"
 #include "core/ps1_memory_bus.h"
 #include "core/r3000a_state.h"
 #include "core/result.h"
@@ -41,6 +42,7 @@ private:
     Ps1MemoryBus bus_{};
     R3000aState cpu_{};
     Ps1HleBios hle_bios_{};
+    Ps1InterruptContinuation interrupt_continuation_{};
     bool diagnostic_bios_frontier_pending_{};
 };
 
