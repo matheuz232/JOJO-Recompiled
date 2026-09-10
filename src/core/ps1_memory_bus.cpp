@@ -19,6 +19,7 @@ constexpr std::uint32_t kTimer1CounterAddress = 0x1F801110u;
 constexpr std::uint32_t kTimer1ModeAddress = 0x1F801114u;
 constexpr std::uint32_t kCdromIndexStatus = 0x1F801800u;
 constexpr std::uint32_t kCdromResponseCommand = 0x1F801801u;
+constexpr std::uint32_t kCdromData = 0x1F801802u;
 constexpr std::uint32_t kCdromRequestInterrupt = 0x1F801803u;
 constexpr std::uint32_t kGpuGp0Address = 0x1F801810u;
 constexpr std::uint32_t kGpuGp1Address = 0x1F801814u;
@@ -152,6 +153,10 @@ R3000aBusResult Ps1MemoryBus::read8(std::uint32_t address) noexcept {
             last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 1u, false, 0u};
             return {R3000aBusStatus::unsupported, 0u};
         }
+        if (*physical == kCdromData) {
+            last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 1u, false, 0u};
+            return {R3000aBusStatus::unsupported, 0u};
+        }
         if (auto* p = mapped_bytes(*physical, 1u, main_ram_, scratchpad_)) {
             return {R3000aBusStatus::ok, read_little_endian(p, 1u)};
         }
@@ -262,6 +267,10 @@ R3000aBusResult Ps1MemoryBus::write8(std::uint32_t address, std::uint8_t value) 
             if (result.status == Ps1CdromIoStatus::unsupported_command) {
                 last_unsupported_cdrom_command_ = value;
             }
+            last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 1u, true, value};
+            return {R3000aBusStatus::unsupported, 0u};
+        }
+        if (*physical == kCdromData) {
             last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 1u, true, value};
             return {R3000aBusStatus::unsupported, 0u};
         }
