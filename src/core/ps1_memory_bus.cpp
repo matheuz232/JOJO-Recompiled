@@ -173,12 +173,6 @@ R3000aBusResult Ps1MemoryBus::read16(std::uint32_t address) noexcept {
 R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
-        if (*physical == kCommonDelayAddress) {
-            return {R3000aBusStatus::ok, common_delay_};
-        }
-        if (*physical == kInterruptStatusAddress) {
-            return {R3000aBusStatus::ok, interrupt_status_};
-        }
         if (*physical == kInterruptMaskAddress) {
             return {R3000aBusStatus::ok, interrupt_mask_};
         }
