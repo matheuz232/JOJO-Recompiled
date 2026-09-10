@@ -10,6 +10,7 @@ constexpr std::uint32_t kDiagnosticMmioBase = 0x1F801000u;
 constexpr std::uint32_t kInterruptStatusAddress = 0x1F801070u;
 constexpr std::uint32_t kInterruptMaskAddress = 0x1F801074u;
 constexpr std::uint32_t kDmaControlAddress = 0x1F8010F0u;
+constexpr std::uint32_t kTimer1ModeAddress = 0x1F801114u;
 constexpr std::uint16_t kInterruptValidBits = 0x07FFu;
 
 std::uint8_t* mapped_bytes(std::uint32_t physical,
@@ -195,6 +196,11 @@ R3000aBusResult Ps1MemoryBus::write32(std::uint32_t address, std::uint32_t value
             dma_control_ = value;
             return {R3000aBusStatus::ok, 0u};
         }
+        if (*physical == kTimer1ModeAddress) {
+            timer1_mode_ = static_cast<std::uint16_t>(value & 0xFFFFu);
+            timer1_counter_ = 0u;
+            return {R3000aBusStatus::ok, 0u};
+        }
         if (auto* p = mapped_bytes(*physical, 4u, main_ram_, scratchpad_)) {
             write_little_endian(p, 4u, value);
             return {R3000aBusStatus::ok, 0u};
@@ -229,6 +235,14 @@ Result<void> Ps1MemoryBus::load_main_ram(
 
 std::uint16_t Ps1MemoryBus::interrupt_mask() const noexcept {
     return interrupt_mask_;
+}
+
+std::uint16_t Ps1MemoryBus::timer1_counter() const noexcept {
+    return timer1_counter_;
+}
+
+std::uint16_t Ps1MemoryBus::timer1_mode() const noexcept {
+    return timer1_mode_;
 }
 
 void Ps1MemoryBus::set_diagnostic_mmio_probe_enabled(bool enabled) noexcept {
