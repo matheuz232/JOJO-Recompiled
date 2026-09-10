@@ -27,6 +27,7 @@ add_library(jojo_core STATIC
   src/core/ps1_exe.cpp
   src/core/ps1_installation.cpp
   src/core/ps1_memory_bus.cpp
+  src/core/ps1_cdrom_state.cpp
   src/core/ps1_gpu_state.cpp
   src/core/ps1_executable_loader.cpp
   src/core/ps1_boot_runtime.cpp
@@ -96,6 +97,7 @@ add_jojo_test(jojo_ps1_installation_tests tests/test_ps1_installation.cpp)
 add_jojo_test(jojo_ps1_conversion_tests tests/test_ps1_conversion.cpp)
 add_jojo_test(jojo_ps1_runtime_installation_tests tests/test_ps1_runtime_installation.cpp)
 add_jojo_test(jojo_ps1_memory_bus_tests tests/test_ps1_memory_bus.cpp)
+add_jojo_test(jojo_ps1_cdrom_state_tests tests/test_ps1_cdrom_state.cpp)
 add_jojo_test(jojo_ps1_executable_loader_tests tests/test_ps1_executable_loader.cpp)
 add_jojo_test(jojo_ps1_boot_runtime_tests tests/test_ps1_boot_runtime.cpp)
 add_jojo_test(jojo_ps1_changeclearrcnt_tests tests/test_ps1_changeclearrcnt.cpp)
