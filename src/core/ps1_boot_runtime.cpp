@@ -257,11 +257,15 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
             continue;
         }
 
+        if (step.status == R3000aStepStatus::exception &&
+            step.diagnostic.exception_code == R3000aExceptionCode::interrupt) {
+            ++report.interrupts_accepted;
+            instructions_since_progress = 0u;
+            continue;
+        }
+
         report.cpu_diagnostic = step.diagnostic;
         report.unsupported_access = bus_.last_unsupported_access();
-        if (step.status == R3000aStepStatus::exception && step.diagnostic.exception_code == R3000aExceptionCode::interrupt) {
-            ++report.interrupts_accepted;
-        }
         if (bus_.last_unsupported_cdrom_command()) {
             if (report.unsupported_access) {
                 const auto physical = Ps1MemoryBus::guest_to_physical(report.unsupported_access->guest_address);
