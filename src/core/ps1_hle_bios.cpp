@@ -37,11 +37,46 @@ void return_from_bios_vector(R3000aState& cpu) noexcept {
     cpu.gpr[0] = 0u;
 }
 
+void return_zero_from_bios_vector(R3000aState& cpu) noexcept {
+    cpu.gpr[2] = 0u;
+    return_from_bios_vector(cpu);
+}
+
 void advance_sys_instruction(R3000aState& cpu) noexcept {
     cpu.pc = cpu.next_pc;
     cpu.next_pc += 4u;
     cpu.delay_slot = {};
     cpu.gpr[0] = 0u;
+}
+
+bool is_safe_a0_return_zero(std::uint32_t selector) noexcept {
+    switch (selector) {
+        case 0x57u: case 0x58u: case 0x59u: case 0x5Au:
+        case 0x73u: case 0x74u: case 0x75u: case 0x76u: case 0x77u:
+        case 0x79u: case 0x7Au: case 0x7Bu: case 0x7Du:
+        case 0x7Fu: case 0x80u:
+        case 0x82u: case 0x83u: case 0x84u: case 0x85u:
+        case 0x86u: case 0x87u: case 0x88u: case 0x89u:
+        case 0x8Au: case 0x8Bu: case 0x8Cu: case 0x8Du:
+        case 0x8Eu: case 0x8Fu:
+        case 0xB0u: case 0xB1u: case 0xB3u:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool is_safe_c0_return_zero(std::uint32_t selector) noexcept {
+    switch (selector) {
+        case 0x0Eu:
+        case 0x0Fu:
+        case 0x10u:
+        case 0x11u:
+        case 0x14u:
+            return true;
+        default:
+            return false;
+    }
 }
 
 } // namespace
@@ -61,6 +96,10 @@ Ps1HleBiosResult Ps1HleBios::dispatch(const Ps1HleBiosCall& call, R3000aState& c
                     return {Ps1HleBiosDisposition::handled};
                 default:
                     break;
+            }
+            if (is_safe_a0_return_zero(call.selector)) {
+                return_zero_from_bios_vector(cpu);
+                return {Ps1HleBiosDisposition::handled};
             }
             break;
         case Ps1HleBiosDomain::b0:
@@ -84,6 +123,10 @@ Ps1HleBiosResult Ps1HleBios::dispatch(const Ps1HleBiosCall& call, R3000aState& c
                 root_counter_auto_ack_enabled_[index] = call.a1 != 0u;
                 cpu.gpr[2] = previous ? 1u : 0u;
                 return_from_bios_vector(cpu);
+                return {Ps1HleBiosDisposition::handled};
+            }
+            if (is_safe_c0_return_zero(call.selector)) {
+                return_zero_from_bios_vector(cpu);
                 return {Ps1HleBiosDisposition::handled};
             }
             break;
