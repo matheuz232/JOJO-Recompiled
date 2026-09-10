@@ -1,4 +1,5 @@
 #include "core/ps1_hle_bios.h"
+#include "core/ps1_memory_bus.h"
 #include "core/r3000a_state.h"
 
 #include <cstdint>
@@ -82,6 +83,88 @@ static void test_b0_changeclearpad_records_flag() {
     CHECK(bios.dispatch(call, cpu).disposition == jojo::Ps1HleBiosDisposition::handled);
     CHECK(bios.pad_card_auto_ack_enabled().has_value());
     CHECK(!bios.pad_card_auto_ack_enabled().value_or(true));
+}
+
+static void test_observed_card_bootstrap_calls_are_stateful_and_void() {
+    jojo::Ps1HleBios bios;
+    jojo::R3000aState cpu{};
+    const auto initial_hash = bios.diagnostic_state_hash();
+
+    cpu.pc = 0xB0u;
+    cpu.next_pc = 0xB4u;
+    cpu.gpr[2] = 0xA5A5A5A5u;
+    cpu.gpr[4] = 1u;
+    cpu.gpr[31] = 0x80020000u;
+    const jojo::Ps1HleBiosCall init_card{jojo::Ps1HleBiosDomain::b0, 0x4Au, cpu.pc,
+        cpu.gpr[4], 0u, 0u, 0u, cpu.gpr[31]};
+    CHECK(bios.dispatch(init_card, cpu).disposition == jojo::Ps1HleBiosDisposition::handled);
+    CHECK(cpu.gpr[2] == 0xA5A5A5A5u);
+    CHECK(cpu.pc == 0x80020000u);
+    const auto after_init = bios.diagnostic_state_hash();
+    CHECK(after_init != initial_hash);
+
+    cpu.pc = 0xB0u;
+    cpu.next_pc = 0xB4u;
+    cpu.gpr[2] = 0xB6B6B6B6u;
+    cpu.gpr[31] = 0x80020020u;
+    const jojo::Ps1HleBiosCall start_card{jojo::Ps1HleBiosDomain::b0, 0x4Bu, cpu.pc,
+        0u, 0u, 0u, 0u, cpu.gpr[31]};
+    CHECK(bios.dispatch(start_card, cpu).disposition == jojo::Ps1HleBiosDisposition::handled);
+    CHECK(cpu.gpr[2] == 0xB6B6B6B6u);
+    CHECK(cpu.pc == 0x80020020u);
+    const auto after_start = bios.diagnostic_state_hash();
+    CHECK(after_start != after_init);
+
+    cpu.pc = 0xA0u;
+    cpu.next_pc = 0xA4u;
+    cpu.gpr[2] = 0xC7C7C7C7u;
+    cpu.gpr[31] = 0x80020040u;
+    const jojo::Ps1HleBiosCall bu_init{jojo::Ps1HleBiosDomain::a0, 0x70u, cpu.pc,
+        0u, 0u, 0u, 0u, cpu.gpr[31]};
+    CHECK(bios.dispatch(bu_init, cpu).disposition == jojo::Ps1HleBiosDisposition::handled);
+    CHECK(cpu.gpr[2] == 0xC7C7C7C7u);
+    CHECK(cpu.pc == 0x80020040u);
+    CHECK(bios.diagnostic_state_hash() != after_start);
+}
+
+static void test_b0_getb0table_returns_real_jump_table_base() {
+    jojo::Ps1HleBios bios;
+    jojo::Ps1MemoryBus bus;
+    jojo::R3000aState cpu{};
+    cpu.pc = 0xB0u;
+    cpu.next_pc = 0xB4u;
+    cpu.gpr[31] = 0x80020100u;
+    const jojo::Ps1HleBiosCall get_table{jojo::Ps1HleBiosDomain::b0, 0x57u, cpu.pc,
+        0u, 0u, 0u, 0u, cpu.gpr[31]};
+    CHECK(bios.dispatch(get_table, cpu, bus).disposition == jojo::Ps1HleBiosDisposition::handled);
+    CHECK(cpu.gpr[2] == 0x00000874u);
+    CHECK(cpu.pc == 0x80020100u);
+}
+
+static void test_b0_openevent_allocates_deterministic_event_descriptors() {
+    jojo::Ps1HleBios first;
+    jojo::Ps1HleBios same;
+    jojo::Ps1HleBios different;
+
+    auto open = [](jojo::Ps1HleBios& bios, std::uint32_t func) {
+        jojo::R3000aState cpu{};
+        cpu.pc = 0xB0u;
+        cpu.next_pc = 0xB4u;
+        cpu.gpr[31] = 0x80047BF4u;
+        const jojo::Ps1HleBiosCall call{jojo::Ps1HleBiosDomain::b0, 0x08u, cpu.pc,
+            0xF4000001u, 0x00008000u, 0x00001000u, func, cpu.gpr[31]};
+        const auto result = bios.dispatch(call, cpu);
+        CHECK(result.disposition == jojo::Ps1HleBiosDisposition::handled);
+        CHECK(cpu.pc == 0x80047BF4u);
+        return cpu.gpr[2];
+    };
+
+    CHECK(open(first, 0x80047AE4u) == 0xF1000005u);
+    CHECK(open(same, 0x80047AE4u) == 0xF1000005u);
+    CHECK(first.diagnostic_state_hash() == same.diagnostic_state_hash());
+    CHECK(open(different, 0x80047AF0u) == 0xF1000005u);
+    CHECK(first.diagnostic_state_hash() != different.diagnostic_state_hash());
+    CHECK(open(first, 0x80047AE4u) == 0xF1000006u);
 }
 
 static void test_c0_changeclearrcnt_returns_previous_flag() {
@@ -229,6 +312,9 @@ int main() {
     test_a0_remove_aliases_preserve_v0_and_mark_logical_state();
     test_b0_hookentryint_records_pointer();
     test_b0_changeclearpad_records_flag();
+    test_observed_card_bootstrap_calls_are_stateful_and_void();
+    test_b0_getb0table_returns_real_jump_table_base();
+    test_b0_openevent_allocates_deterministic_event_descriptors();
     test_c0_changeclearrcnt_returns_previous_flag();
     test_sys00_preserves_registers_and_advances_instruction();
     test_sys01_sys02_match_critical_section_contract();
