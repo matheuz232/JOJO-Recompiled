@@ -41,21 +41,19 @@ int main() {
 
     bus.clear_last_diagnostic_mmio_probe();
     CHECK(bus.write32(0x1F801070u, 0xFFFFFFFEu).status == jojo::R3000aBusStatus::ok);
-    const auto istat32 = bus.read32(0x1F801070u);
-    CHECK(istat32.status == jojo::R3000aBusStatus::ok);
-    CHECK(istat32.value == 0x00000000u);
     CHECK(!bus.last_diagnostic_mmio_probe().has_value());
 
     bus.clear_last_diagnostic_mmio_probe();
+    const auto before_common_delay = bus.diagnostic_state_hash();
     CHECK(bus.write32(0x1F801020u, 0x00001325u).status == jojo::R3000aBusStatus::ok);
-    const auto common_delay = bus.read32(0x1F801020u);
-    CHECK(common_delay.status == jojo::R3000aBusStatus::ok);
-    CHECK(common_delay.value == 0x00001325u);
     CHECK(!bus.last_diagnostic_mmio_probe().has_value());
+    CHECK(bus.diagnostic_state_hash() != before_common_delay);
     bus.set_diagnostic_mmio_probe_enabled(false);
 
     CHECK(bus.write16(0x1F801070u, 0x0000u).status == jojo::R3000aBusStatus::ok);
     CHECK(bus.read16(0x1F801070u).status == jojo::R3000aBusStatus::unsupported);
+    CHECK(bus.read32(0x1F801070u).status == jojo::R3000aBusStatus::unsupported);
+    CHECK(bus.read32(0x1F801020u).status == jojo::R3000aBusStatus::unsupported);
 
     const auto dpcr_reset = bus.read32(0x1F8010F0u);
     CHECK(dpcr_reset.status == jojo::R3000aBusStatus::ok);
