@@ -123,6 +123,14 @@ static void test_gp0_port_accepts_known_nop_and_rejects_unknown_without_probe_sh
     CHECK(bus.write32(0x1F801810u, 0x00000000u).status == jojo::R3000aBusStatus::ok);
     CHECK(!bus.last_diagnostic_mmio_probe().has_value());
     CHECK(bus.diagnostic_state_hash() != before);
+    const auto after_nop = bus.diagnostic_state_hash();
+
+    bus.clear_last_unsupported_access();
+    bus.clear_last_diagnostic_mmio_probe();
+    CHECK(bus.write32(0x1F801810u, 0xE1000000u).status == jojo::R3000aBusStatus::unsupported);
+    CHECK(!bus.last_diagnostic_mmio_probe().has_value());
+    CHECK(bus.last_unsupported_access().has_value());
+    CHECK(bus.diagnostic_state_hash() == after_nop);
 
     bus.clear_last_unsupported_access();
     bus.clear_last_diagnostic_mmio_probe();
