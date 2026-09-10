@@ -10,8 +10,14 @@ constexpr std::uint32_t kDiagnosticMmioBase = 0x1F801000u;
 constexpr std::uint32_t kInterruptStatusAddress = 0x1F801070u;
 constexpr std::uint32_t kInterruptMaskAddress = 0x1F801074u;
 constexpr std::uint32_t kDmaControlAddress = 0x1F8010F0u;
+constexpr std::uint32_t kDmaInterruptAddress = 0x1F8010F4u;
 constexpr std::uint32_t kTimer1ModeAddress = 0x1F801114u;
 constexpr std::uint16_t kInterruptValidBits = 0x07FFu;
+constexpr std::uint32_t kDmaInterruptControlMask = 0x00FF807Fu;
+constexpr std::uint32_t kDmaInterruptFlagMask = 0x7F000000u;
+constexpr std::uint32_t kDmaInterruptMasterFlag = 0x80000000u;
+constexpr std::uint32_t kDmaInterruptMasterEnable = 0x00800000u;
+constexpr std::uint32_t kDmaInterruptBusError = 0x00008000u;
 
 std::uint8_t* mapped_bytes(std::uint32_t physical,
                            std::size_t width,
@@ -61,6 +67,16 @@ void write_little_endian(std::uint8_t* bytes,
         bytes[2] = static_cast<std::uint8_t>(value >> 16);
         bytes[3] = static_cast<std::uint8_t>(value >> 24);
     }
+}
+
+std::uint32_t visible_dma_interrupt(std::uint32_t state) noexcept {
+    std::uint32_t value = state & (kDmaInterruptControlMask | kDmaInterruptFlagMask);
+    if ((value & kDmaInterruptBusError) != 0u ||
+        ((value & kDmaInterruptMasterEnable) != 0u &&
+         (value & kDmaInterruptFlagMask) != 0u)) {
+        value |= kDmaInterruptMasterFlag;
+    }
+    return value;
 }
 
 } // namespace
@@ -121,6 +137,9 @@ R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
     if (physical) {
         if (*physical == kDmaControlAddress) {
             return {R3000aBusStatus::ok, dma_control_};
+        }
+        if (*physical == kDmaInterruptAddress) {
+            return {R3000aBusStatus::ok, visible_dma_interrupt(dma_interrupt_)};
         }
         if (auto* p = mapped_bytes(*physical, 4u, main_ram_, scratchpad_)) {
             return {R3000aBusStatus::ok, read_little_endian(p, 4u)};
@@ -196,6 +215,12 @@ R3000aBusResult Ps1MemoryBus::write32(std::uint32_t address, std::uint32_t value
             dma_control_ = value;
             return {R3000aBusStatus::ok, 0u};
         }
+        if (*physical == kDmaInterruptAddress) {
+            const auto flags = (dma_interrupt_ & kDmaInterruptFlagMask) &
+                               ~(value & kDmaInterruptFlagMask);
+            dma_interrupt_ = (value & kDmaInterruptControlMask) | flags;
+            return {R3000aBusStatus::ok, 0u};
+        }
         if (*physical == kTimer1ModeAddress) {
             timer1_mode_ = static_cast<std::uint16_t>(value & 0xFFFFu);
             timer1_counter_ = 0u;
@@ -235,6 +260,10 @@ Result<void> Ps1MemoryBus::load_main_ram(
 
 std::uint16_t Ps1MemoryBus::interrupt_mask() const noexcept {
     return interrupt_mask_;
+}
+
+std::uint32_t Ps1MemoryBus::dma_interrupt() const noexcept {
+    return visible_dma_interrupt(dma_interrupt_);
 }
 
 std::uint16_t Ps1MemoryBus::timer1_counter() const noexcept {
