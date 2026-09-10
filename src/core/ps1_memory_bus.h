@@ -61,6 +61,7 @@ private:
 
     std::vector<std::uint8_t> main_ram_;
     std::array<std::uint8_t, scratchpad_size> scratchpad_{};
+    std::uint32_t common_delay_{};
     std::uint16_t interrupt_status_{};
     std::uint16_t interrupt_mask_{};
     std::uint32_t dma2_madr_{};
