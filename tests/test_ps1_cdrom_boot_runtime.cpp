@@ -46,6 +46,32 @@ static std::vector<std::uint32_t> irq_program(std::uint16_t interrupt_mask) {
     };
 }
 
+static std::vector<std::uint32_t> registered_irq_program() {
+    return {
+        test_mips::i(0x09u, 0u, 4u, 2u),                         // priority=2
+        test_mips::i(0x0Fu, 0u, 5u, 0x8000u),                   // a1=0x80001000
+        test_mips::i(0x0Du, 5u, 5u, 0x1000u),
+        test_mips::i(0x09u, 0u, 9u, 0x02u),                     // C0:02
+        test_mips::j(0x03u, 0x000000C0u >> 2),                  // jal 0x800000C0
+        0x00000000u,
+        test_mips::i(0x0Fu, 0u, 8u, 0x1F80u),
+        test_mips::i(0x0Du, 8u, 8u, 0x1074u),                   // I_MASK
+        test_mips::i(0x09u, 0u, 10u, 4u),
+        test_mips::i(0x2Bu, 8u, 10u, 0u),
+        test_mips::i(0x09u, 0u, 13u, 0x0401u),
+        mtc0(13u, 12u),                                         // IEc + IM2
+        test_mips::i(0x0Fu, 0u, 11u, 0x1F80u),
+        test_mips::i(0x0Du, 11u, 11u, 0x1800u),                 // CD-ROM index port
+        test_mips::i(0x09u, 0u, 12u, 0u),
+        test_mips::i(0x28u, 11u, 12u, 0u),                      // bank 0
+        test_mips::i(0x09u, 0u, 9u, 0x35u),                     // residual selector
+        test_mips::i(0x09u, 0u, 12u, 1u),
+        test_mips::i(0x28u, 11u, 12u, 1u),                      // command 01 -> IRQ2
+        test_mips::j(0x02u, 0x8001004Cu >> 2),
+        0x00000000u,
+    };
+}
+
 static std::vector<std::uint32_t> command_program(std::uint16_t command) {
     return {
         test_mips::i(0x0Fu, 0u, 8u, 0x1F80u),
@@ -57,6 +83,21 @@ static std::vector<std::uint32_t> command_program(std::uint16_t command) {
         test_mips::j(0x02u, 0x80010018u >> 2),
         0x00000000u,
     };
+}
+
+static void prepare_interrupt_node(jojo::Ps1BootRuntime& runtime,
+                                   std::uint32_t first_callback) {
+    CHECK(runtime.bus().write32(0x80001004u, 0u).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(0x80001008u, first_callback).status == jojo::R3000aBusStatus::ok);
+}
+
+static void write_return_from_exception_callback(jojo::Ps1BootRuntime& runtime,
+                                                 std::uint32_t address) {
+    CHECK(runtime.bus().write32(address + 0u,
+        test_mips::i(0x09u, 0u, 9u, 0x17u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 4u,
+        test_mips::j(0x02u, 0x000000B0u >> 2)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(address + 8u, 0u).status == jojo::R3000aBusStatus::ok);
 }
 
 static void test_runtime_seeds_post_bios_cdrom_state() {
@@ -144,6 +185,73 @@ static void test_unsupported_cdrom_command_has_device_stop_reason() {
     }
 }
 
+static void test_zero_exception_vector_dispatches_registered_handler_without_fake_a0() {
+    auto runtime = make_runtime(registered_irq_program());
+    prepare_interrupt_node(runtime, 0x80012000u);
+    write_return_from_exception_callback(runtime, 0x80012000u);
+
+    jojo::Ps1BootOptions options{};
+    options.instruction_budget = 128u;
+    options.bios_event_capacity = 64u;
+    const auto report = runtime.run(options);
+
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(report.interrupts_accepted >= 1u);
+    bool saw_return_from_exception = false;
+    for (const auto& event : report.recent_bios_calls) {
+        CHECK(!(event.table == 0xA0u && event.selector == 0x35u));
+        if (event.table == 0xB0u && event.selector == 0x17u) {
+            saw_return_from_exception = true;
+        }
+    }
+    CHECK(saw_return_from_exception);
+}
+
+static void test_custom_exception_vector_remains_guest_owned() {
+    auto runtime = make_runtime(registered_irq_program());
+    prepare_interrupt_node(runtime, 0x80012000u);
+    write_return_from_exception_callback(runtime, 0x80012000u);
+    CHECK(runtime.bus().write32(0x80000080u,
+        test_mips::j(0x02u, 0x80000080u >> 2)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(0x80000084u, 0u).status == jojo::R3000aBusStatus::ok);
+
+    jojo::Ps1BootOptions options{};
+    options.instruction_budget = 96u;
+    options.bios_event_capacity = 32u;
+    const auto report = runtime.run(options);
+
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
+    CHECK(report.interrupts_accepted == 1u);
+    for (const auto& event : report.recent_bios_calls) {
+        CHECK(!(event.table == 0xB0u && event.selector == 0x17u));
+    }
+    CHECK(runtime.cpu_state().pc == 0x80000080u || runtime.cpu_state().pc == 0x80000084u);
+}
+
+static void test_nested_interrupt_while_callback_active_is_terminal() {
+    auto runtime = make_runtime(registered_irq_program());
+    prepare_interrupt_node(runtime, 0x80012100u);
+    CHECK(runtime.bus().write32(0x80012100u,
+        test_mips::i(0x09u, 0u, 8u, 0x0401u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(0x80012104u,
+        mtc0(8u, 12u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(0x80012108u,
+        test_mips::r(31u, 0u, 0u, 0u, 0x08u)).status == jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(0x8001210Cu, 0u).status == jojo::R3000aBusStatus::ok);
+
+    jojo::Ps1BootOptions options{};
+    options.instruction_budget = 128u;
+    const auto report = runtime.run(options);
+
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::cpu_boundary);
+    CHECK(report.interrupts_accepted == 2u);
+    CHECK(report.cpu_diagnostic.has_value());
+    if (report.cpu_diagnostic) {
+        CHECK(report.cpu_diagnostic->exception_code == jojo::R3000aExceptionCode::interrupt);
+        CHECK(report.cpu_diagnostic->pc == 0x80012108u);
+    }
+}
+
 int main() {
     test_runtime_seeds_post_bios_cdrom_state();
     test_enabled_cdrom_irq_enters_exception_handler_without_terminal_stop();
@@ -151,5 +259,8 @@ int main() {
     test_supported_cdrom_command_reports_progress();
     test_cdrom_command_count_survives_zero_event_capacity();
     test_unsupported_cdrom_command_has_device_stop_reason();
+    test_zero_exception_vector_dispatches_registered_handler_without_fake_a0();
+    test_custom_exception_vector_remains_guest_owned();
+    test_nested_interrupt_while_callback_active_is_terminal();
     return failures ? 1 : 0;
 }
