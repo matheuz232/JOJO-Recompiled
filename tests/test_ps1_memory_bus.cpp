@@ -42,6 +42,11 @@ int main() {
     CHECK(dpcr_written.status == jojo::R3000aBusStatus::ok);
     CHECK(dpcr_written.value == 0x33333333u);
 
+    CHECK(bus.write32(0x1F801114u, 0xABCD0100u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.timer1_mode() == 0x0100u);
+    CHECK(bus.timer1_counter() == 0x0000u);
+    CHECK(bus.read32(0x1F801114u).status == jojo::R3000aBusStatus::unsupported);
+
     bus.clear_last_unsupported_access();
     bus.set_diagnostic_mmio_probe_enabled(true);
     const auto probe_zero = bus.read32(0x1F801080u);
