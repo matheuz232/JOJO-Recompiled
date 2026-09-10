@@ -8,6 +8,8 @@
 
 namespace jojo {
 
+class Ps1MemoryBus;
+
 enum class Ps1HleBiosDomain : std::uint8_t {
     a0,
     b0,
@@ -47,6 +49,11 @@ public:
         const Ps1HleBiosCall& call,
         R3000aState& cpu) noexcept;
 
+    [[nodiscard]] Ps1HleBiosResult dispatch(
+        const Ps1HleBiosCall& call,
+        R3000aState& cpu,
+        Ps1MemoryBus& bus) noexcept;
+
     [[nodiscard]] std::uint64_t diagnostic_state_hash() const noexcept;
 
     [[nodiscard]] const std::optional<Ps1BiosHeapState>& heap_state() const noexcept;
@@ -57,11 +64,17 @@ public:
     [[nodiscard]] bool iso9660_removed() const noexcept;
 
 private:
+    [[nodiscard]] Ps1HleBiosResult dispatch_impl(
+        const Ps1HleBiosCall& call,
+        R3000aState& cpu,
+        Ps1MemoryBus* bus) noexcept;
+
     std::optional<Ps1BiosHeapState> heap_state_{};
     std::optional<std::uint32_t> interrupt_hook_address_{};
     std::optional<bool> pad_card_auto_ack_enabled_{};
     std::array<std::optional<bool>, 4> root_counter_auto_ack_enabled_{};
     bool iso9660_removed_{};
+    bool c0_table_materialized_{};
 };
 
 } // namespace jojo
