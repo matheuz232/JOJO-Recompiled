@@ -311,6 +311,78 @@ static void test_unreadable_custom_hook_is_terminal_without_partial_cpu_mutation
     CHECK(bus.last_unsupported_access().has_value());
 }
 
+static void test_copy_and_future_execution_hash_identity() {
+    auto seed = interrupted_cpu();
+    jojo::Ps1InterruptContinuation base;
+    base.begin(seed, 0x00000401u, 0x80010000u, 0x80010004u);
+    const auto copied = base;
+    CHECK(copied.diagnostic_state_hash() == base.diagnostic_state_hash());
+
+    jojo::Ps1InterruptContinuation different_resume;
+    different_resume.begin(seed, 0x00000401u, 0x80010020u, 0x80010024u);
+    CHECK(different_resume.diagnostic_state_hash() != base.diagnostic_state_hash());
+
+    jojo::Ps1HleBios callback_bios;
+    jojo::Ps1MemoryBus callback_bus;
+    enqueue_node(callback_bios, callback_bus, 0u,
+                 0x80001000u, 0x80012100u, 0x80012000u);
+    auto callback_cpu = interrupted_cpu();
+    jojo::Ps1InterruptContinuation phases;
+    phases.begin(callback_cpu, 0x00000401u, 0x80010000u, 0x80010004u);
+    const auto dispatch_hash = phases.diagnostic_state_hash();
+    CHECK(phases.drive(callback_cpu, callback_bus, callback_bios).status ==
+          jojo::Ps1InterruptDriveStatus::guest_execution);
+    CHECK(phases.phase() == jojo::Ps1InterruptContinuationPhase::first_callback);
+    const auto first_hash = phases.diagnostic_state_hash();
+    CHECK(first_hash != dispatch_hash);
+    const auto first_copy = phases;
+    CHECK(first_copy.diagnostic_state_hash() == first_hash);
+
+    callback_cpu.pc = jojo::Ps1InterruptContinuation::callback_return_sentinel;
+    callback_cpu.gpr[2] = 1u;
+    CHECK(phases.drive(callback_cpu, callback_bus, callback_bios).status ==
+          jojo::Ps1InterruptDriveStatus::guest_execution);
+    CHECK(phases.phase() == jojo::Ps1InterruptContinuationPhase::second_callback);
+    CHECK(phases.diagnostic_state_hash() != first_hash);
+
+    jojo::Ps1HleBios hook_bios;
+    jojo::Ps1MemoryBus hook_bus;
+    constexpr std::uint32_t hook = 0x80003000u;
+    CHECK(hook_bus.write32(hook, 0x80014000u).status == jojo::R3000aBusStatus::ok);
+    for (std::uint32_t i = 1u; i < 12u; ++i) {
+        CHECK(hook_bus.write32(hook + i * 4u, 0x18000000u + i).status ==
+              jojo::R3000aBusStatus::ok);
+    }
+    install_hook(hook_bios, hook_bus, hook);
+    auto hook_cpu = interrupted_cpu();
+    jojo::Ps1InterruptContinuation hooked;
+    hooked.begin(hook_cpu, 0x00000401u, 0x80010000u, 0x80010004u);
+    const auto hook_dispatch_hash = hooked.diagnostic_state_hash();
+    CHECK(hooked.drive(hook_cpu, hook_bus, hook_bios).status ==
+          jojo::Ps1InterruptDriveStatus::guest_execution);
+    CHECK(hooked.phase() == jojo::Ps1InterruptContinuationPhase::hook_guest);
+    CHECK(hooked.diagnostic_state_hash() != hook_dispatch_hash);
+
+    jojo::Ps1HleBios left_bios;
+    jojo::Ps1MemoryBus left_bus;
+    jojo::Ps1HleBios right_bios;
+    jojo::Ps1MemoryBus right_bus;
+    enqueue_node(left_bios, left_bus, 0u, 0x80001100u, 0u, 0x80015000u);
+    enqueue_node(right_bios, right_bus, 0u, 0x80001200u, 0u, 0x80015000u);
+    auto left_cpu = interrupted_cpu();
+    auto right_cpu = interrupted_cpu();
+    jojo::Ps1InterruptContinuation left;
+    jojo::Ps1InterruptContinuation right;
+    left.begin(left_cpu, 0x00000401u, 0x80010000u, 0x80010004u);
+    right.begin(right_cpu, 0x00000401u, 0x80010000u, 0x80010004u);
+    CHECK(left.drive(left_cpu, left_bus, left_bios).status ==
+          jojo::Ps1InterruptDriveStatus::guest_execution);
+    CHECK(right.drive(right_cpu, right_bus, right_bios).status ==
+          jojo::Ps1InterruptDriveStatus::guest_execution);
+    CHECK(left.phase() == right.phase());
+    CHECK(left.diagnostic_state_hash() != right.diagnostic_state_hash());
+}
+
 int main() {
     test_begin_and_restore_exact_v0_context();
     test_equal_continuations_hash_equal();
@@ -322,5 +394,6 @@ int main() {
     test_default_reset_entry_hook_restores_directly();
     test_custom_hook_loads_guest_context_then_b017_restores_original();
     test_unreadable_custom_hook_is_terminal_without_partial_cpu_mutation();
+    test_copy_and_future_execution_hash_identity();
     return failures ? 1 : 0;
 }
