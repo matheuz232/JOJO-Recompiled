@@ -9,9 +9,13 @@ namespace {
 constexpr std::uint32_t kDiagnosticMmioBase = 0x1F801000u;
 constexpr std::uint32_t kInterruptStatusAddress = 0x1F801070u;
 constexpr std::uint32_t kInterruptMaskAddress = 0x1F801074u;
+constexpr std::uint32_t kDma2MadrAddress = 0x1F8010A0u;
+constexpr std::uint32_t kDma2BcrAddress = 0x1F8010A4u;
+constexpr std::uint32_t kDma2ChcrAddress = 0x1F8010A8u;
 constexpr std::uint32_t kDmaControlAddress = 0x1F8010F0u;
 constexpr std::uint32_t kDmaInterruptAddress = 0x1F8010F4u;
 constexpr std::uint32_t kTimer1ModeAddress = 0x1F801114u;
+constexpr std::uint32_t kGpuGp0Address = 0x1F801810u;
 constexpr std::uint32_t kGpuGp1Address = 0x1F801814u;
 constexpr std::uint16_t kInterruptValidBits = 0x07FFu;
 constexpr std::uint32_t kDmaInterruptControlMask = 0x00FF807Fu;
@@ -19,6 +23,7 @@ constexpr std::uint32_t kDmaInterruptFlagMask = 0x7F000000u;
 constexpr std::uint32_t kDmaInterruptMasterFlag = 0x80000000u;
 constexpr std::uint32_t kDmaInterruptMasterEnable = 0x00800000u;
 constexpr std::uint32_t kDmaInterruptBusError = 0x00008000u;
+constexpr std::uint32_t kDmaStartBusy = 0x01000000u;
 constexpr std::uint64_t kFnvOffset = 14695981039346656037ull;
 constexpr std::uint64_t kFnvPrime = 1099511628211ull;
 
@@ -166,11 +171,23 @@ R3000aBusResult Ps1MemoryBus::read16(std::uint32_t address) noexcept {
 R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (*physical == kDma2MadrAddress) {
+            return {R3000aBusStatus::ok, dma2_madr_};
+        }
+        if (*physical == kDma2BcrAddress) {
+            return {R3000aBusStatus::ok, dma2_bcr_};
+        }
+        if (*physical == kDma2ChcrAddress) {
+            return {R3000aBusStatus::ok, dma2_chcr_};
+        }
         if (*physical == kDmaControlAddress) {
             return {R3000aBusStatus::ok, dma_control_};
         }
         if (*physical == kDmaInterruptAddress) {
             return {R3000aBusStatus::ok, visible_dma_interrupt(dma_interrupt_)};
+        }
+        if (*physical == kGpuGp0Address) {
+            return {R3000aBusStatus::ok, gpu_.read_gp0()};
         }
         if (*physical == kGpuGp1Address) {
             return {R3000aBusStatus::ok, gpu_.gpu_stat()};
@@ -245,6 +262,22 @@ R3000aBusResult Ps1MemoryBus::write16(std::uint32_t address, std::uint16_t value
 R3000aBusResult Ps1MemoryBus::write32(std::uint32_t address, std::uint32_t value) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
+        if (*physical == kDma2MadrAddress) {
+            dma2_madr_ = value & 0x00FFFFFFu;
+            return {R3000aBusStatus::ok, 0u};
+        }
+        if (*physical == kDma2BcrAddress) {
+            dma2_bcr_ = value;
+            return {R3000aBusStatus::ok, 0u};
+        }
+        if (*physical == kDma2ChcrAddress) {
+            if ((value & kDmaStartBusy) != 0u) {
+                last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 4u, true, value};
+                return {R3000aBusStatus::unsupported, 0u};
+            }
+            dma2_chcr_ = value;
+            return {R3000aBusStatus::ok, 0u};
+        }
         if (*physical == kDmaControlAddress) {
             dma_control_ = value;
             return {R3000aBusStatus::ok, 0u};
@@ -259,6 +292,13 @@ R3000aBusResult Ps1MemoryBus::write32(std::uint32_t address, std::uint32_t value
             timer1_mode_ = static_cast<std::uint16_t>(value & 0xFFFFu);
             timer1_counter_ = 0u;
             return {R3000aBusStatus::ok, 0u};
+        }
+        if (*physical == kGpuGp0Address) {
+            if (gpu_.write_gp0(value)) {
+                return {R3000aBusStatus::ok, 0u};
+            }
+            last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 4u, true, value};
+            return {R3000aBusStatus::unsupported, 0u};
         }
         if (*physical == kGpuGp1Address) {
             if (gpu_.write_gp1(value)) {
@@ -329,6 +369,9 @@ std::uint64_t Ps1MemoryBus::diagnostic_state_hash() const noexcept {
     hash_bytes(hash, std::span<const std::uint8_t>{scratchpad_.data(), scratchpad_.size()});
     hash_u16(hash, interrupt_status_);
     hash_u16(hash, interrupt_mask_);
+    hash_u32(hash, dma2_madr_);
+    hash_u32(hash, dma2_bcr_);
+    hash_u32(hash, dma2_chcr_);
     hash_u32(hash, dma_control_);
     hash_u32(hash, dma_interrupt_);
     hash_u16(hash, timer1_counter_);
