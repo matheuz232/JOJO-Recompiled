@@ -42,16 +42,12 @@ void Ps1GpuState::reset_control_state() noexcept {
     display_mode_ = 0u;
     irq1_ = false;
     gp0_read_latch_ = 0u;
-    draw_mode_ = 0u;
 }
 
 bool Ps1GpuState::write_gp0(std::uint32_t value) noexcept {
     const auto command = static_cast<std::uint8_t>(value >> 24u);
     switch (command) {
         case 0x00u: // NOP
-            break;
-        case 0xE1u: // Draw mode setting; retained as guest-visible state only.
-            draw_mode_ = value & 0x00FFFFFFu;
             break;
         default:
             return false;
@@ -153,7 +149,6 @@ std::uint64_t Ps1GpuState::diagnostic_state_hash() const noexcept {
     hash_byte(hash, display_mode_);
     hash_byte(hash, static_cast<std::uint8_t>(irq1_));
     hash_u32(hash, gp0_read_latch_);
-    hash_u32(hash, draw_mode_);
     hash_u64(hash, gp0_command_count_);
     hash_u64(hash, gp1_command_count_);
     hash_u64(hash, command_buffer_reset_count_);
