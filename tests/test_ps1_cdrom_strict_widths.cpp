@@ -66,6 +66,21 @@ static std::vector<std::uint32_t> cdrom_command_then_read_hsts_program() {
     };
 }
 
+static std::vector<std::uint32_t> cdrom_command_bank1_then_read_result_program() {
+    return {
+        test_mips::i(0x0Fu, 0u, 8u, 0x1F80u),
+        test_mips::i(0x0Du, 8u, 8u, 0x1800u),
+        test_mips::i(0x09u, 0u, 9u, 0u),
+        test_mips::i(0x28u, 8u, 9u, 0u),
+        test_mips::i(0x09u, 0u, 9u, 1u),
+        test_mips::i(0x28u, 8u, 9u, 1u),
+        test_mips::i(0x28u, 8u, 9u, 0u),
+        test_mips::i(0x24u, 8u, 10u, 1u),
+        test_mips::j(0x02u, 0x80010020u >> 2),
+        0x00000000u,
+    };
+}
+
 static void test_istat_read32_returns_latched_irq_without_probe() {
     jojo::Ps1MemoryBus bus;
     bus.cdrom().seed_post_bios(0x02u, 0x1Fu);
@@ -117,6 +132,24 @@ static void test_hsts_read8_is_dynamic_and_not_a_probe() {
     CHECK(bus.read8(0x1F801800u).value == 0x18u);
 }
 
+static void test_result_read8_is_available_in_bank1_without_probe() {
+    jojo::Ps1MemoryBus bus;
+    bus.cdrom().seed_post_bios(0x02u, 0x1Fu);
+    bus.set_diagnostic_mmio_probe_enabled(true);
+
+    CHECK(bus.write8(0x1F801800u, 0x00u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.write8(0x1F801801u, 0x01u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.write8(0x1F801800u, 0x01u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.read8(0x1F801800u).value == 0x39u);
+
+    bus.clear_last_diagnostic_mmio_probe();
+    const auto result = bus.read8(0x1F801801u);
+    CHECK(result.status == jojo::R3000aBusStatus::ok);
+    CHECK(result.value == 0x02u);
+    CHECK(!bus.last_diagnostic_mmio_probe().has_value());
+    CHECK(bus.read8(0x1F801800u).value == 0x19u);
+}
+
 static void test_istat_read32_is_not_a_max3_dependency() {
     const auto executable = make_executable(cdrom_irq_then_read_istat32_program());
     const auto explored = jojo::explore_ps1_max3(executable, fast_max3_options());
@@ -149,6 +182,22 @@ static void test_hsts_read8_is_not_a_max3_dependency() {
     CHECK(report.best_report.cdrom_command_count == 1u);
 }
 
+static void test_result_read8_bank1_is_not_a_max3_dependency() {
+    const auto executable = make_executable(cdrom_command_bank1_then_read_result_program());
+    const auto explored = jojo::explore_ps1_max3(executable, fast_max3_options());
+    CHECK(explored);
+    if (!explored) return;
+
+    const auto& report = explored.value;
+    CHECK(report.nodes.size() == 1u);
+    CHECK(std::none_of(report.dependencies.begin(), report.dependencies.end(), [](const auto& dependency) {
+        return dependency.address == 0x1F801801u &&
+               dependency.width == 1u &&
+               !dependency.write;
+    }));
+    CHECK(report.best_report.cdrom_command_count == 1u);
+}
+
 int main() {
     jojo::Ps1MemoryBus bus;
     bus.set_diagnostic_mmio_probe_enabled(true);
@@ -173,7 +222,9 @@ int main() {
 
     test_istat_read32_returns_latched_irq_without_probe();
     test_hsts_read8_is_dynamic_and_not_a_probe();
+    test_result_read8_is_available_in_bank1_without_probe();
     test_istat_read32_is_not_a_max3_dependency();
     test_hsts_read8_is_not_a_max3_dependency();
+    test_result_read8_bank1_is_not_a_max3_dependency();
     return failures ? 1 : 0;
 }
