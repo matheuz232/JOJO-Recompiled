@@ -25,7 +25,7 @@ static void test_gp1_reset_state_and_supported_control_commands() {
     CHECK(gpu.horizontal_start() == 0x123u);
     CHECK(gpu.horizontal_end() == 0xABCu);
 
-    CHECK(gpu.write_gp1(0x070CD045u));
+    CHECK(gpu.write_gp1(0x07033445u));
     CHECK(gpu.vertical_start() == 0x045u);
     CHECK(gpu.vertical_end() == 0x0CDu);
 
