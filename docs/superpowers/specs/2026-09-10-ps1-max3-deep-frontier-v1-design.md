@@ -37,6 +37,8 @@ A frontier reached through a speculative ancestor can never be promoted to `stri
 
 The report must make this distinction explicit at node, dependency/frontier, and path levels.
 
+The existing BIOS fallback branches are diagnostic continuations and therefore become explicitly classified as speculative in v2 reporting, even when deep MMIO exploration is disabled. This is a reporting clarification, not a behavioral change to existing BIOS branching.
+
 ## 4. Scope of speculative continuation in v1
 
 ### 4.1 Supported speculative frontier classes
@@ -52,10 +54,9 @@ For an unsupported MMIO read, the explorer may branch on a deterministic ordered
 
 1. `0x00000000`;
 2. `0x00000001`;
-3. all ones for the width (`0xFF`, `0xFFFF`, or `0xFFFFFFFF`);
-4. all address bits currently representable in the destination width are **not** used; no address-derived or random guesses are allowed.
+3. all ones for the width (`0xFF`, `0xFFFF`, or `0xFFFFFFFF`).
 
-Duplicate values after masking are removed while preserving order.
+Duplicate values after masking are removed while preserving order. No address-derived, random, timing-derived, or device-specific guesses are allowed.
 
 These values are deliberately small and generic. They are not hardware claims.
 
@@ -85,7 +86,7 @@ A new diagnostic-only runtime mechanism will allow the explorer to continue exac
 
 - inspect whether the most recent terminal boundary is an expandable unsupported MMIO read;
 - apply one fallback value to that exact blocked access;
-- resume execution after the load using normal R3000A semantics.
+- resume execution by re-executing the blocked load through normal R3000A execution.
 
 The override is one-shot and must be keyed strongly enough that it cannot affect a later unrelated read. At minimum the identity includes:
 
@@ -94,7 +95,7 @@ The override is one-shot and must be keyed strongly enough that it cannot affect
 - access width;
 - read direction.
 
-The override is consumed by that one access and then cleared.
+The override is consumed by that one access and then cleared. Applying an override is rejected unless the runtime is still stopped at the exact matching frontier.
 
 ### 5.2 Load semantics
 
@@ -106,7 +107,9 @@ The continuation must preserve the semantics of the original load instruction, i
 - PC/next-PC behavior;
 - pending-load retirement rules already implemented by the reference executor.
 
-The explorer must not patch registers directly if doing so would bypass these semantics. The preferred implementation is a one-shot diagnostic bus read override consumed while the executor re-executes the blocked instruction.
+The explorer must not patch registers directly if doing so would bypass these semantics. The implementation must use a one-shot diagnostic bus read override consumed while the executor re-executes the blocked instruction.
+
+Tests must also prove that reaching an unsupported read does not partially retire that blocked load before the fallback is applied.
 
 ### 5.3 Production isolation
 
@@ -119,18 +122,30 @@ The override API is diagnostic-only:
 
 ## 6. Deep exploration model
 
-### 6.1 Options
+### 6.1 Options and limits
 
 `Ps1Max3Options` gains explicit deep-mode controls. Defaults preserve current behavior.
 
 Required controls:
 
 - `deep_frontier_enabled` — default `false`;
-- `max_unique_frontiers` — deep-mode default `32`;
-- `max_speculative_depth` — deep-mode default `8`;
+- `max_unique_frontiers` — default `32` when deep mode is enabled;
+- `max_speculative_depth` — default `8` when deep mode is enabled;
+- existing `max_branch_depth` remains the total diagnostic-continuation depth guard;
 - existing `max_nodes` and `max_total_retired` remain hard global bounds.
 
-`ps1_max3_local_evidence_options()` enables Deep Frontier v1 for user-generated checkpoints after implementation, while unit-test helper options can choose either mode explicitly.
+A child may be expanded only when both conditions hold:
+
+- `depth < max_branch_depth`;
+- `speculative_depth < max_speculative_depth`.
+
+For compatibility, strict/default test options keep their existing `max_branch_depth` behavior. `ps1_max3_local_evidence_options()` enables Deep Frontier v1 for user checkpoints and sets both `max_branch_depth` and `max_speculative_depth` to `8`, so the new speculative-depth limit is not accidentally shadowed by the old default depth of `6`.
+
+`max_speculative_depth` is **path-local**. Reaching it stops expansion of that node only; sibling paths continue.
+
+`max_unique_frontiers` is **global**. Once the unique-frontier cap has been reached, no new frontier-producing branch may be expanded. If this leaves otherwise-expandable work unexplored, the report termination reason is `frontier_limit`; if no work was truncated, the report may still terminate as `completed`.
+
+`Ps1Max3TerminationReason` therefore gains `frontier_limit`. It does not gain a global `speculative_depth_limit` reason.
 
 ### 6.2 Node provenance
 
@@ -140,7 +155,8 @@ Each MAX³ node records:
 - speculative depth;
 - the continuation decision used from its parent;
 - frontier identity/type that produced that decision;
-- existing state hash and progress metrics.
+- existing state hash and progress metrics;
+- an optional path-local expansion stop reason (`branch_depth`, `speculative_depth`, `deduplicated`, or terminal frontier class).
 
 Root is always strict with speculative depth zero.
 
@@ -162,10 +178,13 @@ For MMIO read:
 - class;
 - physical address;
 - width;
-- guest PC/opcode identity;
+- guest PC;
+- opcode;
 - diagnostic state hash.
 
-The global `max_unique_frontiers` bound counts unique expandable and terminal frontiers after deduplication. Repeated observations of the same frontier increase an occurrence count rather than consuming another unique slot.
+For terminal writes/device/CPU boundaries, the key includes the corresponding stop class plus the available PC/opcode/address/width/value identity needed to distinguish materially different blockers.
+
+Repeated observations of the same key increase an occurrence count rather than consuming another unique-frontier slot.
 
 ### 6.4 Search order
 
@@ -184,7 +203,7 @@ MMIO read fallback order is:
 2. one;
 3. width-masked all ones.
 
-If node, frontier, speculative-depth, or retired-instruction limits are reached, exploration terminates with an explicit reason. No partial limit condition is reported as `completed`.
+Global termination reasons remain explicit: `completed`, `node_limit`, `total_retired_limit`, or `frontier_limit`. Path-local depth limits do not terminate unrelated siblings and do not by themselves change the global termination reason.
 
 ## 7. Frontier graph and dependency chains
 
@@ -221,7 +240,9 @@ The existing observable-progress ranking remains primary:
 7. unique dependencies/frontiers;
 8. cumulative retired instructions.
 
-Deep mode adds one tie-break principle: when two paths have otherwise equal progress, prefer the path with **lower speculative depth**. A strict path always outranks an otherwise-equal speculative path.
+Deep mode adds one tie-break principle **before cumulative retired instructions**: when two paths have otherwise equal progress through item 7, prefer the path with lower speculative depth. A strict path therefore outranks an otherwise-equal speculative path.
+
+Only after speculative depth ties does cumulative retired instruction count break the tie.
 
 This prevents a long speculative path from automatically displacing a shorter evidence-strong path merely because it retired more instructions.
 
@@ -241,12 +262,12 @@ It must include:
 - `speculative_frontier_count`;
 - `unique_frontier_count`;
 - per-frontier provenance fields from section 7;
-- per-node evidence class and speculative depth;
+- per-node evidence class, speculative depth, and path-local expansion-stop reason;
 - typed continuation decisions;
 - best path with its provenance;
 - the existing detailed `best_report` block.
 
-The old ambiguous `dependency_count` may remain for compatibility, but v2 must separately expose the unique frontier counts and evidence classes.
+The old `dependency_count` and dependency records remain for compatibility, but v2 separately exposes the unique frontier records and evidence classes. Existing dependency semantics are not repurposed to mean speculative graph nodes.
 
 No proprietary game bytes, RAM dumps, sectors, BIOS code, or assets are added to the report. Existing bounded trace/MMIO/BIOS event diagnostics remain the maximum payload.
 
@@ -256,10 +277,11 @@ When `deep_frontier_enabled=false`:
 
 - no MMIO fallback branches are generated;
 - BIOS branching behaves as it does before this feature;
+- BIOS fallback descendants are simply labeled `speculative` in v2 provenance;
 - strict frontier semantics remain unchanged;
 - diagnostic MMIO overrides are never armed.
 
-The serializer may use v2 after the feature lands, but all strict evidence must be representable without semantic loss. Tests must cover strict-mode equivalence for representative existing fixtures.
+The serializer uses v2 after the feature lands, but all existing v1 information remains present with the same meaning. Tests must cover semantic equivalence for representative existing fixtures rather than requiring byte-identical v1 text.
 
 ## 11. Safety against false paths
 
@@ -298,6 +320,7 @@ All tests use synthetic PS1 executable fixtures only.
 
 - unsupported `LBU` MMIO read can be resumed through a one-shot zero fallback;
 - `LB`, `LBU`, `LH`, `LHU`, and `LW` preserve sign/zero extension and load delay;
+- blocked load is not partially retired before fallback application;
 - override rejects wrong PC/address/width/write direction;
 - override is consumed exactly once;
 - supported MMIO is never replaced by a diagnostic override;
@@ -305,13 +328,15 @@ All tests use synthetic PS1 executable fixtures only.
 
 ### Explorer tests
 
-- strict mode preserves current BIOS-only branching;
+- strict mode preserves current BIOS-only branching behavior;
+- existing BIOS fallback descendants are classified speculative in v2;
 - deep mode discovers a second MMIO-read frontier after speculatively crossing the first;
 - a downstream frontier is marked speculative and records its assumption chain;
 - MMIO writes remain terminal and do not branch;
 - unique frontier deduplication counts repeated blockers once;
-- `max_unique_frontiers` terminates deterministically;
-- `max_speculative_depth` terminates deterministically;
+- `max_unique_frontiers` truncates deterministically and reports `frontier_limit` only when work is actually left unexplored;
+- `max_speculative_depth` stops only the affected path and siblings still run;
+- `max_branch_depth` and `max_speculative_depth` both gate expansion;
 - state-hash deduplication does not merge distinct pending overrides;
 - ranking prefers lower speculative depth when progress is otherwise equal;
 - repeated exploration yields identical frontier and node ordering.
@@ -322,7 +347,8 @@ All tests use synthetic PS1 executable fixtures only.
 - strict/speculative counts;
 - typed decisions;
 - provenance chain serialization;
-- terminal reason serialization;
+- path-local expansion-stop serialization;
+- global `frontier_limit` serialization;
 - no proprietary payload fields.
 
 ### Integration/CI
