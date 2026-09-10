@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -86,7 +87,12 @@ struct Ps1BootOptions {
 };
 
 [[nodiscard]] constexpr Ps1BootOptions ps1_local_evidence_options() noexcept {
-    return Ps1BootOptions{50000000u, 256u, true, 512u};
+    return Ps1BootOptions{
+        std::numeric_limits<std::uint64_t>::max(),
+        512u,
+        true,
+        1024u,
+    };
 }
 
 } // namespace jojo
