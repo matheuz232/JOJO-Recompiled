@@ -1,11 +1,19 @@
 #include "core/ps1_hle_bios.h"
 
+#include "core/ps1_memory_bus.h"
+
 namespace jojo {
 namespace {
 
 constexpr std::uint64_t kFnvOffset = 14695981039346656037ull;
 constexpr std::uint64_t kFnvPrime = 1099511628211ull;
 constexpr std::uint32_t kCriticalMask = (1u << 0) | (1u << 10);
+constexpr std::uint32_t kC0Table = 0x00000674u;
+constexpr std::uint32_t kC0ExceptionEntry = 0x00000C80u;
+constexpr std::uint32_t kDefaultEntryInt = 0x00006CF4u;
+constexpr std::uint32_t kReturnFromException = 0x00000F40u;
+constexpr std::uint32_t kKernelSavedSp = 0x000085D4u;
+constexpr std::uint32_t kC0TableWords = 0x1Eu;
 
 void hash_byte(std::uint64_t& hash, std::uint8_t value) noexcept {
     hash ^= value;
@@ -49,6 +57,10 @@ void advance_sys_instruction(R3000aState& cpu) noexcept {
     cpu.gpr[0] = 0u;
 }
 
+bool write32_ok(Ps1MemoryBus& bus, std::uint32_t address, std::uint32_t value) noexcept {
+    return bus.write32(address, value).status == R3000aBusStatus::ok;
+}
+
 bool is_safe_a0_return_zero(std::uint32_t selector) noexcept {
     switch (selector) {
         case 0x57u: case 0x58u: case 0x59u: case 0x5Au:
@@ -81,12 +93,31 @@ bool is_safe_c0_return_zero(std::uint32_t selector) noexcept {
 
 } // namespace
 
-Ps1HleBiosResult Ps1HleBios::dispatch(const Ps1HleBiosCall& call, R3000aState& cpu) noexcept {
+Ps1HleBiosResult Ps1HleBios::dispatch(
+    const Ps1HleBiosCall& call,
+    R3000aState& cpu) noexcept {
+    return dispatch_impl(call, cpu, nullptr);
+}
+
+Ps1HleBiosResult Ps1HleBios::dispatch(
+    const Ps1HleBiosCall& call,
+    R3000aState& cpu,
+    Ps1MemoryBus& bus) noexcept {
+    return dispatch_impl(call, cpu, &bus);
+}
+
+Ps1HleBiosResult Ps1HleBios::dispatch_impl(
+    const Ps1HleBiosCall& call,
+    R3000aState& cpu,
+    Ps1MemoryBus* bus) noexcept {
     switch (call.domain) {
         case Ps1HleBiosDomain::a0:
             switch (call.selector) {
                 case 0x39u:
                     heap_state_ = Ps1BiosHeapState{call.a0, call.a1};
+                    return_from_bios_vector(cpu);
+                    return {Ps1HleBiosDisposition::handled};
+                case 0x44u: // FlushCache; interpreter has no instruction cache.
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
                 case 0x56u:
@@ -104,10 +135,40 @@ Ps1HleBiosResult Ps1HleBios::dispatch(const Ps1HleBiosCall& call, R3000aState& c
             break;
         case Ps1HleBiosDomain::b0:
             switch (call.selector) {
+                case 0x18u: { // ResetEntryInt
+                    if (!bus) return {Ps1HleBiosDisposition::unsupported};
+                    for (std::uint32_t word = 0u; word < 12u; ++word) {
+                        std::uint32_t value = 0u;
+                        if (word == 0u) value = kReturnFromException;
+                        else if (word == 1u) value = kKernelSavedSp;
+                        if (!write32_ok(*bus, kDefaultEntryInt + word * 4u, value)) {
+                            return {Ps1HleBiosDisposition::terminal};
+                        }
+                    }
+                    interrupt_hook_address_ = kDefaultEntryInt;
+                    cpu.gpr[2] = kDefaultEntryInt;
+                    return_from_bios_vector(cpu);
+                    return {Ps1HleBiosDisposition::handled};
+                }
                 case 0x19u:
                     interrupt_hook_address_ = call.a0;
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
+                case 0x56u: { // GetC0Table
+                    if (!bus) return {Ps1HleBiosDisposition::unsupported};
+                    if (!c0_table_materialized_) {
+                        for (std::uint32_t word = 0u; word < kC0TableWords; ++word) {
+                            const auto value = word == 6u ? kC0ExceptionEntry : 0u;
+                            if (!write32_ok(*bus, kC0Table + word * 4u, value)) {
+                                return {Ps1HleBiosDisposition::terminal};
+                            }
+                        }
+                        c0_table_materialized_ = true;
+                    }
+                    cpu.gpr[2] = kC0Table;
+                    return_from_bios_vector(cpu);
+                    return {Ps1HleBiosDisposition::handled};
+                }
                 case 0x5Bu:
                     pad_card_auto_ack_enabled_ = call.a0 != 0u;
                     return_from_bios_vector(cpu);
@@ -165,6 +226,7 @@ std::uint64_t Ps1HleBios::diagnostic_state_hash() const noexcept {
     hash_optional_bool(hash, pad_card_auto_ack_enabled_);
     for (const auto& state : root_counter_auto_ack_enabled_) hash_optional_bool(hash, state);
     hash_bool(hash, iso9660_removed_);
+    hash_bool(hash, c0_table_materialized_);
     return hash;
 }
 
