@@ -42,6 +42,23 @@ int main() {
     CHECK(dpcr_written.status == jojo::R3000aBusStatus::ok);
     CHECK(dpcr_written.value == 0x33333333u);
 
+    CHECK(bus.dma_interrupt() == 0u);
+    const auto dicr_reset = bus.read32(0x1F8010F4u);
+    CHECK(dicr_reset.status == jojo::R3000aBusStatus::ok);
+    CHECK(dicr_reset.value == 0u);
+    bus.set_diagnostic_mmio_probe_enabled(true);
+    bus.clear_last_diagnostic_mmio_probe();
+    CHECK(bus.write32(0x1F8010F4u, 0x00FF807Fu).status == jojo::R3000aBusStatus::ok);
+    CHECK(!bus.last_diagnostic_mmio_probe().has_value());
+    const auto dicr_written = bus.read32(0x1F8010F4u);
+    CHECK(dicr_written.status == jojo::R3000aBusStatus::ok);
+    CHECK(dicr_written.value == 0x00FF807Fu);
+    CHECK(bus.dma_interrupt() == 0x00FF807Fu);
+    bus.clear_last_diagnostic_mmio_probe();
+    CHECK(bus.write32(0x1F8010F4u, 0x00000000u).status == jojo::R3000aBusStatus::ok);
+    CHECK(!bus.last_diagnostic_mmio_probe().has_value());
+    CHECK(bus.read32(0x1F8010F4u).value == 0u);
+
     CHECK(bus.write32(0x1F801114u, 0xABCD0100u).status == jojo::R3000aBusStatus::ok);
     CHECK(bus.timer1_mode() == 0x0100u);
     CHECK(bus.timer1_counter() == 0x0000u);
