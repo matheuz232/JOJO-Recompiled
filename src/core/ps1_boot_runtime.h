@@ -28,6 +28,7 @@ public:
     [[nodiscard]] const R3000aState& cpu_state() const noexcept;
     [[nodiscard]] const std::optional<Ps1BiosHeapState>& bios_heap_state() const noexcept;
     [[nodiscard]] const std::optional<std::uint32_t>& bios_interrupt_hook_address() const noexcept;
+    [[nodiscard]] const std::optional<bool>& bios_pad_card_auto_ack_enabled() const noexcept;
     [[nodiscard]] Ps1MemoryBus& bus() noexcept;
     [[nodiscard]] const Ps1MemoryBus& bus() const noexcept;
 
@@ -36,6 +37,7 @@ private:
     R3000aState cpu_{};
     std::optional<Ps1BiosHeapState> bios_heap_state_{};
     std::optional<std::uint32_t> bios_interrupt_hook_address_{};
+    std::optional<bool> bios_pad_card_auto_ack_enabled_{};
 };
 
 } // namespace jojo
