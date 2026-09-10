@@ -1,5 +1,5 @@
 #include "core/ps1_installation.h"
-#include "core/ps1_boot_report.h"
+#include "core/ps1_max3_explorer.h"
 #include "core/runtime.h"
 #include "ps1_fixture.h"
 
@@ -68,42 +68,59 @@ int main() {
     const auto manifest_before = read_text(manifest_path);
     const auto files_before = regular_files_under(resolved.value.generation_dir);
 
-    const auto evidence_options = jojo::ps1_local_evidence_options();
-    CHECK(evidence_options.instruction_budget == std::numeric_limits<std::uint64_t>::max());
-    CHECK(evidence_options.trace_capacity == 4096u);
-    CHECK(evidence_options.diagnostic_mmio_probe);
-    CHECK(evidence_options.mmio_event_capacity == 8192u);
-    CHECK(evidence_options.bios_event_capacity == 4096u);
+    const auto max3_options = jojo::ps1_max3_local_evidence_options();
+    CHECK(max3_options.max_nodes == 5461u);
+    CHECK(max3_options.max_branch_depth == 6u);
+    CHECK(max3_options.max_total_retired == 1000000000ull);
+    CHECK(max3_options.segment_options.instruction_budget == std::numeric_limits<std::uint64_t>::max());
+    CHECK(max3_options.segment_options.trace_capacity == 131072u);
+    CHECK(max3_options.segment_options.diagnostic_mmio_probe);
+    CHECK(max3_options.segment_options.mmio_event_capacity == 65536u);
+    CHECK(max3_options.segment_options.bios_event_capacity == 65536u);
+    CHECK(max3_options.segment_options.stagnation_instruction_limit == 2000000u);
 
-    const auto checkpoint = jojo::bootstrap_runtime_local_evidence_to_file(
-        install, report_path);
-    CHECK(checkpoint);
-    if (checkpoint) {
-        CHECK(checkpoint.value.stop_reason == jojo::Ps1BootStopReason::bios_call_unimplemented);
-        CHECK(checkpoint.value.instructions_retired == 2u);
-        CHECK(checkpoint.value.recent_trace.size() == 2u);
-        CHECK(checkpoint.value.diagnostic_probe_mode);
-        CHECK(checkpoint.value.speculative_mmio_count == 0u);
-        CHECK(checkpoint.value.bios_call_count == 1u);
+    auto fast_options = max3_options;
+    fast_options.max_nodes = 5u;
+    fast_options.max_branch_depth = 1u;
+    fast_options.max_total_retired = 128u;
+    fast_options.segment_options.trace_capacity = 16u;
+    fast_options.segment_options.mmio_event_capacity = 16u;
+    fast_options.segment_options.bios_event_capacity = 16u;
+    fast_options.segment_options.stagnation_instruction_limit = 16u;
+
+    const auto max3 = jojo::bootstrap_runtime_max3_local_evidence_to_file(
+        install, report_path, fast_options);
+    CHECK(max3);
+    if (max3) {
+        CHECK(!max3.value.nodes.empty());
+        CHECK(max3.value.nodes.front().stop_reason == jojo::Ps1BootStopReason::bios_call_unimplemented);
+        CHECK(max3.value.nodes.front().frontier_table == 0x000000A0u);
     }
 
     CHECK(fs::is_regular_file(report_path));
     const auto report = read_text(report_path);
-    CHECK(report.find("format=jojo-mega-checkpoint-v1\n") == 0u);
-    CHECK(report.find("instructions_retired=2\n") != std::string::npos);
-    CHECK(report.find("trace_sample_count=2\n") != std::string::npos);
-    CHECK(report.find("diagnostic_probe_mode=1\n") != std::string::npos);
-    CHECK(report.find("speculative_mmio_count=0\n") != std::string::npos);
-    CHECK(report.find("bios_last_table=0x000000a0\n") != std::string::npos);
+    CHECK(report.find("format=jojo-max3-checkpoint-v1\n") == 0u);
+    CHECK(report.find("node_count=") != std::string::npos);
+    CHECK(report.find("dependency_count=") != std::string::npos);
+    CHECK(report.find("best_report_begin=1\n") != std::string::npos);
+    CHECK(report.find("best_report_end=1\n") != std::string::npos);
     CHECK(report.find("PS-X EXE") == std::string::npos);
     CHECK(read_text(manifest_path) == manifest_before);
     CHECK(regular_files_under(resolved.value.generation_dir) == files_before);
 
+    // Existing button/runtime-facing API remains source compatible but now writes MAX3.
+    const auto compatibility_path = root / "diagnostics" / "compat-checkpoint.txt";
+    const auto checkpoint = jojo::bootstrap_runtime_local_evidence_to_file(
+        install, compatibility_path);
+    CHECK(checkpoint);
+    CHECK(fs::is_regular_file(compatibility_path));
+    CHECK(read_text(compatibility_path).find("format=jojo-max3-checkpoint-v1\n") == 0u);
+
     fs::remove_all(root, ec);
     if (failures) {
-        std::cerr << failures << " PS1 local-evidence assertion(s) failed\n";
+        std::cerr << failures << " PS1 MAX3 local-evidence assertion(s) failed\n";
         return 1;
     }
-    std::cout << "PS1 local-evidence assertions passed\n";
+    std::cout << "PS1 MAX3 local-evidence assertions passed\n";
     return 0;
 }
