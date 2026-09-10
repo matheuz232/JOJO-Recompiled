@@ -50,7 +50,7 @@ Ps1CdromIoResult Ps1CdromState::read8(std::uint32_t physical) noexcept {
         return {Ps1CdromIoStatus::ok,
                 static_cast<std::uint8_t>(0xE0u | (interrupt_status_ & 0x1Fu))};
     }
-    if (physical == kCdromResponseCommand && index_ == 0u && response_) {
+    if (physical == kCdromResponseCommand && response_) {
         const auto value = *response_;
         response_.reset();
         return {Ps1CdromIoStatus::ok, value};
