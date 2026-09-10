@@ -48,6 +48,7 @@ struct Ps1BiosEventState {
     std::uint32_t spec{};
     std::uint32_t mode{};
     std::uint32_t function{};
+    bool enabled{};
 };
 
 class Ps1HleBios {
