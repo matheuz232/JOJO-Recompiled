@@ -177,6 +177,16 @@ Ps1HleBiosResult Ps1HleBios::dispatch_impl(
                     return_from_bios_vector(cpu);
                     return {Ps1HleBiosDisposition::handled};
                 }
+                case 0x0Cu: { // EnableEvent(event): valid EvCB becomes enabled/busy; BIOS returns 1 always.
+                    const auto limit = kEventDescriptorBase + static_cast<std::uint32_t>(events_.size());
+                    if (call.a0 >= kEventDescriptorBase && call.a0 < limit) {
+                        const auto slot = static_cast<std::size_t>(call.a0 - kEventDescriptorBase);
+                        if (events_[slot]) events_[slot]->enabled = true;
+                    }
+                    cpu.gpr[2] = 1u;
+                    return_from_bios_vector(cpu);
+                    return {Ps1HleBiosDisposition::handled};
+                }
                 case 0x18u: { // ResetEntryInt
                     if (!bus) return {Ps1HleBiosDisposition::unsupported};
                     for (std::uint32_t word = 0u; word < 12u; ++word) {
@@ -300,6 +310,7 @@ std::uint64_t Ps1HleBios::diagnostic_state_hash() const noexcept {
             hash_u32(hash, event->spec);
             hash_u32(hash, event->mode);
             hash_u32(hash, event->function);
+            hash_bool(hash, event->enabled);
         }
     }
     hash_bool(hash, iso9660_removed_);
