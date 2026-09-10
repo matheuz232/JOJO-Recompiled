@@ -40,6 +40,7 @@ public:
                                std::span<const std::uint8_t> bytes);
 
     [[nodiscard]] std::uint16_t interrupt_mask() const noexcept;
+    [[nodiscard]] std::uint32_t dma_interrupt() const noexcept;
     [[nodiscard]] std::uint16_t timer1_counter() const noexcept;
     [[nodiscard]] std::uint16_t timer1_mode() const noexcept;
 
@@ -59,6 +60,7 @@ private:
     std::uint16_t interrupt_status_{};
     std::uint16_t interrupt_mask_{};
     std::uint32_t dma_control_{0x07654321u};
+    std::uint32_t dma_interrupt_{};
     std::uint16_t timer1_counter_{};
     std::uint16_t timer1_mode_{};
     bool diagnostic_mmio_probe_enabled_{};
