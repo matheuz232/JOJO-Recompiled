@@ -28,6 +28,7 @@ static jojo::Ps1BootReport make_report(std::uint64_t retired) {
     report.recent_mmio.push_back({0x80010100u, 0x1F801070u, 4u, false, 0u, false});
     report.interrupts_accepted = 1u;
     report.dma_transfer_count = 2u;
+    report.cdrom_command_count = 6u;
     report.gpu_gp0_command_count = 3u;
     report.gpu_gp1_command_count = 4u;
     report.vram_write_count = 5u;
@@ -87,6 +88,7 @@ int main() {
     CHECK(text.find("mmio_last_address=0x1f801070\n") != std::string::npos);
     CHECK(text.find("interrupts_accepted=1\n") != std::string::npos);
     CHECK(text.find("dma_transfer_count=2\n") != std::string::npos);
+    CHECK(text.find("cdrom_command_count=6\n") != std::string::npos);
     CHECK(text.find("gpu_gp0_command_count=3\n") != std::string::npos);
     CHECK(text.find("gpu_gp1_command_count=4\n") != std::string::npos);
     CHECK(text.find("vram_write_count=5\n") != std::string::npos);
