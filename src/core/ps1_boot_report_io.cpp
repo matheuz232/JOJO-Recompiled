@@ -90,6 +90,7 @@ std::string format_ps1_boot_report(const Ps1BootReport& report) {
     out << "bios_call_count=" << report.bios_call_count << '\n';
     out << "interrupts_accepted=" << report.interrupts_accepted << '\n';
     out << "dma_transfer_count=" << report.dma_transfer_count << '\n';
+    out << "cdrom_command_count=" << report.cdrom_command_count << '\n';
     out << "gpu_gp0_command_count=" << report.gpu_gp0_command_count << '\n';
     out << "gpu_gp1_command_count=" << report.gpu_gp1_command_count << '\n';
     out << "vram_write_count=" << report.vram_write_count << '\n';
