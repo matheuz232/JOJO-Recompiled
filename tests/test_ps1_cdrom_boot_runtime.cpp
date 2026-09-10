@@ -70,6 +70,9 @@ static void test_runtime_seeds_post_bios_cdrom_state() {
 
 static void test_enabled_cdrom_irq_enters_exception_handler_without_terminal_stop() {
     auto runtime = make_runtime(irq_program(0x0004u));
+    CHECK(runtime.bus().write32(0x80000080u, test_mips::j(0x02u, 0x80000080u >> 2)).status ==
+          jojo::R3000aBusStatus::ok);
+    CHECK(runtime.bus().write32(0x80000084u, 0x00000000u).status == jojo::R3000aBusStatus::ok);
     const auto report = runtime.run({32u});
 
     CHECK(report.stop_reason == jojo::Ps1BootStopReason::execution_budget_exhausted);
