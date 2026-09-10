@@ -43,6 +43,7 @@ public:
     [[nodiscard]] std::uint32_t dma_interrupt() const noexcept;
     [[nodiscard]] std::uint16_t timer1_counter() const noexcept;
     [[nodiscard]] std::uint16_t timer1_mode() const noexcept;
+    [[nodiscard]] std::uint64_t diagnostic_state_hash() const noexcept;
 
     void set_diagnostic_mmio_probe_enabled(bool enabled) noexcept;
     [[nodiscard]] bool diagnostic_mmio_probe_enabled() const noexcept;
