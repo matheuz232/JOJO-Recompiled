@@ -70,9 +70,10 @@ int main() {
 
     const auto evidence_options = jojo::ps1_local_evidence_options();
     CHECK(evidence_options.instruction_budget == std::numeric_limits<std::uint64_t>::max());
-    CHECK(evidence_options.trace_capacity == 512u);
+    CHECK(evidence_options.trace_capacity == 4096u);
     CHECK(evidence_options.diagnostic_mmio_probe);
-    CHECK(evidence_options.mmio_event_capacity == 1024u);
+    CHECK(evidence_options.mmio_event_capacity == 8192u);
+    CHECK(evidence_options.bios_event_capacity == 4096u);
 
     const auto checkpoint = jojo::bootstrap_runtime_local_evidence_to_file(
         install, report_path);
