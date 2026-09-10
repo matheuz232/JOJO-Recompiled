@@ -24,6 +24,7 @@ enum class Ps1BootStopReason : std::uint8_t {
     gpu_command_unimplemented,
     commercial_frame_presented,
     fatal_runtime_error,
+    diagnostic_stall,
 };
 
 struct Ps1BiosCallSummary {
@@ -85,6 +86,7 @@ struct Ps1BootOptions {
     bool diagnostic_mmio_probe{false};
     std::size_t mmio_event_capacity{16u};
     std::size_t bios_event_capacity{16u};
+    std::uint64_t stagnation_instruction_limit{};
 };
 
 [[nodiscard]] constexpr Ps1BootOptions ps1_local_evidence_options() noexcept {
@@ -94,6 +96,7 @@ struct Ps1BootOptions {
         true,
         8192u,
         4096u,
+        0u,
     };
 }
 
