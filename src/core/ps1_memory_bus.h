@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/ps1_gpu_state.h"
 #include "core/r3000a_bus.h"
 #include "core/result.h"
 
@@ -43,6 +44,8 @@ public:
     [[nodiscard]] std::uint32_t dma_interrupt() const noexcept;
     [[nodiscard]] std::uint16_t timer1_counter() const noexcept;
     [[nodiscard]] std::uint16_t timer1_mode() const noexcept;
+    [[nodiscard]] Ps1GpuState& gpu() noexcept;
+    [[nodiscard]] const Ps1GpuState& gpu() const noexcept;
     [[nodiscard]] std::uint64_t diagnostic_state_hash() const noexcept;
 
     void set_diagnostic_mmio_probe_enabled(bool enabled) noexcept;
@@ -64,6 +67,7 @@ private:
     std::uint32_t dma_interrupt_{};
     std::uint16_t timer1_counter_{};
     std::uint16_t timer1_mode_{};
+    Ps1GpuState gpu_{};
     bool diagnostic_mmio_probe_enabled_{};
     std::array<std::uint8_t, diagnostic_mmio_shadow_size> diagnostic_mmio_shadow_{};
     std::optional<Ps1UnsupportedAccess> last_diagnostic_mmio_probe_{};
