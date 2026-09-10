@@ -43,6 +43,7 @@ int main() {
         CHECK(event->status == 0x02u);
     }
 
+    CHECK(first.write8(0x1F801801u, 0x01u).status == jojo::Ps1CdromIoStatus::unsupported_command);
     const auto result = first.read8(0x1F801801u);
     CHECK(result.status == jojo::Ps1CdromIoStatus::ok);
     CHECK(result.value == 0x02u);
@@ -58,5 +59,10 @@ int main() {
     CHECK(left.write8(0x1F801803u, 0x01u).status == jojo::Ps1CdromIoStatus::unsupported_register);
     CHECK(left.write8(0x1F801800u, 0x03u).status == jojo::Ps1CdromIoStatus::ok);
     CHECK(left.read8(0x1F801803u).status == jojo::Ps1CdromIoStatus::unsupported_register);
+
+    jojo::Ps1CdromState bank1;
+    bank1.seed_post_bios(0x02u, 0x1Fu);
+    CHECK(bank1.write8(0x1F801800u, 0x01u).status == jojo::Ps1CdromIoStatus::ok);
+    CHECK(bank1.write8(0x1F801803u, 0x00u).status == jojo::Ps1CdromIoStatus::unsupported_register);
     return failures ? 1 : 0;
 }
