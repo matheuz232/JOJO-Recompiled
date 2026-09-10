@@ -1,13 +1,30 @@
+#include "core/ps1_boot_runtime.h"
+#include "core/ps1_exe.h"
 #include "core/ps1_gpu_state.h"
 #include "core/ps1_hle_bios.h"
 #include "core/ps1_memory_bus.h"
 #include "core/r3000a_state.h"
+#include "mips_test_encode.h"
+#include "ps1_fixture.h"
 
 #include <cstdint>
 #include <iostream>
+#include <utility>
+#include <vector>
 
 static int failures = 0;
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__ << " CHECK failed: " #x "\n"; ++failures; } } while (0)
+
+static jojo::Ps1BootRuntime make_runtime(const std::vector<std::uint32_t>& words) {
+    auto executable = jojo::parse_ps1_executable(test_ps1::make_psx_exe_from_words(words));
+    CHECK(executable);
+    auto runtime = executable ? jojo::Ps1BootRuntime::create(executable.value)
+                              : jojo::Result<jojo::Ps1BootRuntime>::failure(
+                                    jojo::ErrorCode::invalid_installation,
+                                    "synthetic executable parse failed");
+    CHECK(runtime);
+    return runtime ? std::move(runtime.value) : jojo::Ps1BootRuntime{};
+}
 
 static void test_gp1_reset_state_and_supported_control_commands() {
     jojo::Ps1GpuState gpu;
@@ -188,6 +205,39 @@ static void test_a0_gpu_cw_syncs_immediately_and_routes_word_to_gp0() {
     CHECK(cpu.pc == 0x80012500u);
 }
 
+static void test_runtime_reports_gp0_count_for_handled_gpu_cw() {
+    auto runtime = make_runtime({
+        test_mips::i(0x09u, 0u, 4u, 0x0000u),
+        test_mips::i(0x09u, 0u, 9u, 0x0049u),
+        test_mips::i(0x09u, 0u, 10u, 0x00A0u),
+        test_mips::r(10u, 0u, 31u, 0u, 0x09u),
+        0x00000000u,
+        test_mips::j(0x02u, 0x80010014u >> 2),
+        0x00000000u,
+    });
+    const auto report = runtime.run({12u});
+    CHECK(report.gpu_gp0_command_count == 1u);
+}
+
+static void test_runtime_keeps_unknown_gpu_cw_out_of_bios_fallback() {
+    auto runtime = make_runtime({
+        test_mips::i(0x0Fu, 0u, 4u, 0xFF00u),
+        test_mips::i(0x09u, 0u, 9u, 0x0049u),
+        test_mips::i(0x09u, 0u, 10u, 0x00A0u),
+        test_mips::r(10u, 0u, 31u, 0u, 0x09u),
+        0x00000000u,
+    });
+    const auto report = runtime.run({16u});
+    CHECK(report.stop_reason == jojo::Ps1BootStopReason::gpu_command_unimplemented);
+    CHECK(report.unsupported_access.has_value());
+    if (report.unsupported_access) {
+        CHECK(report.unsupported_access->guest_address == 0x1F801810u);
+        CHECK(report.unsupported_access->write);
+        CHECK(report.unsupported_access->value == 0xFF000000u);
+    }
+    CHECK(!runtime.apply_diagnostic_bios_fallback(jojo::Ps1BiosFallback::return_zero));
+}
+
 int main() {
     test_gp1_reset_state_and_supported_control_commands();
     test_gp1_mmio_bypasses_diagnostic_shadow_and_rejects_unknown_command();
@@ -196,5 +246,7 @@ int main() {
     test_dma2_registers_are_real_mmio_but_started_linked_list_stays_strict();
     test_b0_write_handles_dummy_stdout_without_host_side_effects();
     test_a0_gpu_cw_syncs_immediately_and_routes_word_to_gp0();
+    test_runtime_reports_gp0_count_for_handled_gpu_cw();
+    test_runtime_keeps_unknown_gpu_cw_out_of_bios_fallback();
     return failures ? 1 : 0;
 }
