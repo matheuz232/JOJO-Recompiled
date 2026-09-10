@@ -7,6 +7,20 @@
 static int failures = 0;
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__ << " CHECK failed: " #x "\n"; ++failures; } } while (0)
 
+static constexpr std::uint32_t kSafeA0ReturnZero[] = {
+    0x57u, 0x58u, 0x59u, 0x5Au,
+    0x73u, 0x74u, 0x75u, 0x76u, 0x77u,
+    0x79u, 0x7Au, 0x7Bu, 0x7Du,
+    0x7Fu, 0x80u,
+    0x82u, 0x83u, 0x84u, 0x85u, 0x86u, 0x87u, 0x88u, 0x89u,
+    0x8Au, 0x8Bu, 0x8Cu, 0x8Du, 0x8Eu, 0x8Fu,
+    0xB0u, 0xB1u, 0xB3u,
+};
+
+static constexpr std::uint32_t kSafeC0ReturnZero[] = {
+    0x0Eu, 0x0Fu, 0x10u, 0x11u, 0x14u,
+};
+
 static void test_default_hash_is_deterministic_and_state_changes_hash() {
     jojo::Ps1HleBios first;
     jojo::Ps1HleBios second;
@@ -140,6 +154,75 @@ static void test_sys03_is_unsupported_without_mutation() {
     CHECK(cpu.cop0.status == before.cop0.status);
 }
 
+static void test_safe_documented_return_zero_selectors() {
+    for (const auto selector : kSafeA0ReturnZero) {
+        jojo::Ps1HleBios bios;
+        jojo::R3000aState cpu{};
+        cpu.pc = 0x000000A0u;
+        cpu.next_pc = 0x000000A4u;
+        cpu.gpr[2] = 0xDEADBEEFu;
+        cpu.gpr[31] = 0x80012000u;
+        const jojo::Ps1HleBiosCall call{jojo::Ps1HleBiosDomain::a0, selector, cpu.pc,
+            0x11u, 0x22u, 0x33u, 0x44u, cpu.gpr[31]};
+        CHECK(bios.dispatch(call, cpu).disposition == jojo::Ps1HleBiosDisposition::handled);
+        CHECK(cpu.gpr[2] == 0u);
+        CHECK(cpu.pc == 0x80012000u);
+    }
+    for (const auto selector : kSafeC0ReturnZero) {
+        jojo::Ps1HleBios bios;
+        jojo::R3000aState cpu{};
+        cpu.pc = 0x000000C0u;
+        cpu.next_pc = 0x000000C4u;
+        cpu.gpr[2] = 0xDEADBEEFu;
+        cpu.gpr[31] = 0x80013000u;
+        const jojo::Ps1HleBiosCall call{jojo::Ps1HleBiosDomain::c0, selector, cpu.pc,
+            0x11u, 0x22u, 0x33u, 0x44u, cpu.gpr[31]};
+        CHECK(bios.dispatch(call, cpu).disposition == jojo::Ps1HleBiosDisposition::handled);
+        CHECK(cpu.gpr[2] == 0u);
+        CHECK(cpu.pc == 0x80013000u);
+    }
+}
+
+static void test_nearby_excluded_selectors_remain_unsupported_without_mutation() {
+    static constexpr std::uint32_t excluded_a0[] = {0x5Bu, 0x78u, 0x7Cu, 0x7Eu, 0x81u, 0xB2u};
+    static constexpr std::uint32_t excluded_c0[] = {0x12u, 0x13u, 0x15u};
+
+    for (const auto selector : excluded_a0) {
+        jojo::Ps1HleBios bios;
+        jojo::R3000aState cpu{};
+        cpu.pc = 0xA0u;
+        cpu.next_pc = 0xA4u;
+        cpu.gpr[2] = 0xCAFEBABEu;
+        cpu.gpr[31] = 0x80014000u;
+        const auto cpu_before = cpu;
+        const auto hash_before = bios.diagnostic_state_hash();
+        const jojo::Ps1HleBiosCall call{jojo::Ps1HleBiosDomain::a0, selector, cpu.pc,
+            1u, 2u, 3u, 4u, cpu.gpr[31]};
+        CHECK(bios.dispatch(call, cpu).disposition == jojo::Ps1HleBiosDisposition::unsupported);
+        CHECK(cpu.pc == cpu_before.pc);
+        CHECK(cpu.next_pc == cpu_before.next_pc);
+        CHECK(cpu.gpr[2] == cpu_before.gpr[2]);
+        CHECK(bios.diagnostic_state_hash() == hash_before);
+    }
+    for (const auto selector : excluded_c0) {
+        jojo::Ps1HleBios bios;
+        jojo::R3000aState cpu{};
+        cpu.pc = 0xC0u;
+        cpu.next_pc = 0xC4u;
+        cpu.gpr[2] = 0xCAFEBABEu;
+        cpu.gpr[31] = 0x80015000u;
+        const auto cpu_before = cpu;
+        const auto hash_before = bios.diagnostic_state_hash();
+        const jojo::Ps1HleBiosCall call{jojo::Ps1HleBiosDomain::c0, selector, cpu.pc,
+            1u, 2u, 3u, 4u, cpu.gpr[31]};
+        CHECK(bios.dispatch(call, cpu).disposition == jojo::Ps1HleBiosDisposition::unsupported);
+        CHECK(cpu.pc == cpu_before.pc);
+        CHECK(cpu.next_pc == cpu_before.next_pc);
+        CHECK(cpu.gpr[2] == cpu_before.gpr[2]);
+        CHECK(bios.diagnostic_state_hash() == hash_before);
+    }
+}
+
 int main() {
     test_default_hash_is_deterministic_and_state_changes_hash();
     test_a0_initheap_records_state_and_returns_via_ra();
@@ -150,5 +233,7 @@ int main() {
     test_sys00_preserves_registers_and_advances_instruction();
     test_sys01_sys02_match_critical_section_contract();
     test_sys03_is_unsupported_without_mutation();
+    test_safe_documented_return_zero_selectors();
+    test_nearby_excluded_selectors_remain_unsupported_without_mutation();
     return failures ? 1 : 0;
 }
