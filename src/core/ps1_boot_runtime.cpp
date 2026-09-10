@@ -106,6 +106,15 @@ bool interrupt_would_preempt_syscall(const R3000aState& cpu) noexcept {
            (cause & cpu.cop0.status & kCauseInterruptMask) != 0u;
 }
 
+void sync_interrupt_controller_to_cpu(R3000aState& cpu, const Ps1MemoryBus& bus) noexcept {
+    constexpr std::uint8_t kExternalIp2 = 0x04u;
+    if ((bus.interrupt_status() & bus.interrupt_mask()) != 0u) {
+        cpu.external_interrupt_pending |= kExternalIp2;
+    } else {
+        cpu.external_interrupt_pending &= static_cast<std::uint8_t>(~kExternalIp2);
+    }
+}
+
 } // namespace
 
 Result<Ps1BootRuntime> Ps1BootRuntime::create(const Ps1Executable& executable) {
@@ -113,6 +122,7 @@ Result<Ps1BootRuntime> Ps1BootRuntime::create(const Ps1Executable& executable) {
     auto loaded = load_ps1_executable_into_bus(runtime.bus_, executable);
     if (!loaded) return Result<Ps1BootRuntime>::failure(loaded.error, loaded.detail);
     runtime.cpu_ = std::move(loaded.value);
+    runtime.bus_.cdrom().seed_post_bios(0x02u, 0x1Fu);
     return Result<Ps1BootRuntime>::success(std::move(runtime));
 }
 
@@ -181,6 +191,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
         }
 
         diagnostic_bios_frontier_pending_ = false;
+        sync_interrupt_controller_to_cpu(cpu_, bus_);
         const auto observed_opcode = bus_.read32(cpu_.pc);
         if (observed_opcode.status == R3000aBusStatus::ok) report.last_opcode = observed_opcode.value;
         else report.last_opcode.reset();
