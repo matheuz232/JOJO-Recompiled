@@ -1,4 +1,5 @@
 #include "core/ps1_boot_report_io.h"
+#include "core/ps1_max3_explorer.h"
 
 #include <filesystem>
 #include <fstream>
@@ -33,6 +34,36 @@ static jojo::Ps1BootReport make_report(std::uint64_t retired) {
     report.presented_frames = 0u;
     report.recent_trace.push_back({0x80010018u, 0x24420004u});
     report.recent_trace.push_back({0x8001001Cu, 0xAC400000u});
+    return report;
+}
+
+static jojo::Ps1Max3Report make_max3_report() {
+    jojo::Ps1Max3Report report{};
+    report.options = jojo::ps1_max3_local_evidence_options();
+    report.termination_reason = jojo::Ps1Max3TerminationReason::node_limit;
+    report.total_retired = 123456u;
+    report.best_node = 1u;
+    report.nodes.push_back({
+        0u, std::nullopt, 0u, std::nullopt,
+        jojo::Ps1BootStopReason::bios_call_unimplemented,
+        100u, 100u, 0x1111111111111111ull, false,
+        0xA0u, 0x33u,
+        0u, 0u, 0u, 0u, 0u, 0u, 1u});
+    report.nodes.push_back({
+        1u, 0u, 1u, jojo::Ps1BiosFallback::return_zero,
+        jojo::Ps1BootStopReason::diagnostic_stall,
+        200u, 300u, 0x2222222222222222ull, false,
+        0u, 0u,
+        0u, 0u, 0u, 0u, 0u, 0u, 2u});
+    report.dependencies.push_back({
+        jojo::Ps1Max3DependencyKind::bios_frontier,
+        0xA0u, 0x33u, 0u, 0u, false});
+    report.dependencies.push_back({
+        jojo::Ps1Max3DependencyKind::speculative_mmio,
+        0u, 0u, 0x1F801820u, 4u, true});
+    report.best_path.push_back({0xA0u, 0x33u, jojo::Ps1BiosFallback::return_zero});
+    report.best_report = make_report(200u);
+    report.best_report.diagnostic_probe_mode = true;
     return report;
 }
 
@@ -82,6 +113,32 @@ int main() {
     CHECK(mega_text.find("mmio_event_0_speculative=1\n") != std::string::npos);
     CHECK(mega_text.find("mmio_event_1_value=0x12345678\n") != std::string::npos);
 
+    const auto max3 = make_max3_report();
+    const auto max3_text = jojo::format_ps1_max3_report(max3);
+    CHECK(max3_text.find("format=jojo-max3-checkpoint-v1\n") == 0u);
+    CHECK(max3_text.find("max_nodes=5461\n") != std::string::npos);
+    CHECK(max3_text.find("max_branch_depth=6\n") != std::string::npos);
+    CHECK(max3_text.find("max_total_retired=1000000000\n") != std::string::npos);
+    CHECK(max3_text.find("stagnation_instruction_limit=2000000\n") != std::string::npos);
+    CHECK(max3_text.find("termination_reason=node_limit\n") != std::string::npos);
+    CHECK(max3_text.find("total_retired=123456\n") != std::string::npos);
+    CHECK(max3_text.find("node_count=2\n") != std::string::npos);
+    CHECK(max3_text.find("best_node=1\n") != std::string::npos);
+    CHECK(max3_text.find("best_path_count=1\n") != std::string::npos);
+    CHECK(max3_text.find("best_path_0_table=0x000000a0\n") != std::string::npos);
+    CHECK(max3_text.find("best_path_0_selector=0x00000033\n") != std::string::npos);
+    CHECK(max3_text.find("best_path_0_fallback=return_zero\n") != std::string::npos);
+    CHECK(max3_text.find("dependency_count=2\n") != std::string::npos);
+    CHECK(max3_text.find("dependency_0_kind=bios_frontier\n") != std::string::npos);
+    CHECK(max3_text.find("dependency_1_kind=speculative_mmio\n") != std::string::npos);
+    CHECK(max3_text.find("dependency_1_address=0x1f801820\n") != std::string::npos);
+    CHECK(max3_text.find("node_1_depth=1\n") != std::string::npos);
+    CHECK(max3_text.find("node_1_stop_reason=diagnostic_stall\n") != std::string::npos);
+    CHECK(max3_text.find("best_report_begin=1\n") != std::string::npos);
+    CHECK(max3_text.find("format=jojo-mega-checkpoint-v1\n") != std::string::npos);
+    CHECK(max3_text.find("best_report_end=1\n") != std::string::npos);
+    CHECK(max3_text.find("PS-X EXE") == std::string::npos);
+
     const auto root = fs::temp_directory_path() / "jojo-m3a-report-io";
     const auto path = root / "diagnostics" / "m3a-checkpoint.txt";
     std::error_code ec;
@@ -97,6 +154,10 @@ int main() {
     const auto replaced = read_text(path);
     CHECK(replaced.find("instructions_retired=9\n") != std::string::npos);
     CHECK(replaced.find("instructions_retired=2\n") == std::string::npos);
+
+    auto max3_saved = jojo::save_ps1_max3_report_atomic(path, max3);
+    CHECK(max3_saved);
+    CHECK(read_text(path).find("format=jojo-max3-checkpoint-v1\n") == 0u);
 
     fs::remove_all(root, ec);
     return failures ? 1 : 0;
