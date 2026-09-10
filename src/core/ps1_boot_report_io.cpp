@@ -71,6 +71,7 @@ std::string ps1_boot_stop_reason_name(Ps1BootStopReason reason) noexcept {
         case Ps1BootStopReason::gpu_command_unimplemented: return "gpu_command_unimplemented";
         case Ps1BootStopReason::commercial_frame_presented: return "commercial_frame_presented";
         case Ps1BootStopReason::fatal_runtime_error: return "fatal_runtime_error";
+        case Ps1BootStopReason::diagnostic_stall: return "diagnostic_stall";
     }
     return "unknown";
 }
