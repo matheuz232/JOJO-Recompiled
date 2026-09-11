@@ -13,6 +13,8 @@ The objective is to make strict execution dominate diagnostic speculation in ran
 
 This phase does not implement new GPU, DMA, IRQ, timer, CD-ROM, GTE, BIOS, SIO, or SPU behavior.
 
+The umbrella design called for frame-first observability and gating. For this phase, the already-existing GP0, GP1, DMA, VRAM, CD-ROM, interrupt, and presented-frame counters are the observability substrate. No parallel landmark model is introduced until strict commercial evidence proves that an additional representation is necessary.
+
 ## 2. Approved policy
 
 The approved ranking policy is strict-first.
@@ -23,7 +25,7 @@ For any two OMEGA search candidates:
 2. Only candidates in the same evidence class are compared by frame-first progress.
 3. Existing deterministic tie-breakers remain in force after progress comparison.
 
-The intended order is:
+The required order is:
 
 1. evidence class: `strict` > `speculative`;
 2. `presented_frames`;
@@ -40,7 +42,7 @@ The intended order is:
 13. greater retired count;
 14. earlier insertion sequence.
 
-This order applies to queue ranking, best-node selection, and any other decision that uses `Ps1Max3SearchScore` ordering.
+This order applies to queue ranking, best-node selection, and every decision that uses `Ps1Max3SearchScore` ordering.
 
 ## 3. State dominance
 
@@ -52,23 +54,34 @@ A strict state may dominate a speculative state when all other dominance require
 
 Within the same evidence class, the existing progress-not-worse and assumption/speculative-depth rules remain unchanged.
 
-## 4. Commercial frame gating
+## 4. Authoritative best result
+
+`Ps1Max3Report::best_node`, `best_path`, and `best_report` are strict-authoritative in Phase B.
+
+The root OMEGA work item is strict, so every successful exploration has at least one strict node. The best-result fields therefore never need to fall back to a speculative node.
+
+Speculative descendants remain in `nodes`, `frontiers`, dependency data, search statistics, and diagnostic reports. They may show deeper graphics or device progress, but they cannot replace the strict-authoritative best result.
+
+This is deliberately different from the Phase A policy, where progress counters could cause a speculative node to become the best node.
+
+## 5. Commercial frame gating
 
 `commercial_frame_presented` is authoritative only on strict execution.
 
-If a node or segment is speculative and its underlying runtime report would otherwise contain `Ps1BootStopReason::commercial_frame_presented`, OMEGA must not expose that result as a commercial success.
+If a speculative node's underlying runtime segment reaches `Ps1BootStopReason::commercial_frame_presented`, that occurrence is diagnostic evidence only. It may remain represented inside the node-level diagnostic history with `evidence == speculative`, but it must not become:
 
-The required behavior is:
+- `Ps1Max3Report::best_report`;
+- the result returned by `bootstrap_runtime_local_evidence_to_file()`;
+- a successful `bootstrap_runtime()` outcome;
+- a strict first-frame claim in user-facing or serialized summary fields.
 
-- speculative frame-like progress may remain visible through diagnostic counters and node provenance;
-- speculative descendants remain eligible for diagnostic exploration;
-- speculative results must not become an authoritative `best_report` commercial success;
-- any API that returns the checkpoint result used to judge commercial boot must not convert a speculative descendant into success;
-- a strict `commercial_frame_presented` remains valid and must outrank every speculative result.
+For this design, “emit `commercial_frame_presented`” means exposing it through an authoritative best/checkpoint/commercial-success result. Raw speculative node evidence is allowed only when its speculative provenance is preserved.
+
+A strict `commercial_frame_presented` is valid, must outrank every speculative result, and may become the authoritative best report.
 
 This gate is defensive even if the current runtime cannot yet produce a commercial frame. The invariant must exist before later GPU/DMA work can make such a state reachable.
 
-## 5. Search behavior
+## 6. Search behavior
 
 This phase intentionally reduces the ability of speculative progress to displace strict progress in the priority queue.
 
@@ -81,21 +94,23 @@ The policy does not disable speculation. It changes its authority:
 - speculative paths continue to reveal downstream blockers for engineering guidance;
 - speculative progress is never evidence that commercial boot succeeded.
 
-## 6. Frontier cluster ranking
+## 7. Frontier cluster ranking
 
 Frontier clusters already record strict and speculative occurrence counts. Phase B aligns cluster ranking with the same authority rule.
 
 A cluster containing strict evidence must outrank a purely speculative cluster before descendant count, occurrence count, callsite count, or progress score are considered.
 
+The implementation must compare evidence class explicitly before numeric cluster priority so strict-first remains unconditional rather than depending on the magnitude of a weight constant.
+
 Within the same evidence class, existing deterministic cluster scoring can continue to reward frame-first progress.
 
 This keeps the highest-ranked implementation target anchored to an observed strict blocker rather than a deeper speculative branch.
 
-## 7. Data model changes
+## 8. Data model
 
-Prefer minimal data-model changes.
+No new parallel evidence or landmark model is introduced in Phase B.
 
-Existing fields are sufficient for the core policy:
+Existing fields are the canonical source of truth:
 
 - `Ps1Max3EvidenceClass`;
 - `Ps1Max3NodeSummary::evidence`;
@@ -105,11 +120,11 @@ Existing fields are sufficient for the core policy:
 - existing path progress counters;
 - `Ps1BootStopReason::commercial_frame_presented`.
 
-Do not add a second parallel evidence system.
+`Ps1Max3Report::best_node`, `best_path`, and `best_report` are redefined by policy as strict-authoritative; no `strict_best_*` duplicate fields are added.
 
-Add a dedicated report field only if implementation proves it is required to expose the best strict result without ambiguity. If added, it must be derived, deterministic, bounded, and additive to existing report compatibility.
+Report format changes are unnecessary unless tests expose an existing serialized field that would otherwise falsely label speculative progress as authoritative success. Any such fix must be additive or compatibility-preserving and deterministic.
 
-## 8. Runtime boundary
+## 9. Runtime boundary
 
 `Ps1BootRuntime` remains unaware of OMEGA evidence class.
 
@@ -122,20 +137,20 @@ Therefore:
 - keep `apply_diagnostic_bios_fallback()` and `apply_diagnostic_mmio_read_fallback()` as the points that create speculative descendants;
 - preserve strict runtime stop behavior for unsupported operations.
 
-## 9. Local-evidence API behavior
+## 10. Local-evidence API behavior
 
-`bootstrap_runtime_local_evidence_to_file()` must remain diagnostic and must not claim commercial success from speculation.
+`bootstrap_runtime_local_evidence_to_file()` continues to return `max3.value.best_report`.
 
-If the existing `Ps1Max3Report::best_report` can become speculative after future work, Phase B must ensure the value returned through the local-evidence API is strict-safe.
+Because Phase B makes `best_report` strict-authoritative, this existing API becomes strict-safe without introducing a second result channel.
 
-Acceptable implementations are:
+Consequences:
 
-- make `best_report` strict-authoritative under the new ranking; or
-- keep a diagnostic best result and expose a separate strict-best result used by the API.
+- the saved full OMEGA report may still contain speculative nodes and downstream hints;
+- the `Ps1BootReport` returned by the local-evidence API is always derived from a strict node;
+- a speculative descendant can never make this API return `commercial_frame_presented`;
+- no public API signature changes are required.
 
-The implementation plan should choose the smaller design that preserves report compatibility and makes the invariant testable.
-
-## 10. Determinism
+## 11. Determinism
 
 Strict-first ranking must be deterministic.
 
@@ -145,11 +160,11 @@ Given the same executable, options, candidate generation, and runtime semantics:
 - best-node selection must be stable;
 - dominance decisions must be stable;
 - frontier-cluster order must be stable;
-- serialized reports must remain deterministic apart from intentionally added deterministic fields.
+- serialized reports must remain deterministic.
 
 No randomness or wall-clock data is introduced.
 
-## 11. RED → GREEN contracts
+## 12. RED → GREEN contracts
 
 Implementation must begin with tests that fail against the Phase A baseline.
 
@@ -159,31 +174,32 @@ Required RED contracts:
 2. the same rule holds for VRAM, GP0, GP1, DMA, CD-ROM, interrupt progress, frontier count, and coverage count;
 3. a speculative state cannot dominate an equivalent strict state;
 4. a strict state can dominate an equivalent speculative state when all other dominance requirements are satisfied;
-5. best-node selection remains strict-first;
-6. frontier clusters with strict evidence outrank purely speculative clusters regardless of deeper speculative progress;
-7. a speculative descendant cannot surface authoritative `commercial_frame_presented` through OMEGA/local-evidence result paths;
-8. strict `commercial_frame_presented` remains valid;
-9. repeated runs produce identical ordering and report output.
+5. best-node selection remains strict-first even when a speculative descendant has greater frame-first counters;
+6. `best_report` and `best_path` correspond to that strict best node;
+7. frontier clusters with strict evidence outrank purely speculative clusters regardless of deeper speculative progress;
+8. a speculative descendant cannot surface authoritative `commercial_frame_presented` through `best_report` or the local-evidence result path;
+9. strict `commercial_frame_presented` remains valid and becomes authoritative when it is the highest-ranked strict node;
+10. speculation still expands under deep/omega profiles after strict-first ranking is introduced;
+11. repeated runs produce identical ordering and report output.
 
-Tests must include negative coverage proving that speculation still expands; Phase B must not accidentally disable diagnostic exploration.
-
-## 12. Files expected to change
+## 13. Files expected to change
 
 Primary expected files:
 
 - `src/core/ps1_max3_search_policy.cpp`
-- `src/core/ps1_max3_search_policy.h` only if interface changes are necessary
 - `src/core/ps1_max3_explorer.cpp`
-- `src/core/ps1_max3_explorer.h` only if an additive strict-best field is required
 - `src/core/ps1_max3_frontier_priority.cpp`
-- `src/core/ps1_max3_report_io.cpp` only if an additive field is introduced
-- `src/core/runtime.cpp` only if local-evidence needs an explicit strict-best handoff
-- tests covering search policy, explorer, frontier priority, report I/O, and local evidence
-- `CMakeLists.txt` only if a new dedicated test target is preferred
+- existing tests for search policy, explorer, frontier priority, and local evidence
 
-No device implementation file should change unless a compile-only interface dependency requires a mechanical update. Any semantic device change is out of scope.
+Possible compatibility-only files if a failing test proves they are needed:
 
-## 13. Non-goals
+- `src/core/ps1_max3_report_io.cpp`
+- `src/core/runtime.cpp`
+- `CMakeLists.txt` only if a dedicated new test target is clearer than extending existing suites
+
+No device implementation file should change. Any semantic GPU, DMA, CD-ROM, IRQ, timer, GTE, BIOS, SIO, SPU, CPU, or memory change is out of scope.
+
+## 14. Non-goals
 
 Phase B does not:
 
@@ -199,16 +215,18 @@ Phase B does not:
 - implement SPU behavior;
 - enlarge OMEGA budgets;
 - alter candidate value generation;
+- add a duplicate strict-best report model;
 - claim that JoJo is playable;
-- claim that a synthetic frame is a commercial frame.
+- claim that speculative frame evidence is a commercial frame.
 
-## 14. Exit gate
+## 15. Exit gate
 
 Phase B is complete when:
 
 - strict evidence unconditionally outranks speculative evidence in search ordering;
+- `best_node`, `best_path`, and `best_report` are strict-authoritative;
 - state dominance obeys the same authority rule;
-- frontier-cluster priority obeys strict-first authority;
+- frontier-cluster priority obeys strict-first authority through explicit evidence comparison;
 - speculative exploration still works within existing budgets;
 - speculative descendants cannot create authoritative commercial-frame success;
 - strict commercial-frame success remains valid;
