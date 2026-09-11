@@ -5,6 +5,7 @@
 #include "core/ps1_exe.h"
 #include "core/ps1_installation.h"
 #include "core/ps1_max3_explorer.h"
+#include "core/ps1_omega_infinity.h"
 
 #include <fstream>
 #include <iterator>
@@ -292,6 +293,26 @@ Result<Ps1BootReport> bootstrap_runtime_local_evidence_to_file(
         return Result<Ps1BootReport>::failure(max3.error, max3.detail);
     }
     return Result<Ps1BootReport>::success(std::move(max3.value.best_report));
+}
+
+Result<Ps1OmegaInfinitySummary> bootstrap_runtime_omega_infinity(
+    const std::filesystem::path& install_root,
+    const std::filesystem::path& session_root,
+    Ps1OmegaInfinityOptions options,
+    Ps1OmegaInfinityControl& control,
+    Ps1OmegaInfinityProgressCallback progress) {
+    auto install = validate_installation(install_root);
+    if (!install) {
+        return Result<Ps1OmegaInfinitySummary>::failure(install.error, install.detail);
+    }
+
+    auto executable = load_validated_installed_executable(install.value);
+    if (!executable) {
+        return Result<Ps1OmegaInfinitySummary>::failure(executable.error, executable.detail);
+    }
+
+    return explore_ps1_omega_infinity(
+        executable.value, session_root, options, control, std::move(progress));
 }
 
 Result<void> bootstrap_runtime(const std::filesystem::path& install_root) {
