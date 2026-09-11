@@ -62,11 +62,10 @@ void test_priority_order_is_lexicographic_and_deterministic() {
 
     lower = baseline(); higher = lower;
     higher.new_coverage_count = 1u;
-    lower.evidence = jojo::Ps1Max3EvidenceClass::speculative;
+    lower.assumption_count = 1u;
     CHECK(jojo::ps1_max3_search_outranks(higher, lower));
 
     lower = baseline(); higher = lower;
-    lower.evidence = jojo::Ps1Max3EvidenceClass::speculative;
     higher.assumption_count = 1u;
     lower.assumption_count = 2u;
     CHECK(jojo::ps1_max3_search_outranks(higher, lower));
@@ -100,6 +99,28 @@ void test_strict_evidence_beats_equivalent_speculative_path() {
     CHECK(!jojo::ps1_max3_search_outranks(speculative, strict));
 }
 
+void test_strict_evidence_beats_speculative_progress_unconditionally() {
+    const auto check = [](auto inflate) {
+        auto strict = baseline();
+        auto speculative = baseline();
+        strict.evidence = jojo::Ps1Max3EvidenceClass::strict;
+        speculative.evidence = jojo::Ps1Max3EvidenceClass::speculative;
+        inflate(speculative);
+        CHECK(jojo::ps1_max3_search_outranks(strict, speculative));
+        CHECK(!jojo::ps1_max3_search_outranks(speculative, strict));
+    };
+
+    check([](auto& s) { s.presented_frames = 1000u; });
+    check([](auto& s) { s.vram_write_count = 1000u; });
+    check([](auto& s) { s.gpu_gp0_command_count = 1000u; });
+    check([](auto& s) { s.gpu_gp1_command_count = 1000u; });
+    check([](auto& s) { s.dma_transfer_count = 1000u; });
+    check([](auto& s) { s.cdrom_command_count = 1000u; });
+    check([](auto& s) { s.interrupt_callback_progress = 1000u; });
+    check([](auto& s) { s.new_frontier_count = 1000u; });
+    check([](auto& s) { s.new_coverage_count = 1000u; });
+}
+
 void test_dominance_requires_same_state_and_no_better_progress() {
     auto incumbent = baseline();
     incumbent.presented_frames = 1u;
@@ -131,6 +152,19 @@ void test_dominance_requires_same_state_and_no_better_progress() {
     CHECK(!jojo::ps1_max3_state_dominates(incumbent, candidate));
 }
 
+void test_evidence_authority_controls_state_dominance() {
+    auto strict = baseline();
+    auto speculative = strict;
+    strict.evidence = jojo::Ps1Max3EvidenceClass::strict;
+    speculative.evidence = jojo::Ps1Max3EvidenceClass::speculative;
+
+    CHECK(jojo::ps1_max3_state_dominates(strict, speculative));
+    CHECK(!jojo::ps1_max3_state_dominates(speculative, strict));
+
+    speculative.presented_frames = 1u;
+    CHECK(!jojo::ps1_max3_state_dominates(strict, speculative));
+}
+
 void test_exact_cycle_counts_only_identical_ancestor_hashes() {
     const std::vector<std::uint64_t> ancestors{0x10u, 0x20u, 0x30u, 0x20u};
     CHECK(jojo::ps1_max3_is_exact_cycle(ancestors, 0x20u, 1u));
@@ -150,7 +184,9 @@ void test_no_near_cycle_equivalence_is_inferred() {
 int main() {
     test_priority_order_is_lexicographic_and_deterministic();
     test_strict_evidence_beats_equivalent_speculative_path();
+    test_strict_evidence_beats_speculative_progress_unconditionally();
     test_dominance_requires_same_state_and_no_better_progress();
+    test_evidence_authority_controls_state_dominance();
     test_exact_cycle_counts_only_identical_ancestor_hashes();
     test_no_near_cycle_equivalence_is_inferred();
     return failures ? 1 : 0;
