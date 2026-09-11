@@ -108,6 +108,9 @@ void test_dominance_requires_same_state_and_no_better_progress() {
     incumbent.speculative_depth = 1u;
 
     auto candidate = incumbent;
+    CHECK(jojo::ps1_max3_state_dominates(incumbent, candidate));
+
+    candidate = incumbent;
     candidate.assumption_count = 2u;
     candidate.speculative_depth = 2u;
     CHECK(jojo::ps1_max3_state_dominates(incumbent, candidate));
