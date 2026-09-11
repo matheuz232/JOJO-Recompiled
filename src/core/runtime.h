@@ -3,6 +3,7 @@
 #include "core/conversion.h"
 #include "core/ps1_boot_report.h"
 #include "core/ps1_max3_explorer.h"
+#include "core/ps1_omega_infinity.h"
 #include "core/result.h"
 
 #include <filesystem>
@@ -39,6 +40,12 @@ struct InstallationInfo {
 [[nodiscard]] Result<Ps1BootReport> bootstrap_runtime_local_evidence_to_file(
     const std::filesystem::path& install_root,
     const std::filesystem::path& report_path);
+[[nodiscard]] Result<Ps1OmegaInfinitySummary> bootstrap_runtime_omega_infinity(
+    const std::filesystem::path& install_root,
+    const std::filesystem::path& session_root,
+    Ps1OmegaInfinityOptions options,
+    Ps1OmegaInfinityControl& control,
+    Ps1OmegaInfinityProgressCallback progress = {});
 [[nodiscard]] Result<void> bootstrap_runtime(
     const std::filesystem::path& install_root);
 
