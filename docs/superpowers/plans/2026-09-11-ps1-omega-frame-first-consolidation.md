@@ -4,72 +4,72 @@
 
 **Goal:** Consolidate current `main` with the mature OMEGA diagnostic line into one authoritative, fully tested PS1 runtime without adding new hardware semantics in this phase.
 
-**Architecture:** Start from the mature OMEGA head because it already contains the broader GPU/GTE/CD-ROM/interrupt/MAX³ diagnostic architecture, then merge current `main` into it and resolve conflicts semantically. Preserve current `main`'s modular `Ps1HleBios` ownership boundary while retaining OMEGA's richer `Ps1HleBiosCall`/`Ps1HleBiosResult` contract, device state, interrupt continuation, deep/omega search infrastructure, deterministic hashing, and report compatibility. Complete the phase only when targeted PS1 suites and the full Linux/Windows gates are green on the consolidated head.
+**Architecture:** Start from the mature OMEGA head because it already contains the broader GPU/GTE/CD-ROM/interrupt/MAX³ diagnostic architecture, then merge current `main` into it and resolve overlaps semantically. Preserve current `main`'s modular `Ps1HleBios` ownership boundary while retaining OMEGA's richer call/result contract, device state, interrupt continuation, deep/omega search infrastructure, deterministic hashing, and report compatibility. The phase ends only when targeted PS1 suites and the full Linux/Windows gates are green on the consolidated head.
 
-**Tech Stack:** C++20, CMake 3.20+, CTest, Git, GitHub Actions, Win32/MSVC 2022, Linux/GCC/Clang-compatible portable core.
+**Tech Stack:** C++20, CMake 3.20+, CTest, Git, GitHub Actions, Win32/MSVC 2022, Linux portable core.
 
 **Spec:** `docs/superpowers/specs/2026-09-11-ps1-omega-frame-first-design.md`
 
 ## Global Constraints
 
-- The first-frame milestone is complete only when JoJo reaches `commercial_frame_presented` through a strict execution path using implemented CPU, BIOS/HLE, memory, and device semantics.
-- Speculative OMEGA descendants may expose likely blockers but may never satisfy the first-frame milestone.
+- `commercial_frame_presented` is a valid milestone only on a strict execution path using implemented CPU, BIOS/HLE, memory, and device semantics.
+- Speculative OMEGA descendants may expose blockers but may never satisfy the first-frame milestone.
 - Preserve the modular HLE ownership boundary from current `main`.
-- Preserve the broader evidence-backed BIOS/kernel behavior from `feature/ps1-gp0-dma2-bios-frontier-v0`.
-- Preserve strict runtime behavior; diagnostic fallbacks remain outside production semantics.
+- Preserve the broader evidence-backed BIOS/kernel/device behavior from the mature OMEGA line.
+- Diagnostic fallbacks remain runtime/MAX³ policy, outside production HLE semantics.
 - Preserve deterministic diagnostic hashing and MAX³ deduplication.
-- Preserve OMEGA coverage, candidate generation, budget, priority, CD-ROM, interrupt, GPU, and GTE tests.
-- Do not add new GP0, DMA, IRQ/timer, CD-ROM, GTE, SIO, SPU, or BIOS semantics during this consolidation phase.
-- Unsupported behavior must remain explicit; do not convert unsupported writes or side-effectful device operations into silent success.
-- Linux and Windows x64 CI gates must both pass before consolidation is considered complete.
-- Commercial-image evidence remains bounded and derived; do not commit game images, BIOS ROMs, raw sectors, unrestricted guest-memory dumps, textures, or audio.
+- Preserve OMEGA coverage, candidates, budgets, priorities, CD-ROM, interrupt, GPU, and GTE tests.
+- Add no new GP0, DMA, IRQ/timer, CD-ROM, GTE, SIO, SPU, or BIOS semantics in Phase A.
+- Unsupported behavior remains explicit; unknown side-effectful hardware must never silently succeed.
+- Linux and Windows x64 CI must both pass before consolidation is complete.
+- Commercial-image evidence remains bounded and derived; never commit game images, BIOS ROMs, raw sectors, unrestricted RAM dumps, textures, or audio.
 
 ## Pinned Inputs
 
-- Current `main`: `fbde3f2a455845f062ab94d7f8db3040eb042889`
-- Mature OMEGA source: `8402c574bba0b58fe107af66740349c43f6dcd31`
+- `main`: `fbde3f2a455845f062ab94d7f8db3040eb042889`
+- Mature OMEGA: `8402c574bba0b58fe107af66740349c43f6dcd31`
 - Historical merge base: `0fa7a3c52d16c5c9a26e381fab667a744e5c1983`
-- Expected implementation branch: `feature/ps1-omega-frame-first-consolidation`
+- Implementation branch: `feature/ps1-omega-frame-first-consolidation`
 
 ## File Structure
 
-The consolidation keeps the OMEGA source tree and resolves ownership around these units:
-
-- `src/core/ps1_hle_bios.h/.cpp` — single owner of BIOS A0/B0/C0/SYS semantics and logical HLE state.
-- `src/core/ps1_boot_runtime.h/.cpp` — CPU execution loop, BIOS/SYS boundary detection, strict stop policy, diagnostic frontier ownership, interrupt continuation, and telemetry.
-- `src/core/ps1_memory_bus.h/.cpp` — RAM/MMIO routing, GPU/CD-ROM device ownership, unsupported-access evidence, and one-shot diagnostic MMIO read override.
-- `src/core/ps1_gpu_state.h/.cpp` — already-implemented GPU control/data state retained from OMEGA.
-- `src/core/ps1_cdrom_state.h/.cpp` — already-implemented CD-ROM state retained from OMEGA.
-- `src/core/ps1_interrupt_continuation.h/.cpp` — already-implemented guest interrupt continuation retained from OMEGA.
-- `src/core/r3000a_state.h` and `src/core/r3000a_reference_executor.cpp` — OMEGA GTE/COP2 architectural state and transfer semantics retained.
-- `src/core/ps1_max3_*.h/.cpp` — OMEGA explorer, candidate engine, coverage, search policy, budgets, priority, report I/O retained as independent focused modules.
-- `CMakeLists.txt` — canonical union of current-main and OMEGA sources/tests.
-- Existing PS1 tests — authoritative regression contracts; no deletions to make the merge pass.
-- `tests/test_ps1_omega_consolidation.cpp` — new narrow integration sentinel proving the canonical HLE boundary and OMEGA runtime can coexist in one build.
+- `src/core/ps1_hle_bios.h/.cpp` — sole BIOS A0/B0/C0/SYS semantic owner.
+- `src/core/ps1_boot_runtime.h/.cpp` — CPU loop, BIOS/SYS detection, strict stops, diagnostics, interrupt continuation, telemetry.
+- `src/core/ps1_memory_bus.h/.cpp` — RAM/MMIO routing, device ownership, unsupported-access evidence, one-shot diagnostic read override.
+- `src/core/ps1_gpu_state.h/.cpp` — existing OMEGA GPU semantics; no expansion here.
+- `src/core/ps1_cdrom_state.h/.cpp` — existing OMEGA CD-ROM semantics; no expansion here.
+- `src/core/ps1_interrupt_continuation.h/.cpp` — existing OMEGA guest interrupt continuation.
+- `src/core/r3000a_state.h`, `src/core/r3000a_reference_executor.cpp` — existing OMEGA GTE/COP2 state and transfers.
+- `src/core/ps1_max3_*.h/.cpp` — OMEGA explorer, candidate engine, coverage, policy, budgets, priority, report I/O.
+- `CMakeLists.txt` — canonical union of both development lines.
+- `tests/test_ps1_omega_consolidation.cpp` — narrow integration sentinel proving modular HLE + OMEGA coexist in one build.
 
 ---
 
-### Task 1: Create the consolidation branch and reproduce the semantic merge
+### Task 1: Create an isolated consolidation branch and reproduce the merge
 
 **Files:**
-- No code changes yet.
-- Merge inputs: `fbde3f2a455845f062ab94d7f8db3040eb042889`, `8402c574bba0b58fe107af66740349c43f6dcd31`
+- Carry into branch: `docs/superpowers/specs/2026-09-11-ps1-omega-frame-first-design.md`
+- Carry into branch: `docs/superpowers/plans/2026-09-11-ps1-omega-frame-first-consolidation.md`
 
 **Interfaces:**
-- Consumes: exact pinned commits listed above.
-- Produces: an in-progress semantic merge on `feature/ps1-omega-frame-first-consolidation` with all conflicts visible and no force-updates to `main`.
+- Consumes: pinned OMEGA and `main` commits.
+- Produces: an in-progress semantic merge with both design documents present and all overlapping code conflicts visible.
 
-- [ ] **Step 1: Create an isolated worktree from the OMEGA head**
+- [ ] **Step 1: Create the worktree from the OMEGA head**
 
 ```bash
 git fetch origin main feature/ps1-gp0-dma2-bios-frontier-v0 design/ps1-omega-frame-first
-git worktree add ../jojo-omega-frame-first -b feature/ps1-omega-frame-first-consolidation 8402c574bba0b58fe107af66740349c43f6dcd31
+git worktree add ../jojo-omega-frame-first \
+  -b feature/ps1-omega-frame-first-consolidation \
+  8402c574bba0b58fe107af66740349c43f6dcd31
 cd ../jojo-omega-frame-first
+git rev-parse HEAD
 ```
 
-Expected: `git rev-parse HEAD` prints `8402c574bba0b58fe107af66740349c43f6dcd31`.
+Expected: `8402c574bba0b58fe107af66740349c43f6dcd31`.
 
-- [ ] **Step 2: Verify the OMEGA source head before merging**
+- [ ] **Step 2: Verify the source OMEGA head before touching it**
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -77,33 +77,39 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-Expected: all existing OMEGA tests pass before current `main` is introduced. If the pinned source head is already red, stop and record that as a pre-existing failure instead of attributing it to consolidation.
+Expected: all source-branch tests pass. If the pinned source is already red, record that separately and do not blame consolidation.
 
-- [ ] **Step 3: Start the merge without committing**
+- [ ] **Step 3: Carry the approved design and this plan into the implementation branch**
+
+```bash
+git checkout origin/design/ps1-omega-frame-first -- \
+  docs/superpowers/specs/2026-09-11-ps1-omega-frame-first-design.md \
+  docs/superpowers/plans/2026-09-11-ps1-omega-frame-first-consolidation.md
+git add docs/superpowers/specs/2026-09-11-ps1-omega-frame-first-design.md \
+        docs/superpowers/plans/2026-09-11-ps1-omega-frame-first-consolidation.md
+git commit -m "docs: carry Omega frame-first consolidation design"
+```
+
+Expected: spec and plan now travel with the code branch.
+
+- [ ] **Step 4: Start the semantic merge without committing**
 
 ```bash
 git merge --no-commit --no-ff fbde3f2a455845f062ab94d7f8db3040eb042889
 ```
 
-Expected: Git reports conflicts in overlapping HLE/runtime/CMake/test files while automatically carrying non-conflicting OMEGA modules.
+Expected: overlapping HLE/runtime/CMake/test files may conflict; non-overlapping OMEGA modules remain present.
 
-- [ ] **Step 4: Record the conflict set**
+- [ ] **Step 5: Record conflicts and confirm merge state**
 
 ```bash
 git diff --name-only --diff-filter=U | sort
+git rev-parse -q --verify MERGE_HEAD
 ```
 
-Expected: the list is finite and centered on files changed independently since `0fa7a3c...`; do not resolve by choosing `--ours` or `--theirs` wholesale for `ps1_hle_bios.*`, `ps1_boot_runtime.*`, `CMakeLists.txt`, or PS1 regression tests.
+Expected: `MERGE_HEAD` resolves successfully. Do not use wholesale `--ours`/`--theirs` for `ps1_hle_bios.*`, `ps1_boot_runtime.*`, `CMakeLists.txt`, or PS1 regression tests.
 
-- [ ] **Step 5: Verify the merge remains uncommitted**
-
-```bash
-test -f .git/MERGE_HEAD || git rev-parse -q --verify MERGE_HEAD
-```
-
-Expected: merge state exists; no merge commit has been created yet.
-
-### Task 2: Establish the canonical merged HLE contract
+### Task 2: Resolve the canonical HLE boundary with a RED→GREEN sentinel
 
 **Files:**
 - Modify: `src/core/ps1_hle_bios.h`
@@ -116,8 +122,8 @@ Expected: merge state exists; no merge commit has been created yet.
 - Preserve: `tests/test_ps1_changeclearrcnt.cpp`
 
 **Interfaces:**
-- Consumes: `R3000aState`, `Ps1MemoryBus`.
-- Produces:
+
+Canonical merged HLE API:
 
 ```cpp
 enum class Ps1HleBiosDomain : std::uint8_t { a0, b0, c0, sys };
@@ -143,23 +149,11 @@ enum class Ps1HleBiosDisposition : std::uint8_t {
 struct Ps1HleBiosResult {
     Ps1HleBiosDisposition disposition{Ps1HleBiosDisposition::unsupported};
 };
-
-class Ps1HleBios {
-public:
-    [[nodiscard]] Ps1HleBiosResult dispatch(
-        const Ps1HleBiosCall& call,
-        R3000aState& cpu) noexcept;
-    [[nodiscard]] Ps1HleBiosResult dispatch(
-        const Ps1HleBiosCall& call,
-        R3000aState& cpu,
-        Ps1MemoryBus& bus) noexcept;
-    [[nodiscard]] std::uint64_t diagnostic_state_hash() const noexcept;
-};
 ```
 
-The richer OMEGA call/result API is the canonical superset. Current-main semantics for A0/39, A0/56, A0/72, B0/19, B0/5B, and C0/0A remain required and are not rewritten back into `Ps1BootRuntime`.
+The OMEGA call/result API is the canonical superset. Current-main behavior for A0/39, A0/56, A0/72, B0/19, B0/5B, and C0/0A remains required.
 
-- [ ] **Step 1: Add a failing consolidation sentinel**
+- [ ] **Step 1: Add the consolidation sentinel**
 
 Create `tests/test_ps1_omega_consolidation.cpp`:
 
@@ -168,59 +162,67 @@ Create `tests/test_ps1_omega_consolidation.cpp`:
 #include "core/ps1_memory_bus.h"
 
 #include <cassert>
-#include <cstdint>
 
 int main() {
     jojo::Ps1HleBios bios;
     jojo::Ps1MemoryBus bus;
     jojo::R3000aState cpu{};
-
     cpu.gpr[31] = 0x80012000u;
-    jojo::Ps1HleBiosCall init_heap{};
-    init_heap.domain = jojo::Ps1HleBiosDomain::a0;
-    init_heap.selector = 0x39u;
-    init_heap.a0 = 0x80040000u;
-    init_heap.a1 = 0x1000u;
-    init_heap.ra = cpu.gpr[31];
 
-    const auto init_result = bios.dispatch(init_heap, cpu, bus);
-    assert(init_result.disposition == jojo::Ps1HleBiosDisposition::handled);
+    jojo::Ps1HleBiosCall call{};
+    call.domain = jojo::Ps1HleBiosDomain::a0;
+    call.selector = 0x39u;
+    call.a0 = 0x80040000u;
+    call.a1 = 0x1000u;
+    call.ra = cpu.gpr[31];
+
+    const auto handled = bios.dispatch(call, cpu, bus);
+    assert(handled.disposition == jojo::Ps1HleBiosDisposition::handled);
     assert(bios.heap_state().has_value());
     assert(bios.heap_state()->base == 0x80040000u);
     assert(bios.heap_state()->size == 0x1000u);
     assert(cpu.pc == 0x80012000u);
     assert(cpu.gpr[0] == 0u);
 
-    const auto before_hash = bios.diagnostic_state_hash();
-    jojo::Ps1HleBiosCall unknown{};
-    unknown.domain = jojo::Ps1HleBiosDomain::a0;
-    unknown.selector = 0xFFFFu;
-    const auto unknown_result = bios.dispatch(unknown, cpu, bus);
-    assert(unknown_result.disposition == jojo::Ps1HleBiosDisposition::unsupported);
-    assert(bios.diagnostic_state_hash() == before_hash);
-
+    const auto hash = bios.diagnostic_state_hash();
+    call.selector = 0xFFFFu;
+    const auto unsupported = bios.dispatch(call, cpu, bus);
+    assert(unsupported.disposition == jojo::Ps1HleBiosDisposition::unsupported);
+    assert(bios.diagnostic_state_hash() == hash);
     return 0;
 }
 ```
 
-Register it in `CMakeLists.txt`:
+Register:
 
 ```cmake
 add_jojo_test(jojo_ps1_omega_consolidation_tests tests/test_ps1_omega_consolidation.cpp)
 ```
 
-- [ ] **Step 2: Build the sentinel to verify the unresolved interface fails**
+- [ ] **Step 2: Build to verify the unresolved merge is RED**
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --target jojo_ps1_omega_consolidation_tests --parallel
 ```
 
-Expected before semantic resolution: compile/link failure if the conflict resolution has not yet produced the canonical superset API.
+Expected: FAIL until the canonical merged HLE interface is resolved.
 
-- [ ] **Step 3: Resolve `ps1_hle_bios.h/.cpp` to the canonical superset**
+- [ ] **Step 3: Resolve HLE to the modular superset**
 
-Use the OMEGA `Ps1HleBiosCall`/`Ps1HleBiosResult`/domain API and retain these state/accessor contracts:
+Keep a single `Ps1HleBios` owner with both overloads:
+
+```cpp
+[[nodiscard]] Ps1HleBiosResult dispatch(
+    const Ps1HleBiosCall& call,
+    R3000aState& cpu) noexcept;
+[[nodiscard]] Ps1HleBiosResult dispatch(
+    const Ps1HleBiosCall& call,
+    R3000aState& cpu,
+    Ps1MemoryBus& bus) noexcept;
+```
+
+Retain current-main accessors and OMEGA additions:
 
 ```cpp
 [[nodiscard]] const std::optional<Ps1BiosHeapState>& heap_state() const noexcept;
@@ -231,7 +233,7 @@ Use the OMEGA `Ps1HleBiosCall`/`Ps1HleBiosResult`/domain API and retain these st
 [[nodiscard]] bool iso9660_removed() const noexcept;
 ```
 
-For A0/39, preserve current-main semantics through the call object:
+A0/39 remains:
 
 ```cpp
 case 0x39u:
@@ -240,9 +242,9 @@ case 0x39u:
     return {Ps1HleBiosDisposition::handled};
 ```
 
-Unknown selectors must return `unsupported` without mutating CPU/HLE state. Bus-dependent services must return `unsupported` when called through the CPU-only overload rather than inventing memory effects.
+Unknown selectors return `unsupported` without state mutation. Bus-dependent services invoked through the CPU-only overload return `unsupported`, not fabricated success.
 
-- [ ] **Step 4: Run canonical HLE regression tests**
+- [ ] **Step 4: Run HLE regression suites**
 
 ```bash
 cmake --build build --target \
@@ -251,21 +253,20 @@ cmake --build build --target \
   jojo_ps1_kernel_hle_frontier_tests \
   jojo_ps1_96_remove_tests \
   jojo_ps1_changeclearrcnt_tests --parallel
-ctest --test-dir build --output-on-failure -R "jojo_ps1_(omega_consolidation|hle_bios|kernel_hle_frontier|96_remove|changeclearrcnt)_tests"
+ctest --test-dir build --output-on-failure \
+  -R "jojo_ps1_(omega_consolidation|hle_bios|kernel_hle_frontier|96_remove|changeclearrcnt)_tests"
 ```
 
-Expected: all listed tests pass.
+Expected: PASS.
 
-- [ ] **Step 5: Stage the HLE resolution without finishing the merge**
+- [ ] **Step 5: Stage the HLE resolution**
 
 ```bash
 git add src/core/ps1_hle_bios.h src/core/ps1_hle_bios.cpp \
         tests/test_ps1_omega_consolidation.cpp CMakeLists.txt
 ```
 
-Expected: HLE conflicts disappear from `git diff --name-only --diff-filter=U`.
-
-### Task 3: Merge `Ps1BootRuntime` around the canonical HLE owner
+### Task 3: Resolve `Ps1BootRuntime` while keeping policy separate from HLE
 
 **Files:**
 - Modify: `src/core/ps1_boot_runtime.h`
@@ -276,8 +277,8 @@ Expected: HLE conflicts disappear from `git diff --name-only --diff-filter=U`.
 - Preserve: `tests/test_ps1_interrupt_continuation.cpp`
 
 **Interfaces:**
-- Consumes: canonical `Ps1HleBios`, `Ps1MemoryBus`, `Ps1InterruptContinuation`.
-- Produces:
+
+Merged runtime keeps:
 
 ```cpp
 struct Ps1DiagnosticMmioReadFrontier {
@@ -285,18 +286,9 @@ struct Ps1DiagnosticMmioReadFrontier {
     std::uint32_t opcode{};
     Ps1UnsupportedAccess access{};
 };
-
-class Ps1BootRuntime {
-public:
-    [[nodiscard]] bool apply_diagnostic_bios_fallback(Ps1BiosFallback fallback) noexcept;
-    [[nodiscard]] const std::optional<Ps1DiagnosticMmioReadFrontier>&
-        diagnostic_mmio_read_frontier() const noexcept;
-    [[nodiscard]] bool apply_diagnostic_mmio_read_fallback(std::uint32_t value) noexcept;
-    [[nodiscard]] std::uint64_t diagnostic_state_hash() const noexcept;
-};
 ```
 
-Ownership remains:
+Private ownership:
 
 ```cpp
 Ps1MemoryBus bus_{};
@@ -307,15 +299,11 @@ bool diagnostic_bios_frontier_pending_{};
 std::optional<Ps1DiagnosticMmioReadFrontier> diagnostic_mmio_read_frontier_{};
 ```
 
-Use the member name `bios_` consistently to preserve current-main's explicit modular owner while importing OMEGA behavior.
+- [ ] **Step 1: Resolve the header with no duplicated BIOS semantic fields**
 
-- [ ] **Step 1: Resolve the runtime header with no BIOS semantic state duplicated**
+Do not keep heap/interrupt/pad/root-counter/ISO fields in `Ps1BootRuntime`; they remain inside `Ps1HleBios` and public runtime accessors forward to `bios_`.
 
-The private section must not contain heap/interrupt/pad/root-counter/ISO state fields outside `Ps1HleBios`. Keep only runtime policy/frontier state.
-
-- [ ] **Step 2: Route BIOS/SYS detection through `Ps1HleBiosCall`**
-
-At each A0/B0/C0/SYS boundary, construct a call from architectural state:
+- [ ] **Step 2: Route BIOS/SYS boundaries through the call object**
 
 ```cpp
 Ps1HleBiosCall call{};
@@ -330,37 +318,17 @@ call.ra = cpu_.gpr[31];
 const auto result = bios_.dispatch(call, cpu_, bus_);
 ```
 
-Disposition handling must remain explicit:
+Handle `handled`, `unsupported`, `terminal`, and `return_from_exception` explicitly. Selector semantics must not move back into the runtime.
 
-```cpp
-switch (result.disposition) {
-case Ps1HleBiosDisposition::handled:
-    diagnostic_bios_frontier_pending_ = false;
-    break;
-case Ps1HleBiosDisposition::return_from_exception:
-    // Delegate only to the already-implemented interrupt continuation path.
-    break;
-case Ps1HleBiosDisposition::terminal:
-    // Preserve the concrete runtime/device stop produced by the bus/HLE operation.
-    break;
-case Ps1HleBiosDisposition::unsupported:
-    diagnostic_bios_frontier_pending_ = true;
-    report.stop_reason = Ps1BootStopReason::bios_call_unimplemented;
-    return report;
-}
-```
+- [ ] **Step 3: Preserve diagnostic-only continuations**
 
-Do not copy selector-specific semantics back into the runtime.
+Keep `apply_diagnostic_bios_fallback()` and `apply_diagnostic_mmio_read_fallback()` as MAX³/runtime policy. They do not extend production HLE coverage.
 
-- [ ] **Step 3: Preserve diagnostic fallback separation**
+- [ ] **Step 4: Merge runtime hashing**
 
-`apply_diagnostic_bios_fallback()` and `apply_diagnostic_mmio_read_fallback()` remain runtime/MAX³ policy. They may mutate diagnostic continuation state, but must not expand production HLE coverage.
+`diagnostic_state_hash()` incorporates CPU, bus, `bios_.diagnostic_state_hash()`, interrupt-continuation state when already supported by OMEGA, and pending diagnostic frontier state. Require determinism/state discrimination, not historical numeric equality.
 
-- [ ] **Step 4: Merge diagnostic hashing**
-
-`Ps1BootRuntime::diagnostic_state_hash()` must hash CPU state, bus state, `bios_.diagnostic_state_hash()`, interrupt-continuation state when provided by the existing OMEGA implementation, and pending diagnostic frontier state. Do not require numeric equality with historical hashes; require determinism and state discrimination.
-
-- [ ] **Step 5: Run runtime/frontier tests**
+- [ ] **Step 5: Run runtime/frontier suites**
 
 ```bash
 cmake --build build --target \
@@ -368,10 +336,11 @@ cmake --build build --target \
   jojo_ps1_diagnostic_frontier_tests \
   jojo_ps1_cdrom_boot_runtime_tests \
   jojo_ps1_interrupt_continuation_tests --parallel
-ctest --test-dir build --output-on-failure -R "jojo_ps1_(boot_runtime|diagnostic_frontier|cdrom_boot_runtime|interrupt_continuation)_tests"
+ctest --test-dir build --output-on-failure \
+  -R "jojo_ps1_(boot_runtime|diagnostic_frontier|cdrom_boot_runtime|interrupt_continuation)_tests"
 ```
 
-Expected: all pass, including one-shot diagnostic MMIO fallback and interrupt callback continuation behavior.
+Expected: PASS.
 
 - [ ] **Step 6: Stage runtime resolution**
 
@@ -379,19 +348,15 @@ Expected: all pass, including one-shot diagnostic MMIO fallback and interrupt ca
 git add src/core/ps1_boot_runtime.h src/core/ps1_boot_runtime.cpp
 ```
 
-### Task 4: Preserve OMEGA bus, GPU, CD-ROM, and GTE state exactly through the merge
+### Task 4: Preserve the existing OMEGA device and CPU architecture
 
 **Files:**
-- Modify/resolve: `src/core/ps1_memory_bus.h`
-- Modify/resolve: `src/core/ps1_memory_bus.cpp`
-- Preserve/add from OMEGA: `src/core/ps1_gpu_state.h`
-- Preserve/add from OMEGA: `src/core/ps1_gpu_state.cpp`
-- Preserve/add from OMEGA: `src/core/ps1_cdrom_state.h`
-- Preserve/add from OMEGA: `src/core/ps1_cdrom_state.cpp`
-- Preserve/add from OMEGA: `src/core/ps1_interrupt_continuation.h`
-- Preserve/add from OMEGA: `src/core/ps1_interrupt_continuation.cpp`
-- Modify/resolve: `src/core/r3000a_state.h`
-- Modify/resolve: `src/core/r3000a_reference_executor.cpp`
+- Resolve: `src/core/ps1_memory_bus.h/.cpp`
+- Preserve: `src/core/ps1_gpu_state.h/.cpp`
+- Preserve: `src/core/ps1_cdrom_state.h/.cpp`
+- Preserve: `src/core/ps1_interrupt_continuation.h/.cpp`
+- Resolve: `src/core/r3000a_state.h`
+- Resolve: `src/core/r3000a_reference_executor.cpp`
 - Test: `tests/test_ps1_memory_bus.cpp`
 - Test: `tests/test_ps1_gpu_state.cpp`
 - Test: `tests/test_ps1_gp1_boot_report.cpp`
@@ -400,22 +365,22 @@ git add src/core/ps1_boot_runtime.h src/core/ps1_boot_runtime.cpp
 - Test: `tests/test_r3000a_cop2_control.cpp`
 
 **Interfaces:**
-- Consumes: current main RAM/scratchpad/bus behavior plus OMEGA device mappings.
-- Produces: the exact already-tested OMEGA MMIO/device/GTE surface; no new commands are added.
+- Consumes: current RAM/scratchpad behavior plus already-implemented OMEGA device mappings.
+- Produces: the exact OMEGA MMIO/GPU/CD-ROM/GTE behavior already covered by tests; no new commands.
 
-- [ ] **Step 1: Resolve bus conflicts in favor of the union, not one side**
+- [ ] **Step 1: Resolve the bus as a semantic union**
 
-The merged bus must keep current-main RAM/scratchpad behavior and OMEGA's existing mapped devices/diagnostic read override. Known supported MMIO routes to their device component. Unsupported accesses continue to populate `last_unsupported_access()` and return `R3000aBusStatus::unsupported`.
+Keep current-main RAM/scratchpad behavior and OMEGA's existing device routes plus diagnostic one-shot read override. Supported addresses route to real existing components; unsupported accesses record evidence and return `R3000aBusStatus::unsupported`.
 
-- [ ] **Step 2: Preserve one-shot diagnostic MMIO read identity**
+- [ ] **Step 2: Preserve one-shot MMIO fallback identity**
 
-The armed fallback remains bound to the exact blocked access identity. Wrong address, width, direction, PC, stale runtime state, or second consumption fails closed.
+Wrong address, width, direction, PC, stale state, or second consumption fails closed.
 
-- [ ] **Step 3: Preserve OMEGA GTE/COP2 architectural state**
+- [ ] **Step 3: Preserve existing GTE/COP2 state only**
 
-Keep the OMEGA `R3000aCop2Gte` control-register state in `R3000aState` and retain already-tested CTC2/CFC2 semantics. Do not add GTE mathematical commands in this phase.
+Keep OMEGA control-register state and tested CTC2/CFC2 behavior. Do not add mathematical GTE commands in Phase A.
 
-- [ ] **Step 4: Run device and CPU-state regression suites**
+- [ ] **Step 4: Run device/CPU regression suites**
 
 ```bash
 cmake --build build --target \
@@ -426,12 +391,13 @@ cmake --build build --target \
   jojo_ps1_cdrom_strict_widths_tests \
   jojo_r3000a_cop2_control_tests \
   jojo_r3000a_boundary_tests --parallel
-ctest --test-dir build --output-on-failure -R "jojo_ps1_(memory_bus|gpu_state|gp1_boot_report|cdrom_state|cdrom_strict_widths)_tests|jojo_r3000a_(cop2_control|boundary)_tests"
+ctest --test-dir build --output-on-failure \
+  -R "jojo_ps1_(memory_bus|gpu_state|gp1_boot_report|cdrom_state|cdrom_strict_widths)_tests|jojo_r3000a_(cop2_control|boundary)_tests"
 ```
 
-Expected: all pass.
+Expected: PASS.
 
-- [ ] **Step 5: Stage device/CPU resolution**
+- [ ] **Step 5: Stage the device/CPU resolution**
 
 ```bash
 git add src/core/ps1_memory_bus.h src/core/ps1_memory_bus.cpp \
@@ -441,33 +407,24 @@ git add src/core/ps1_memory_bus.h src/core/ps1_memory_bus.cpp \
         src/core/r3000a_state.h src/core/r3000a_reference_executor.cpp
 ```
 
-### Task 5: Preserve the complete OMEGA search architecture and CMake registration
+### Task 5: Preserve the complete OMEGA search architecture and CMake union
 
 **Files:**
-- Preserve/add: `src/core/ps1_max3_explorer.h/.cpp`
-- Preserve/add: `src/core/ps1_max3_candidate_engine.h/.cpp`
-- Preserve/add: `src/core/ps1_max3_coverage.h/.cpp`
-- Preserve/add: `src/core/ps1_max3_search_policy.h/.cpp`
-- Preserve/add: `src/core/ps1_max3_budget.h/.cpp`
-- Preserve/add: `src/core/ps1_max3_frontier_priority.h/.cpp`
-- Preserve/add: `src/core/ps1_max3_report_io.cpp`
-- Modify/resolve: `CMakeLists.txt`
-- Test: `tests/test_ps1_max3_explorer.cpp`
-- Test: `tests/test_ps1_max3_profiles.cpp`
-- Test: `tests/test_ps1_max3_candidate_engine.cpp`
-- Test: `tests/test_ps1_max3_coverage.cpp`
-- Test: `tests/test_ps1_max3_search_policy.cpp`
-- Test: `tests/test_ps1_max3_budget.cpp`
-- Test: `tests/test_ps1_max3_deep_expansion.cpp`
-- Test: `tests/test_ps1_max3_frontier_priority.cpp`
+- Preserve: `src/core/ps1_max3_explorer.h/.cpp`
+- Preserve: `src/core/ps1_max3_candidate_engine.h/.cpp`
+- Preserve: `src/core/ps1_max3_coverage.h/.cpp`
+- Preserve: `src/core/ps1_max3_search_policy.h/.cpp`
+- Preserve: `src/core/ps1_max3_budget.h/.cpp`
+- Preserve: `src/core/ps1_max3_frontier_priority.h/.cpp`
+- Preserve: `src/core/ps1_max3_report_io.cpp`
+- Resolve: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `Ps1BootRuntime`, diagnostic BIOS/MMIO frontiers, device/report counters.
-- Produces: unchanged OMEGA public profile and report contracts, including:
+
+Keep:
 
 ```cpp
 enum class Ps1Max3Profile : std::uint8_t { strict, deep, omega };
-
 [[nodiscard]] Ps1Max3Options ps1_max3_options(Ps1Max3Profile profile) noexcept;
 [[nodiscard]] Ps1Max3Options ps1_max3_local_evidence_options() noexcept;
 [[nodiscard]] Result<Ps1Max3Report> explore_ps1_max3(
@@ -477,7 +434,7 @@ enum class Ps1Max3Profile : std::uint8_t { strict, deep, omega };
 
 - [ ] **Step 1: Resolve `CMakeLists.txt` as a strict union**
 
-Ensure `jojo_core` contains all of these OMEGA modules exactly once:
+`jojo_core` must contain each OMEGA module exactly once:
 
 ```cmake
 src/core/ps1_cdrom_state.cpp
@@ -493,13 +450,13 @@ src/core/ps1_max3_frontier_priority.cpp
 src/core/ps1_max3_report_io.cpp
 ```
 
-Ensure all OMEGA test targets from the source branch remain registered, plus `jojo_ps1_omega_consolidation_tests`.
+Keep all OMEGA test targets plus `jojo_ps1_omega_consolidation_tests`.
 
-- [ ] **Step 2: Verify profile defaults are unchanged during consolidation**
+- [ ] **Step 2: Freeze profile budgets during consolidation**
 
-Do not enlarge OMEGA budgets here. `strict`, `deep`, and `omega` must retain the values from `8402c574...`; budget expansion belongs to a later Frame-First phase only if the approved spec requires it.
+Do not enlarge strict/deep/omega budgets in this phase. Preserve the source-OMEGA values from `8402c574...`.
 
-- [ ] **Step 3: Run the OMEGA module suites**
+- [ ] **Step 3: Run OMEGA suites**
 
 ```bash
 cmake --build build --target \
@@ -514,15 +471,15 @@ cmake --build build --target \
 ctest --test-dir build --output-on-failure -R "jojo_ps1_max3_"
 ```
 
-Expected: all OMEGA suites pass with deterministic ordering and pruning.
+Expected: PASS with deterministic ordering/pruning.
 
-- [ ] **Step 4: Stage OMEGA modules and CMake**
+- [ ] **Step 4: Stage OMEGA/CMake resolution**
 
 ```bash
 git add CMakeLists.txt src/core/ps1_max3_* tests/test_ps1_max3_*
 ```
 
-### Task 6: Preserve report/runtime compatibility and the Windows checkpoint path
+### Task 6: Preserve report, installation, and Windows checkpoint compatibility
 
 **Files:**
 - Resolve if touched: `src/core/ps1_boot_report.h`
@@ -534,10 +491,8 @@ git add CMakeLists.txt src/core/ps1_max3_* tests/test_ps1_max3_*
 - Test: `tests/test_ps1_runtime_installation.cpp`
 
 **Interfaces:**
-- Consumes: consolidated OMEGA report and runtime.
-- Produces: the existing installation-backed local-evidence API continues to call MAX³/OMEGA and returns `best_report` without changing commercial installation bytes.
 
-Required runtime path remains conceptually:
+The local-evidence path remains:
 
 ```cpp
 auto max3 = bootstrap_runtime_max3_local_evidence_to_file(
@@ -552,69 +507,69 @@ return Result<Ps1BootReport>::success(std::move(max3.value.best_report));
 
 - [ ] **Step 1: Resolve report fields additively**
 
-Retain current-main report compatibility and all OMEGA counters/frontier fields already serialized by the source branch. Do not remove old keys merely because richer OMEGA structures exist.
+Retain current report compatibility and existing OMEGA counters/frontier serialization. Do not remove old keys because richer structures exist.
 
-- [ ] **Step 2: Verify the Windows UI still runs local evidence, not production boot**
+- [ ] **Step 2: Verify `EXECUTAR CHECKPOINT` remains diagnostic**
 
-`EXECUTAR CHECKPOINT` must continue to invoke the installation-backed diagnostic path. Do not repoint the button to `bootstrap_runtime()` or claim commercial playability.
+The Win32 action continues to invoke installation-backed local evidence. Do not redirect it to `bootstrap_runtime()` or claim playability.
 
-- [ ] **Step 3: Run report/install/local-evidence tests**
+- [ ] **Step 3: Run compatibility suites**
 
 ```bash
 cmake --build build --target \
   jojo_ps1_boot_report_io_tests \
   jojo_ps1_local_evidence_tests \
   jojo_ps1_runtime_installation_tests --parallel
-ctest --test-dir build --output-on-failure -R "jojo_ps1_(boot_report_io|local_evidence|runtime_installation)_tests"
+ctest --test-dir build --output-on-failure \
+  -R "jojo_ps1_(boot_report_io|local_evidence|runtime_installation)_tests"
 ```
 
-Expected: all pass and no test mutates the prepared installation unexpectedly.
+Expected: PASS; prepared installation contents remain unmodified except documented diagnostic outputs.
 
-- [ ] **Step 4: Stage compatibility resolutions**
+- [ ] **Step 4: Stage only paths actually changed**
 
 ```bash
 git add src/core/ps1_boot_report.h src/core/ps1_boot_report_io.cpp \
         src/core/runtime.cpp src/app_win32/main.cpp tests/test_ps1_boot_report_io.cpp
 ```
 
-Use `git add` only for paths actually modified by the merge.
+If a listed path has no merge change, omit it from `git add`.
 
-### Task 7: Finish the semantic merge commit only after all targeted suites are green
+### Task 7: Complete the merge only after the semantic union is green
 
 **Files:**
 - All staged consolidation files.
-- No new hardware feature files beyond those already present on one of the two input heads.
+- No new hardware-feature implementation files beyond those already present in one of the input heads.
 
 **Interfaces:**
-- Consumes: all resolved tasks above.
-- Produces: one merge commit with first parent `8402c574...` lineage and second parent current `main`, preserving both histories.
+- Produces: one merge commit preserving both source histories.
 
-- [ ] **Step 1: Confirm no unresolved conflicts remain**
+- [ ] **Step 1: Confirm no unresolved conflicts or conflict markers remain**
 
 ```bash
 test -z "$(git diff --name-only --diff-filter=U)"
 git diff --check
 ```
 
-Expected: no unresolved paths and no whitespace errors.
+Expected: both commands succeed.
 
-- [ ] **Step 2: Run the complete portable test suite before committing**
+- [ ] **Step 2: Run the complete local suite before committing**
 
 ```bash
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-Expected: 100% pass on the local platform.
+Expected: 100% pass.
 
-- [ ] **Step 3: Inspect scope**
+- [ ] **Step 3: Review scope from both source heads**
 
 ```bash
 git diff --stat 8402c574bba0b58fe107af66740349c43f6dcd31
 git diff --stat fbde3f2a455845f062ab94d7f8db3040eb042889
 ```
 
-Expected: differences are explainable as the semantic union plus the single consolidation sentinel test and design/plan documentation. No unrelated gameplay/mod/network/presentation refactor should appear.
+Expected: changes are explainable as the semantic union, design/plan docs, and the consolidation sentinel. No unrelated network/mod/presentation refactor.
 
 - [ ] **Step 4: Create the merge commit**
 
@@ -622,16 +577,15 @@ Expected: differences are explainable as the semantic union plus the single cons
 git commit -m "merge: consolidate PS1 OMEGA with modular HLE main"
 ```
 
-Expected: `git show --no-patch --format='%P' HEAD` contains two parent SHAs.
-
-- [ ] **Step 5: Verify ancestry**
+- [ ] **Step 5: Verify both source heads are ancestors**
 
 ```bash
 git merge-base --is-ancestor 8402c574bba0b58fe107af66740349c43f6dcd31 HEAD
 git merge-base --is-ancestor fbde3f2a455845f062ab94d7f8db3040eb042889 HEAD
+git show --no-patch --format='%P' HEAD
 ```
 
-Expected: both commands exit 0.
+Expected: both ancestry checks exit 0 and the merge commit has two parents.
 
 ### Task 8: Run authoritative Linux/Windows CI and verify the Windows artifact
 
@@ -639,18 +593,15 @@ Expected: both commands exit 0.
 - No source changes unless CI exposes a real portability regression.
 
 **Interfaces:**
-- Consumes: consolidation merge commit.
-- Produces: a green cross-platform consolidation head and Windows artifact; this is the handoff point for Frame-First Phase B, not a first-frame claim.
+- Produces: green Phase A consolidation head; handoff baseline for the next Frame-First plan.
 
-- [ ] **Step 1: Push the consolidation branch**
+- [ ] **Step 1: Push the branch**
 
 ```bash
 git push -u origin feature/ps1-omega-frame-first-consolidation
 ```
 
-- [ ] **Step 2: Verify Linux CI gates**
-
-Required successful stages:
+- [ ] **Step 2: Require Linux success**
 
 ```text
 Configure
@@ -662,11 +613,7 @@ Observed disc revision contract
 R2.5 direct UDP transport contract
 ```
 
-Expected: all success.
-
-- [ ] **Step 3: Verify Windows x64/MSVC 2022 gates**
-
-Required successful stages:
+- [ ] **Step 3: Require Windows x64/MSVC 2022 success**
 
 ```text
 Configure
@@ -679,24 +626,20 @@ R2.5 direct UDP transport contract
 Upload single executable
 ```
 
-Expected: all success.
+- [ ] **Step 4: Verify artifact identity**
 
-- [ ] **Step 4: Verify the artifact**
-
-Expected artifact name:
+Expected artifact:
 
 ```text
 JOJO-Recompiled-Windows-x64
 ```
 
-The artifact must be produced from the exact consolidation head SHA.
+It must be produced from the exact consolidation head SHA.
 
-- [ ] **Step 5: Record final consolidation evidence**
-
-Record in the implementation report, not by changing commercial-readiness claims:
+- [ ] **Step 5: Record evidence**
 
 ```text
-consolidation_head=<sha>
+consolidation_head=<exact SHA>
 linux_job=success
 windows_job=success
 windows_artifact=JOJO-Recompiled-Windows-x64
@@ -706,11 +649,11 @@ main_source_ancestor=true
 
 - [ ] **Step 6: Stop at the Phase A boundary**
 
-Do not implement new GPU/DMA/IRQ/CD/GTE behavior yet. The next approved plan must begin Frame-First Phase B from this green consolidated head.
+Do not add new GPU/DMA/IRQ/CD/GTE behavior. The next implementation plan starts from this green consolidated head and addresses Frame-First observability/gating or the highest strict blocker defined by the approved spec.
 
 ## Plan Self-Review Results
 
-- **Spec coverage:** This plan covers only the spec's required precondition: semantic consolidation of current `main` with the mature OMEGA line while preserving strict/diagnostic boundaries, deterministic hashing, tests, and cross-platform gates. Later Frame-First subsystem work is intentionally excluded and requires separate plans.
-- **Placeholder scan:** No TBD/TODO/"implement later" placeholders are permitted. Every task has concrete files, commands, interfaces, and expected results.
-- **Type consistency:** The canonical HLE API uses `Ps1HleBiosCall`, `Ps1HleBiosResult`, `Ps1HleBiosDisposition`, and `Ps1HleBiosDomain` consistently. `Ps1BootRuntime` owns one `Ps1HleBios bios_`; OMEGA consumes runtime frontiers rather than duplicating BIOS semantics.
-- **Scope check:** This phase adds no new PS1 hardware semantics. Its terminal deliverable is a green semantic union suitable as the baseline for the next Frame-First plan.
+- **Spec coverage:** Phase A covers the spec's required consolidation precondition: current `main` + mature OMEGA, modular HLE ownership, strict/diagnostic separation, deterministic hashing, regression preservation, and Linux/Windows gates. Frame-first hardware expansion is intentionally deferred to later plans.
+- **Placeholder scan:** No TBD/TODO/"implement later" placeholder exists; commands, interfaces, tests, and expected outcomes are explicit.
+- **Type consistency:** `Ps1HleBiosCall`, `Ps1HleBiosResult`, `Ps1HleBiosDisposition`, and `Ps1HleBiosDomain` are canonical. `Ps1BootRuntime` owns exactly one `Ps1HleBios bios_`; OMEGA consumes runtime frontiers rather than duplicating BIOS semantics.
+- **Scope check:** No new PS1 hardware semantics are introduced. The terminal deliverable is a green semantic union suitable for Frame-First Phase B.
