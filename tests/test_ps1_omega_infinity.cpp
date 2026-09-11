@@ -132,6 +132,10 @@ static void test_multi_epoch_stop_resume_and_identity_rejection() {
     CHECK(first.value.epoch_count >= 2u);
     CHECK(first.value.total_retired >= 3u);
     CHECK(jojo::ps1_omega_infinity_has_resumable_session(root));
+    CHECK(jojo::ps1_omega_infinity_has_compatible_resumable_session(
+        root, executable.metadata.fnv1a64_hex));
+    CHECK(!jojo::ps1_omega_infinity_has_compatible_resumable_session(
+        root, "different-executable"));
 
     const auto first_total = first.value.total_retired;
     jojo::Ps1OmegaInfinityControl second_control;
