@@ -38,6 +38,7 @@ enum class Ps1Max3CandidateSource : std::uint8_t {
     mask_class,
     threshold_class,
     coverage_retained,
+    diagnostic_no_effect,
 };
 
 enum class Ps1Max3Subsystem : std::uint8_t {
@@ -69,6 +70,7 @@ enum class Ps1Max3PruneReason : std::uint8_t {
 enum class Ps1Max3DecisionKind : std::uint8_t {
     bios_fallback,
     mmio_read_fallback,
+    mmio_write_no_effect,
 };
 
 enum class Ps1Max3FrontierKind : std::uint8_t {
