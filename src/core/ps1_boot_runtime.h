@@ -20,6 +20,12 @@ enum class Ps1BiosFallback : std::uint8_t {
     preserve_v0,
 };
 
+struct Ps1DiagnosticMmioReadFrontier {
+    std::uint32_t pc{};
+    std::uint32_t opcode{};
+    Ps1UnsupportedAccess access{};
+};
+
 class Ps1BootRuntime {
 public:
     Ps1BootRuntime() = default;
@@ -27,6 +33,9 @@ public:
     [[nodiscard]] static Result<Ps1BootRuntime> create(const Ps1Executable& executable);
     [[nodiscard]] Ps1BootReport run(const Ps1BootOptions& options) noexcept;
     [[nodiscard]] bool apply_diagnostic_bios_fallback(Ps1BiosFallback fallback) noexcept;
+    [[nodiscard]] const std::optional<Ps1DiagnosticMmioReadFrontier>&
+        diagnostic_mmio_read_frontier() const noexcept;
+    [[nodiscard]] bool apply_diagnostic_mmio_read_fallback(std::uint32_t value) noexcept;
     [[nodiscard]] std::uint64_t diagnostic_state_hash() const noexcept;
 
     [[nodiscard]] const R3000aState& cpu_state() const noexcept;
@@ -44,6 +53,7 @@ private:
     Ps1HleBios hle_bios_{};
     Ps1InterruptContinuation interrupt_continuation_{};
     bool diagnostic_bios_frontier_pending_{};
+    std::optional<Ps1DiagnosticMmioReadFrontier> diagnostic_mmio_read_frontier_{};
 };
 
 } // namespace jojo
