@@ -21,6 +21,13 @@ struct Ps1UnsupportedAccess {
     std::uint32_t value{};
 };
 
+struct Ps1DiagnosticMmioReadOverride {
+    std::uint32_t guest_address{};
+    std::uint32_t physical_address{};
+    std::uint8_t width{};
+    std::uint32_t value{};
+};
+
 class Ps1MemoryBus final : public R3000aBus {
 public:
     static constexpr std::uint32_t main_ram_size = 2u * 1024u * 1024u;
@@ -52,6 +59,12 @@ public:
     [[nodiscard]] const Ps1GpuState& gpu() const noexcept;
     [[nodiscard]] std::uint64_t diagnostic_state_hash() const noexcept;
 
+    [[nodiscard]] bool arm_diagnostic_mmio_read_override(
+        const Ps1UnsupportedAccess& access,
+        std::uint32_t value) noexcept;
+    [[nodiscard]] const std::optional<Ps1DiagnosticMmioReadOverride>&
+        diagnostic_mmio_read_override() const noexcept;
+
     void set_diagnostic_mmio_probe_enabled(bool enabled) noexcept;
     [[nodiscard]] bool diagnostic_mmio_probe_enabled() const noexcept;
     const std::optional<Ps1UnsupportedAccess>& last_diagnostic_mmio_probe() const noexcept;
@@ -63,6 +76,11 @@ public:
     void clear_last_unsupported_cdrom_command() noexcept;
 
 private:
+    [[nodiscard]] std::optional<R3000aBusResult> take_diagnostic_mmio_read_override(
+        std::uint32_t guest_address,
+        std::uint32_t physical_address,
+        std::uint8_t width) noexcept;
+
     static constexpr std::size_t diagnostic_mmio_shadow_size = 0x2000u;
 
     std::vector<std::uint8_t> main_ram_;
@@ -81,6 +99,7 @@ private:
     Ps1GpuState gpu_{};
     bool diagnostic_mmio_probe_enabled_{};
     std::array<std::uint8_t, diagnostic_mmio_shadow_size> diagnostic_mmio_shadow_{};
+    std::optional<Ps1DiagnosticMmioReadOverride> diagnostic_mmio_read_override_{};
     std::optional<Ps1UnsupportedAccess> last_diagnostic_mmio_probe_{};
     std::optional<Ps1UnsupportedAccess> last_unsupported_{};
     std::optional<std::uint8_t> last_unsupported_cdrom_command_{};
