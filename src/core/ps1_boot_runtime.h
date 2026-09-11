@@ -39,7 +39,10 @@ public:
 
     [[nodiscard]] bool apply_diagnostic_mmio_write_no_effect(
         const Ps1BootReport& frontier) noexcept {
-        if (frontier.stop_reason != Ps1BootStopReason::mmio_unimplemented ||
+        const bool supported_stop =
+            frontier.stop_reason == Ps1BootStopReason::mmio_unimplemented ||
+            frontier.stop_reason == Ps1BootStopReason::device_command_unimplemented;
+        if (!supported_stop ||
             !frontier.unsupported_access ||
             !frontier.unsupported_access->write ||
             !frontier.last_opcode ||
@@ -66,7 +69,9 @@ public:
         // step_r3000a has already retired any prior delayed load before it reports
         // an unsupported store boundary. Reproduce only the normal store-retirement
         // epilogue: advance control flow and clear the consumed delay slot. No bus
-        // or device state is mutated by this diagnostic continuation.
+        // or device state is mutated by this diagnostic continuation. This remains
+        // speculative even when the bus classified the blocked write as an
+        // unsupported device command rather than a generic unsupported MMIO write.
         cpu_.pc = cpu_.next_pc;
         cpu_.next_pc = cpu_.next_pc + 4u;
         if (cpu_.delay_slot.active) cpu_.delay_slot = {};
