@@ -4,7 +4,7 @@
 
 **Goal:** Make OMEGA strict-first for ranking and commercial authority while preserving speculative exploration and adding no new PS1 hardware semantics.
 
-**Architecture:** `Ps1Max3SearchScore` becomes lexicographically strict-first, and the same evidence rule governs state dominance, best-node selection, and frontier-cluster ranking. `best_node`, `best_path`, and `best_report` remain the single authoritative result and must always refer to a strict node; speculative descendants stay in `nodes`/`frontiers` for diagnosis. The local-evidence compatibility API defensively refuses a MAX3 report whose authoritative best node is not strict.
+**Architecture:** `Ps1Max3SearchScore` becomes lexicographically strict-first, and the same evidence rule governs state dominance, best-node selection, and frontier-cluster ranking. `best_node`, `best_path`, and `best_report` remain the single authoritative result and must always refer to a strict node; speculative descendants stay in `nodes`/`frontiers` for diagnosis. The existing local-evidence compatibility API remains unchanged and becomes strict-safe because it already returns `best_report`.
 
 **Tech Stack:** C++20, CMake/CTest, GitHub Actions Linux + Windows x64/MSVC 2022.
 
@@ -13,6 +13,7 @@
 ## Global Constraints
 
 - Baseline is `40549e6988ef90a351970cd9166a4c58dc14a62c`.
+- Execute from a feature branch created from the approved design branch so the spec and this plan travel with the implementation.
 - `strict` evidence unconditionally outranks `speculative` evidence before all progress counters.
 - Within the same evidence class, preserve this order: presented frames, VRAM writes, GP0, GP1, DMA, CD-ROM, interrupt/callback progress, new frontiers, new coverage, fewer assumptions, smaller speculative depth, greater retired count, earlier insertion sequence.
 - A speculative state must never dominate a strict state with the same diagnostic hash.
@@ -35,7 +36,7 @@
 
 **Interfaces:**
 - Consumes: `Ps1Max3SearchScore`, `Ps1Max3EvidenceClass`.
-- Produces: unchanged signatures:
+- Produces unchanged signatures:
 
 ```cpp
 [[nodiscard]] bool ps1_max3_search_outranks(
@@ -49,7 +50,7 @@
 
 - [ ] **Step 1: Add RED coverage proving strict beats every speculative progress dimension**
 
-Extend `tests/test_ps1_max3_search_policy.cpp` with a helper and a table-style test:
+Extend `tests/test_ps1_max3_search_policy.cpp`:
 
 ```cpp
 void test_strict_evidence_beats_speculative_progress_unconditionally() {
@@ -75,9 +76,9 @@ void test_strict_evidence_beats_speculative_progress_unconditionally() {
 }
 ```
 
-Also update `test_priority_order_is_lexicographic_and_deterministic()` so evidence is tested before progress rather than after it.
+Also update `test_priority_order_is_lexicographic_and_deterministic()` so evidence is exercised before every progress field.
 
-- [ ] **Step 2: Add RED dominance contracts**
+- [ ] **Step 2: Add dominance contracts**
 
 Add:
 
@@ -91,13 +92,12 @@ void test_evidence_authority_controls_state_dominance() {
     CHECK(jojo::ps1_max3_state_dominates(strict, speculative));
     CHECK(!jojo::ps1_max3_state_dominates(speculative, strict));
 
-    auto strict_with_less_progress = strict;
     speculative.presented_frames = 1u;
-    CHECK(!jojo::ps1_max3_state_dominates(strict_with_less_progress, speculative));
+    CHECK(!jojo::ps1_max3_state_dominates(strict, speculative));
 }
 ```
 
-The last assertion preserves the existing `progress_not_worse` rule: strict authority does not erase the remaining dominance requirements.
+The last assertion preserves `progress_not_worse`: strict authority does not erase the other dominance requirements.
 
 - [ ] **Step 3: Run the search-policy target and verify RED**
 
@@ -106,11 +106,9 @@ cmake --build build --target jojo_ps1_max3_search_policy_tests --parallel
 ctest --test-dir build --output-on-failure -R '^jojo_ps1_max3_search_policy_tests$'
 ```
 
-Expected: FAIL because a speculative score with a larger high-priority progress field still outranks strict on the Phase A implementation.
+Expected: FAIL because Phase A compares progress before evidence.
 
 - [ ] **Step 4: Move evidence comparison to the first decision in `ps1_max3_search_outranks()`**
-
-The implementation order must begin:
 
 ```cpp
 bool ps1_max3_search_outranks(const Ps1Max3SearchScore& candidate,
@@ -119,7 +117,7 @@ bool ps1_max3_search_outranks(const Ps1Max3SearchScore& candidate,
         return evidence_outranks(candidate.evidence, current.evidence);
     if (candidate.presented_frames != current.presented_frames)
         return candidate.presented_frames > current.presented_frames;
-    // preserve existing progress and deterministic tie-break order here
+    // preserve the existing progress and deterministic tie-break order
 }
 ```
 
@@ -127,7 +125,7 @@ Remove the later duplicate evidence comparison. Do not reorder fields within the
 
 - [ ] **Step 5: Keep dominance evidence-aware without weakening progress checks**
 
-Retain the existing `progress_not_worse()` requirement and `evidence_not_worse()` requirement. The desired structure remains:
+Retain the existing structure:
 
 ```cpp
 if (incumbent.state_hash != candidate.state_hash) return false;
@@ -158,16 +156,19 @@ git commit -m "refactor: rank MAX3 strict evidence first"
 
 ---
 
-### Task 2: Make `best_node`, `best_path`, and `best_report` strict-authoritative while preserving speculation
+### Task 2: Make the single MAX3 best result strict-authoritative while preserving speculation
 
 **Files:**
 - Modify: `tests/test_ps1_max3_explorer.cpp`
+- Modify: `tests/test_ps1_local_evidence.cpp`
 - Modify: `src/core/ps1_max3_explorer.h`
 - Modify: `src/core/ps1_max3_explorer.cpp`
+- Preserve: `src/core/runtime.cpp`
+- Preserve: `src/core/runtime.h`
 
 **Interfaces:**
 - Consumes: strict-first `ps1_max3_search_outranks()` from Task 1.
-- Produces: existing `Ps1Max3Report::best_node`, `best_path`, `best_report` semantics become strict-authoritative.
+- Produces: `best_node`, `best_path`, and `best_report` remain the existing single result but are always strict-authoritative.
 - Produces one invariant helper:
 
 ```cpp
@@ -175,9 +176,9 @@ git commit -m "refactor: rank MAX3 strict evidence first"
     const Ps1Max3Report& report) noexcept;
 ```
 
-- [ ] **Step 1: Rewrite the existing explorer ranking expectation as a RED strict-authority contract**
+- [ ] **Step 1: Replace the old speculative-best expectation with a RED strict-best contract**
 
-In `test_bounds_and_progress_ranking_are_deterministic()`, replace the expectation that the best path is speculative with:
+In `test_bounds_and_progress_ranking_are_deterministic()` use:
 
 ```cpp
 CHECK(ranked.value.best_node < ranked.value.nodes.size());
@@ -191,11 +192,9 @@ CHECK(std::any_of(ranked.value.nodes.begin(), ranked.value.nodes.end(), [](const
 }));
 ```
 
-This test proves two things simultaneously: strict owns the authoritative best result, and speculative descendants still exist.
+This proves strict owns the authoritative result while speculative descendants still exist.
 
-- [ ] **Step 2: Add a pure invariant test for commercial-frame authority**
-
-Add a test constructing two synthetic reports:
+- [ ] **Step 2: Add a RED invariant helper contract covering commercial-frame provenance**
 
 ```cpp
 void test_best_report_authority_requires_strict_best_node() {
@@ -213,18 +212,41 @@ void test_best_report_authority_requires_strict_best_node() {
 }
 ```
 
-A strict commercial frame remains valid; the same stop reason attached to a speculative authoritative node is rejected.
+The same commercial stop reason is authoritative only when the selected node is strict.
 
-- [ ] **Step 3: Run explorer tests and verify RED**
+- [ ] **Step 3: Add the local-evidence RED assertion before implementing the helper**
 
-```bash
-cmake --build build --target jojo_ps1_max3_explorer_tests --parallel
-ctest --test-dir build --output-on-failure -R '^jojo_ps1_max3_explorer_tests$'
+In `tests/test_ps1_local_evidence.cpp`, after MAX3 exploration succeeds:
+
+```cpp
+CHECK(jojo::ps1_max3_best_is_strict_authoritative(max3.value));
 ```
 
-Expected: compile/test FAIL because the invariant helper does not exist yet and the old best-node expectation is no longer valid.
+For the compatibility call, require the fixture's strict root blocker:
 
-- [ ] **Step 4: Add the invariant helper without adding report fields**
+```cpp
+CHECK(checkpoint);
+if (checkpoint) {
+    CHECK(checkpoint.value.stop_reason ==
+          jojo::Ps1BootStopReason::bios_call_unimplemented);
+}
+```
+
+Because `bootstrap_runtime_local_evidence_to_file()` already returns `max3.value.best_report`, no runtime API change is required when best-report authority is fixed at the explorer level.
+
+- [ ] **Step 4: Run explorer/local-evidence tests and verify RED**
+
+```bash
+cmake --build build --target \
+  jojo_ps1_max3_explorer_tests \
+  jojo_ps1_local_evidence_tests --parallel
+ctest --test-dir build --output-on-failure \
+  -R '^jojo_ps1_(max3_explorer|local_evidence)_tests$'
+```
+
+Expected: compile/test FAIL because `ps1_max3_best_is_strict_authoritative()` does not exist yet; on the Phase A policy the local-evidence best can also be speculative.
+
+- [ ] **Step 5: Add the invariant helper without adding report fields**
 
 Declare in `src/core/ps1_max3_explorer.h` after `Ps1Max3Report`:
 
@@ -243,27 +265,35 @@ bool ps1_max3_best_is_strict_authoritative(const Ps1Max3Report& report) noexcept
 }
 ```
 
-Do not inspect `stop_reason` here. The helper validates authority provenance for every returned best report, including future commercial-frame states.
+Do not inspect `stop_reason`; provenance is the authority invariant for every current and future best report.
 
-- [ ] **Step 5: Verify explorer best selection needs no special-case commercial code**
+- [ ] **Step 6: Keep best selection centralized in the existing search policy**
 
-`Explorer::process()` already uses `ps1_max3_search_outranks()` for best-node replacement. Keep that single mechanism. With Task 1, a speculative node cannot replace a strict root/best node regardless of counters.
+`Explorer::process()` already uses `ps1_max3_search_outranks()` to replace `best_node`, `best_path`, and `best_report`. Do not add a second best-selection path or special-case `commercial_frame_presented`.
 
-Do not suppress speculative nodes, rewrite their individual `stop_reason`, or stop their expansion.
+Do not suppress speculative nodes, rewrite their individual stop reasons, or stop their expansion.
 
-- [ ] **Step 6: Run explorer GREEN tests**
+- [ ] **Step 7: Run GREEN explorer/local-evidence tests**
 
 ```bash
-cmake --build build --target jojo_ps1_max3_explorer_tests --parallel
-ctest --test-dir build --output-on-failure -R '^jojo_ps1_max3_explorer_tests$'
+cmake --build build --target \
+  jojo_ps1_max3_explorer_tests \
+  jojo_ps1_local_evidence_tests \
+  jojo_ps1_runtime_installation_tests --parallel
+ctest --test-dir build --output-on-failure \
+  -R '^jojo_ps1_(max3_explorer|local_evidence|runtime_installation)_tests$'
 ```
 
-Expected: PASS with a strict authoritative best and retained speculative descendants.
+Expected: PASS. The compatibility API remains source-compatible and returns the strict `best_report`; speculative descendants remain present in the MAX3 report.
 
-- [ ] **Step 7: Commit the explorer authority slice**
+- [ ] **Step 8: Commit the strict-best slice**
 
 ```bash
-git add src/core/ps1_max3_explorer.h src/core/ps1_max3_explorer.cpp tests/test_ps1_max3_explorer.cpp
+git add \
+  src/core/ps1_max3_explorer.h \
+  src/core/ps1_max3_explorer.cpp \
+  tests/test_ps1_max3_explorer.cpp \
+  tests/test_ps1_local_evidence.cpp
 git commit -m "feat: enforce strict MAX3 best authority"
 ```
 
@@ -277,11 +307,11 @@ git commit -m "feat: enforce strict MAX3 best authority"
 
 **Interfaces:**
 - Consumes: `Ps1Max3FrontierCluster::evidence`, existing cluster progress/descendant metrics.
-- Produces: `cluster_and_rank_ps1_max3_frontiers()` with strict evidence as the first ordering key.
+- Produces: `cluster_and_rank_ps1_max3_frontiers()` with evidence class as the first ordering key.
 
-- [ ] **Step 1: Add a RED test where speculative progress is intentionally enormous**
+- [ ] **Step 1: Add a RED test that saturates speculative progress beyond the current strict bonus**
 
-Add:
+The test file already includes `<limits>`. Add:
 
 ```cpp
 static void test_strict_cluster_always_precedes_speculative_progress() {
@@ -294,10 +324,8 @@ static void test_strict_cluster_always_precedes_speculative_progress() {
     jojo::Ps1Max3NodeSummary speculative_progress{};
     speculative_progress.frontier = 1u;
     speculative_progress.evidence = jojo::Ps1Max3EvidenceClass::speculative;
-    speculative_progress.path_presented_frames = 1000000u;
-    speculative_progress.path_vram_write_count = 1000000u;
-    speculative_progress.path_gpu_gp0_command_count = 1000000u;
-    speculative_progress.path_dma_transfer_count = 1000000u;
+    speculative_progress.path_presented_frames =
+        std::numeric_limits<std::uint64_t>::max();
     report.nodes.push_back(speculative_progress);
 
     const auto clusters = jojo::cluster_and_rank_ps1_max3_frontiers(report);
@@ -309,7 +337,7 @@ static void test_strict_cluster_always_precedes_speculative_progress() {
 }
 ```
 
-Use different MMIO direction as above so the frontiers form separate clusters.
+Different MMIO direction keeps the frontiers in separate clusters. The speculative `presented_frames` multiplication saturates to `UINT64_MAX`, which intentionally exceeds the current finite strict bonus.
 
 - [ ] **Step 2: Run frontier-priority tests and verify RED**
 
@@ -318,19 +346,19 @@ cmake --build build --target jojo_ps1_max3_frontier_priority_tests --parallel
 ctest --test-dir build --output-on-failure -R '^jojo_ps1_max3_frontier_priority_tests$'
 ```
 
-Expected: FAIL if speculative progress saturates/outweighs the current numeric strict bonus.
+Expected: FAIL because the current implementation encodes strictness as a finite numeric bonus instead of a lexicographic key.
 
-- [ ] **Step 3: Remove strictness from the numeric score and make it a sort key**
+- [ ] **Step 3: Remove strictness from numeric `priority_score()`**
 
-In `priority_score()`, remove `kStrictEvidenceWeight` and start the score at zero:
+Replace the strict bonus initialization with:
 
 ```cpp
 std::uint64_t score = 0u;
 ```
 
-Keep descendant/callsite/occurrence/progress scoring unchanged for comparisons within the same evidence class.
+Keep descendant count, callsite count, occurrence count, and `progress_score()` unchanged for comparisons inside the same evidence class.
 
-Change final stable sort to:
+- [ ] **Step 4: Make evidence the first stable-sort key**
 
 ```cpp
 std::stable_sort(clusters.begin(), clusters.end(), [](const auto& lhs, const auto& rhs) {
@@ -344,9 +372,9 @@ std::stable_sort(clusters.begin(), clusters.end(), [](const auto& lhs, const aut
 });
 ```
 
-This makes strictness lexicographic rather than a saturating numeric approximation.
+This removes saturation risk while preserving deterministic within-class ranking.
 
-- [ ] **Step 4: Run frontier-priority GREEN tests twice for determinism**
+- [ ] **Step 5: Run frontier-priority GREEN tests twice**
 
 ```bash
 cmake --build build --target jojo_ps1_max3_frontier_priority_tests --parallel
@@ -356,7 +384,7 @@ ctest --test-dir build --output-on-failure -R '^jojo_ps1_max3_frontier_priority_
 
 Expected: PASS both times with identical ordering assertions.
 
-- [ ] **Step 5: Commit the frontier-priority slice**
+- [ ] **Step 6: Commit the frontier-priority slice**
 
 ```bash
 git add src/core/ps1_max3_frontier_priority.cpp tests/test_ps1_max3_frontier_priority.cpp
@@ -365,103 +393,12 @@ git commit -m "refactor: rank strict MAX3 frontiers first"
 
 ---
 
-### Task 4: Defensively gate the local-evidence compatibility API on strict authority
-
-**Files:**
-- Modify: `src/core/runtime.cpp`
-- Modify: `tests/test_ps1_local_evidence.cpp`
-- Preserve: `src/core/runtime.h`
-
-**Interfaces:**
-- Consumes: `ps1_max3_best_is_strict_authoritative(const Ps1Max3Report&)` from Task 2.
-- Produces: unchanged public signature:
-
-```cpp
-Result<Ps1BootReport> bootstrap_runtime_local_evidence_to_file(
-    const std::filesystem::path& install_root,
-    const std::filesystem::path& report_path);
-```
-
-- [ ] **Step 1: Add RED local-evidence assertions for strict returned authority**
-
-After `bootstrap_runtime_max3_local_evidence_to_file()` succeeds in `tests/test_ps1_local_evidence.cpp`, add:
-
-```cpp
-CHECK(jojo::ps1_max3_best_is_strict_authoritative(max3.value));
-CHECK(max3.value.best_node < max3.value.nodes.size());
-if (max3.value.best_node < max3.value.nodes.size()) {
-    CHECK(max3.value.nodes[max3.value.best_node].evidence ==
-          jojo::Ps1Max3EvidenceClass::strict);
-}
-```
-
-For the compatibility call, assert the returned stop remains the strict root blocker for the fixture:
-
-```cpp
-CHECK(checkpoint);
-if (checkpoint) {
-    CHECK(checkpoint.value.stop_reason ==
-          jojo::Ps1BootStopReason::bios_call_unimplemented);
-}
-```
-
-The fixture intentionally creates an unknown BIOS frontier and speculative descendants, so the compatibility result must remain strict despite deeper diagnostic branches.
-
-- [ ] **Step 2: Run local-evidence test and verify RED against the old authority behavior**
-
-```bash
-cmake --build build --target jojo_ps1_local_evidence_tests --parallel
-ctest --test-dir build --output-on-failure -R '^jojo_ps1_local_evidence_tests$'
-```
-
-Expected before the strict-first implementation is complete: FAIL because the previous best path can be speculative. After Tasks 1–3, the assertions should pass; keep the next defensive gate regardless.
-
-- [ ] **Step 3: Add an invariant guard before returning the compatibility `best_report`**
-
-Change `bootstrap_runtime_local_evidence_to_file()` to:
-
-```cpp
-auto max3 = bootstrap_runtime_max3_local_evidence_to_file(
-    install_root, report_path, ps1_max3_local_evidence_options());
-if (!max3) {
-    return Result<Ps1BootReport>::failure(max3.error, max3.detail);
-}
-if (!ps1_max3_best_is_strict_authoritative(max3.value)) {
-    return Result<Ps1BootReport>::failure(
-        ErrorCode::backend_unavailable,
-        "MAX3 local-evidence best report is not strict-authoritative");
-}
-return Result<Ps1BootReport>::success(std::move(max3.value.best_report));
-```
-
-This is a defense-in-depth invariant. It does not change runtime device semantics and does not create another best-report representation.
-
-- [ ] **Step 4: Run local-evidence and runtime-installation GREEN tests**
-
-```bash
-cmake --build build --target \
-  jojo_ps1_local_evidence_tests \
-  jojo_ps1_runtime_installation_tests --parallel
-ctest --test-dir build --output-on-failure \
-  -R '^jojo_ps1_(local_evidence|runtime_installation)_tests$'
-```
-
-Expected: PASS. The generated MAX3 report still exists, installation contents remain unchanged, and the compatibility API returns only a strict best report.
-
-- [ ] **Step 5: Commit the API gate**
-
-```bash
-git add src/core/runtime.cpp tests/test_ps1_local_evidence.cpp
-git commit -m "feat: gate local evidence on strict MAX3 authority"
-```
-
----
-
-### Task 5: Prove speculative exploration, report compatibility, and deterministic OMEGA regressions remain intact
+### Task 4: Prove speculative exploration, report compatibility, and deterministic OMEGA behavior remain intact
 
 **Files:**
 - Verify: `src/core/ps1_max3_explorer.cpp`
 - Verify: `src/core/ps1_max3_report_io.cpp`
+- Verify: `src/core/runtime.cpp`
 - Verify: `tests/test_ps1_max3_deep_expansion.cpp`
 - Verify: `tests/test_ps1_max3_candidate_engine.cpp`
 - Verify: `tests/test_ps1_max3_coverage.cpp`
@@ -470,8 +407,8 @@ git commit -m "feat: gate local evidence on strict MAX3 authority"
 - Modify only if a real regression is exposed.
 
 **Interfaces:**
-- Consumes: completed Tasks 1–4.
-- Produces: evidence that Phase B changes authority only, not exploration capability or report format.
+- Consumes: completed Tasks 1–3.
+- Produces: proof that Phase B changes authority only, not speculative exploration, budgets, candidate generation, or report format.
 
 - [ ] **Step 1: Run the complete MAX3 test family**
 
@@ -485,15 +422,17 @@ cmake --build build --target \
   jojo_ps1_max3_budget_tests \
   jojo_ps1_max3_deep_expansion_tests \
   jojo_ps1_max3_frontier_priority_tests \
-  jojo_ps1_boot_report_io_tests --parallel
-ctest --test-dir build --output-on-failure -R 'jojo_ps1_(max3_|boot_report_io)'
+  jojo_ps1_boot_report_io_tests \
+  jojo_ps1_local_evidence_tests --parallel
+ctest --test-dir build --output-on-failure \
+  -R '^jojo_ps1_(max3_|boot_report_io|local_evidence)'
 ```
 
 Expected: PASS.
 
-- [ ] **Step 2: Explicitly inspect the speculative-expansion contract**
+- [ ] **Step 2: Confirm speculative expansion is still observable**
 
-Confirm existing explorer/deep-expansion tests still observe speculative nodes after a strict frontier. The required invariant is:
+At least one explorer/deep-expansion contract must continue to establish:
 
 ```cpp
 std::any_of(report.nodes.begin(), report.nodes.end(), [](const auto& node) {
@@ -501,42 +440,41 @@ std::any_of(report.nodes.begin(), report.nodes.end(), [](const auto& node) {
 });
 ```
 
-Do not "fix" a failing test by disabling fallbacks or reducing budgets.
+Do not fix a failure by disabling fallbacks, shrinking budgets, or deleting candidate classes.
 
-- [ ] **Step 3: Run report-producing tests twice**
+- [ ] **Step 3: Run report-producing tests twice for determinism**
 
 ```bash
-ctest --test-dir build --output-on-failure -R '^jojo_ps1_(max3_explorer|boot_report_io|local_evidence)_tests$'
-ctest --test-dir build --output-on-failure -R '^jojo_ps1_(max3_explorer|boot_report_io|local_evidence)_tests$'
+ctest --test-dir build --output-on-failure \
+  -R '^jojo_ps1_(max3_explorer|boot_report_io|local_evidence)_tests$'
+ctest --test-dir build --output-on-failure \
+  -R '^jojo_ps1_(max3_explorer|boot_report_io|local_evidence)_tests$'
 ```
 
-Expected: PASS twice. No random or time-derived ordering may appear.
+Expected: PASS twice. No randomness or wall-clock ordering may appear.
 
 - [ ] **Step 4: Audit scope against the Phase A baseline**
 
 ```bash
+git diff --check
 git diff --stat 40549e6988ef90a351970cd9166a4c58dc14a62c
 ```
 
-Expected production changes are limited to MAX3 policy/explorer/frontier-priority and the runtime local-evidence guard, plus tests/spec/plan. No PS1 device implementation file should have semantic changes.
+Expected production changes are limited to MAX3 search policy, explorer authority helper, and frontier-priority ordering. `runtime.cpp` remains unchanged because it already returns `max3.value.best_report`. No PS1 device implementation file may gain semantic changes.
 
-- [ ] **Step 5: Commit only if Task 5 exposed and fixed a genuine regression**
+- [ ] **Step 5: Commit only if this regression sweep exposed a genuine fix**
 
-If no source changes were needed, do not create an empty commit. If a test-only deterministic regression fix was required, commit only those paths with a narrow message such as:
-
-```bash
-git commit -m "test: preserve MAX3 speculative exploration"
-```
+If no files changed, do not create an empty commit. If a deterministic test regression needed correction, commit only the necessary paths with a narrow message.
 
 ---
 
-### Task 6: Run the authoritative Phase B verification and produce the Windows artifact
+### Task 5: Run authoritative Phase B verification and produce the Windows artifact
 
 **Files:**
 - No source changes unless CI exposes a real portability regression.
 
 **Interfaces:**
-- Produces: the green Phase B HEAD that is eligible to become the baseline for the first evidence-backed GPU/DMA blocker phase.
+- Produces: the green Phase B HEAD eligible to become the baseline for the first evidence-backed GPU/DMA blocker batch.
 
 - [ ] **Step 1: Run the full local build and CTest suite**
 
@@ -547,18 +485,16 @@ ctest --test-dir build --output-on-failure
 
 Expected: 100% PASS.
 
-- [ ] **Step 2: Verify Phase B scope before push**
+- [ ] **Step 2: Verify Phase B scope**
 
 ```bash
 git diff --check
 git diff --stat 40549e6988ef90a351970cd9166a4c58dc14a62c
 ```
 
-Expected: no whitespace errors; no new hardware semantics; no budget/candidate changes.
+Expected: no whitespace errors; no new hardware semantics; no MAX3 budget or candidate-generation changes.
 
-- [ ] **Step 3: Push the implementation branch and require Linux CI success**
-
-Use an implementation branch derived from the green Phase A baseline, e.g. `feature/ps1-omega-frame-first-phase-b`, carrying the approved spec and this plan.
+- [ ] **Step 3: Push `feature/ps1-omega-frame-first-phase-b` and require Linux CI success**
 
 Required Linux steps:
 
@@ -603,9 +539,7 @@ expired=false
 
 Record artifact ID, byte size, digest, and expiry date.
 
-- [ ] **Step 6: Record final Phase B evidence**
-
-Record:
+- [ ] **Step 6: Record final evidence**
 
 ```text
 phase_b_head=<exact SHA>
@@ -622,11 +556,11 @@ new_ps1_hardware_semantics=false
 
 - [ ] **Step 7: Stop at the Phase B boundary**
 
-Do not implement a GP0 command, DMA mode, IRQ/timer behavior, CD-ROM command, GTE command, BIOS selector, SIO operation, or SPU behavior in this plan. The next plan must be selected from the next real strict JoJo checkpoint evidence.
+Do not implement GP0 commands, DMA modes, IRQ/timer behavior, CD-ROM commands, GTE commands, BIOS selectors, SIO operations, or SPU behavior in this plan. The next plan must be selected from the next real strict JoJo checkpoint evidence.
 
 ## Plan Self-Review Results
 
-- **Spec coverage:** Tasks 1–4 implement strict-first search authority, dominance, strict-authoritative best result, frontier-cluster priority, speculative commercial-frame gating, and the local-evidence defensive boundary. Task 5 proves determinism and preserved speculation. Task 6 covers Linux/Windows/artifact exit gates.
+- **Spec coverage:** Task 1 implements strict-first search ordering and preserves evidence-aware state dominance. Task 2 makes the existing single best result strict-authoritative, proves commercial-frame provenance, and verifies the unchanged local-evidence API returns that strict result. Task 3 makes frontier clusters lexicographically strict-first. Task 4 proves preserved speculation, determinism, budgets, candidates, and report compatibility. Task 5 covers Linux/Windows/artifact exit gates.
 - **Placeholder scan:** No TBD, TODO, unspecified test, or deferred implementation placeholder remains. Commands, expected failures, interfaces, and exact invariants are explicit.
-- **Type consistency:** `Ps1Max3SearchScore`, `Ps1Max3EvidenceClass`, `Ps1Max3Report`, `Ps1BootReport`, `Ps1BootStopReason`, and `ps1_max3_best_is_strict_authoritative()` use one consistent naming scheme throughout the plan.
-- **Scope check:** No PS1 hardware semantics, MAX3 budgets, or candidate-generation rules are changed. Phase B remains one reviewable authority/gating subproject.
+- **Type consistency:** `Ps1Max3SearchScore`, `Ps1Max3EvidenceClass`, `Ps1Max3Report`, `Ps1BootReport`, `Ps1BootStopReason`, and `ps1_max3_best_is_strict_authoritative()` use one consistent naming scheme throughout.
+- **Scope check:** No PS1 hardware semantics, MAX3 budgets, candidate-generation rules, or runtime public APIs are changed. Phase B remains one reviewable authority/gating subproject.
