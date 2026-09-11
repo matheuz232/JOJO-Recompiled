@@ -53,6 +53,17 @@ public:
     [[nodiscard]] std::uint32_t dma_interrupt() const noexcept;
     [[nodiscard]] std::uint16_t timer1_counter() const noexcept;
     [[nodiscard]] std::uint16_t timer1_mode() const noexcept;
+    [[nodiscard]] std::uint32_t common_delay() const noexcept { return common_delay_; }
+    [[nodiscard]] std::uint32_t dma2_madr() const noexcept { return dma2_madr_; }
+    [[nodiscard]] std::uint32_t dma2_bcr() const noexcept { return dma2_bcr_; }
+    [[nodiscard]] std::uint32_t dma2_chcr() const noexcept { return dma2_chcr_; }
+    [[nodiscard]] std::uint32_t dma_control() const noexcept { return dma_control_; }
+    [[nodiscard]] std::span<const std::uint8_t> main_ram_bytes() const noexcept {
+        return std::span<const std::uint8_t>{main_ram_.data(), main_ram_.size()};
+    }
+    [[nodiscard]] std::span<const std::uint8_t> scratchpad_bytes() const noexcept {
+        return std::span<const std::uint8_t>{scratchpad_.data(), scratchpad_.size()};
+    }
     [[nodiscard]] Ps1CdromState& cdrom() noexcept;
     [[nodiscard]] const Ps1CdromState& cdrom() const noexcept;
     [[nodiscard]] Ps1GpuState& gpu() noexcept;
