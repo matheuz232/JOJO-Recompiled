@@ -128,9 +128,7 @@ std::uint64_t progress_score(const Ps1Max3Report& report,
 
 std::uint64_t priority_score(const Ps1Max3Report& report,
                              const Ps1Max3FrontierCluster& cluster) noexcept {
-    constexpr std::uint64_t kStrictEvidenceWeight = (1ull << 62u);
-    std::uint64_t score = cluster.evidence == Ps1Max3EvidenceClass::strict
-        ? kStrictEvidenceWeight : 0u;
+    std::uint64_t score = 0u;
     score = saturating_add(score, saturating_mul(cluster.descendant_count, 1000000000ull));
     score = saturating_add(score, saturating_mul(cluster.callsite_count, 10000000ull));
     score = saturating_add(score, saturating_mul(cluster.occurrence_count, 100000ull));
@@ -182,6 +180,9 @@ cluster_and_rank_ps1_max3_frontiers(const Ps1Max3Report& report) {
     }
 
     std::stable_sort(clusters.begin(), clusters.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.evidence != rhs.evidence) {
+            return lhs.evidence == Ps1Max3EvidenceClass::strict;
+        }
         if (lhs.priority_score != rhs.priority_score) {
             return lhs.priority_score > rhs.priority_score;
         }
