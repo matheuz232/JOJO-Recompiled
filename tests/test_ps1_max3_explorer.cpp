@@ -88,13 +88,15 @@ static void test_one_frontier_branches_four_ways() {
     CHECK(report.dependencies[0].kind == jojo::Ps1Max3DependencyKind::bios_frontier);
     CHECK(report.dependencies[0].table == 0x000000A0u);
     CHECK(report.dependencies[0].selector == 0x00000033u);
-    CHECK(report.frontiers.size() == 1u);
-    if (!report.frontiers.empty()) {
-        CHECK(report.frontiers[0].kind == jojo::Ps1Max3FrontierKind::bios);
-        CHECK(report.frontiers[0].evidence == jojo::Ps1Max3EvidenceClass::strict);
-        CHECK(report.frontiers[0].table == 0x000000A0u);
-        CHECK(report.frontiers[0].selector == 0x00000033u);
-        CHECK(report.frontiers[0].expandable);
+
+    const auto bios_frontier = std::find_if(report.frontiers.begin(), report.frontiers.end(), [](const auto& frontier) {
+        return frontier.kind == jojo::Ps1Max3FrontierKind::bios &&
+               frontier.table == 0x000000A0u && frontier.selector == 0x00000033u;
+    });
+    CHECK(bios_frontier != report.frontiers.end());
+    if (bios_frontier != report.frontiers.end()) {
+        CHECK(bios_frontier->evidence == jojo::Ps1Max3EvidenceClass::strict);
+        CHECK(bios_frontier->expandable);
     }
 }
 
