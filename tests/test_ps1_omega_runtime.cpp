@@ -66,6 +66,8 @@ int main() {
         CHECK(result.value.session_root == session);
     }
     CHECK(fs::is_directory(session));
+    CHECK(fs::is_regular_file(session / "summary.txt"));
+    CHECK(fs::is_regular_file(session / "manifest.json"));
     CHECK(regular_files_under(active.value.generation_dir) == files_before);
 
     fs::remove_all(root, ec);
