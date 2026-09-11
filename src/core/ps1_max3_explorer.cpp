@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <map>
 #include <set>
 #include <tuple>
 #include <utility>
@@ -30,14 +31,38 @@ struct DependencyKey {
     }
 };
 
-struct FrontierKey {
+struct ExpandedBiosKey {
     std::uint32_t table{};
     std::uint32_t selector{};
     std::uint64_t state_hash{};
 
-    friend bool operator<(const FrontierKey& lhs, const FrontierKey& rhs) noexcept {
+    friend bool operator<(const ExpandedBiosKey& lhs, const ExpandedBiosKey& rhs) noexcept {
         return std::tie(lhs.table, lhs.selector, lhs.state_hash) <
                std::tie(rhs.table, rhs.selector, rhs.state_hash);
+    }
+};
+
+struct FrontierRecordKey {
+    Ps1Max3FrontierKind kind{};
+    std::uint32_t pc{};
+    bool has_opcode{};
+    std::uint32_t opcode{};
+    std::uint32_t table{};
+    std::uint32_t selector{};
+    std::uint32_t address{};
+    std::uint8_t width{};
+    bool write{};
+    std::uint32_t value{};
+    std::uint64_t state_hash{};
+
+    friend bool operator<(const FrontierRecordKey& lhs,
+                          const FrontierRecordKey& rhs) noexcept {
+        return std::tie(lhs.kind, lhs.pc, lhs.has_opcode, lhs.opcode,
+                        lhs.table, lhs.selector, lhs.address, lhs.width,
+                        lhs.write, lhs.value, lhs.state_hash) <
+               std::tie(rhs.kind, rhs.pc, rhs.has_opcode, rhs.opcode,
+                        rhs.table, rhs.selector, rhs.address, rhs.width,
+                        rhs.write, rhs.value, rhs.state_hash);
     }
 };
 
@@ -120,6 +145,32 @@ bool outranks(const Ps1Max3NodeSummary& candidate,
     return candidate.cumulative_retired > current.cumulative_retired;
 }
 
+Ps1Max3FrontierKind classify_frontier(const Ps1BootReport& segment,
+                                      bool bios_frontier) noexcept {
+    if (bios_frontier) return Ps1Max3FrontierKind::bios;
+    switch (segment.stop_reason) {
+        case Ps1BootStopReason::mmio_unimplemented:
+            if (segment.unsupported_access && segment.unsupported_access->write) {
+                return Ps1Max3FrontierKind::terminal_mmio_write;
+            }
+            return Ps1Max3FrontierKind::mmio_read;
+        case Ps1BootStopReason::device_command_unimplemented:
+            return Ps1Max3FrontierKind::device_command;
+        case Ps1BootStopReason::gpu_command_unimplemented:
+            return Ps1Max3FrontierKind::gpu_command;
+        case Ps1BootStopReason::cpu_boundary:
+            return Ps1Max3FrontierKind::cpu_boundary;
+        case Ps1BootStopReason::diagnostic_stall:
+            return Ps1Max3FrontierKind::diagnostic_stall;
+        case Ps1BootStopReason::execution_budget_exhausted:
+            return Ps1Max3FrontierKind::execution_budget;
+        case Ps1BootStopReason::fatal_runtime_error:
+            return Ps1Max3FrontierKind::fatal_runtime_error;
+        default:
+            return Ps1Max3FrontierKind::other_terminal;
+    }
+}
+
 class Explorer {
 public:
     explicit Explorer(const Ps1Max3Options& options) : options_(options) {
@@ -139,11 +190,75 @@ public:
         }
 
         visit(std::move(root.value), 0u, std::nullopt, std::nullopt,
-              0u, PathMetrics{}, {}, {});
+              0u, PathMetrics{}, {}, {}, Ps1Max3EvidenceClass::strict,
+              0u, std::nullopt, std::nullopt, {});
         return Result<Ps1Max3Report>::success(std::move(report_));
     }
 
 private:
+    std::size_t register_frontier(const Ps1BootReport& segment,
+                                  const Ps1BootRuntime& runtime,
+                                  std::size_t node_index,
+                                  Ps1Max3EvidenceClass evidence,
+                                  std::optional<std::size_t> parent_frontier,
+                                  std::optional<Ps1Max3Decision> parent_decision,
+                                  const std::vector<Ps1Max3Decision>& assumption_chain,
+                                  bool has_bios_frontier,
+                                  std::uint32_t frontier_table,
+                                  std::uint32_t frontier_selector,
+                                  std::uint64_t state_hash) {
+        const auto kind = classify_frontier(segment, has_bios_frontier);
+        const auto pc = segment.cpu_diagnostic ? segment.cpu_diagnostic->pc : segment.last_pc;
+        const bool has_opcode = segment.last_opcode.has_value();
+        const auto opcode = segment.last_opcode.value_or(0u);
+        const auto address = segment.unsupported_access
+            ? segment.unsupported_access->physical_address : 0u;
+        const auto width = segment.unsupported_access
+            ? segment.unsupported_access->width : 0u;
+        const auto write = segment.unsupported_access
+            ? segment.unsupported_access->write : false;
+        const auto value = segment.unsupported_access
+            ? segment.unsupported_access->value : 0u;
+
+        const FrontierRecordKey key{
+            kind, pc, has_opcode, opcode, frontier_table, frontier_selector,
+            address, width, write, value, state_hash,
+        };
+        const auto existing = frontier_indices_.find(key);
+        if (existing != frontier_indices_.end()) {
+            ++report_.frontiers[existing->second].occurrence_count;
+            return existing->second;
+        }
+
+        Ps1Max3Frontier frontier{};
+        frontier.index = report_.frontiers.size();
+        frontier.evidence = evidence;
+        frontier.kind = kind;
+        frontier.pc = pc;
+        if (has_opcode) frontier.opcode = opcode;
+        frontier.table = frontier_table;
+        frontier.selector = frontier_selector;
+        frontier.address = address;
+        frontier.width = width;
+        frontier.write = write;
+        frontier.value = value;
+        frontier.first_node = node_index;
+        frontier.occurrence_count = 1u;
+        frontier.parent_frontier = parent_frontier;
+        frontier.parent_decision = parent_decision;
+        frontier.assumption_chain = assumption_chain;
+        frontier.expandable = kind == Ps1Max3FrontierKind::bios ||
+            (kind == Ps1Max3FrontierKind::mmio_read &&
+             options_.deep_frontier_enabled &&
+             runtime.diagnostic_mmio_read_frontier().has_value());
+        frontier.stop_reason = segment.stop_reason;
+
+        const auto index = frontier.index;
+        report_.frontiers.push_back(std::move(frontier));
+        frontier_indices_.emplace(key, index);
+        return index;
+    }
+
     void visit(Ps1BootRuntime runtime,
                std::size_t depth,
                std::optional<std::size_t> parent,
@@ -151,7 +266,12 @@ private:
                std::uint64_t cumulative_before,
                const PathMetrics& metrics_before,
                std::vector<Ps1Max3Decision> path,
-               std::set<DependencyKey> path_dependencies) {
+               std::set<DependencyKey> path_dependencies,
+               Ps1Max3EvidenceClass evidence,
+               std::size_t speculative_depth,
+               std::optional<Ps1Max3Decision> parent_decision,
+               std::optional<std::size_t> parent_frontier,
+               std::vector<Ps1Max3Decision> assumption_chain) {
         if (report_.termination_reason != Ps1Max3TerminationReason::completed) return;
         if (report_.nodes.size() >= options_.max_nodes) {
             report_.termination_reason = Ps1Max3TerminationReason::node_limit;
@@ -203,13 +323,13 @@ private:
 
         std::uint32_t frontier_table = 0u;
         std::uint32_t frontier_selector = 0u;
-        bool has_frontier = false;
+        bool has_bios_frontier = false;
         if (segment.stop_reason == Ps1BootStopReason::bios_call_unimplemented) {
             const auto physical = Ps1MemoryBus::guest_to_physical(runtime.cpu_state().pc);
             if (physical && is_bios_table(*physical)) {
                 frontier_table = *physical;
                 frontier_selector = runtime.cpu_state().gpr[9];
-                has_frontier = true;
+                has_bios_frontier = true;
                 add_dependency(report_, global_dependencies_, path_dependencies,
                                Ps1Max3Dependency{
                                    Ps1Max3DependencyKind::bios_frontier,
@@ -222,17 +342,28 @@ private:
             }
         }
 
+        const auto state_hash = runtime.diagnostic_state_hash();
+        const auto node_index = report_.nodes.size();
+        const auto frontier_index = register_frontier(
+            segment, runtime, node_index, evidence, parent_frontier,
+            parent_decision, assumption_chain, has_bios_frontier,
+            frontier_table, frontier_selector, state_hash);
+
         Ps1Max3NodeSummary summary{};
-        summary.index = report_.nodes.size();
+        summary.index = node_index;
         summary.parent = parent;
         summary.depth = depth;
         summary.fallback = fallback;
         summary.stop_reason = segment.stop_reason;
         summary.segment_retired = segment.instructions_retired;
         summary.cumulative_retired = cumulative_before + segment.instructions_retired;
-        summary.state_hash = runtime.diagnostic_state_hash();
+        summary.state_hash = state_hash;
         summary.frontier_table = frontier_table;
         summary.frontier_selector = frontier_selector;
+        summary.evidence = evidence;
+        summary.speculative_depth = speculative_depth;
+        summary.decision = parent_decision;
+        summary.frontier = frontier_index;
         summary.path_presented_frames = metrics.presented_frames;
         summary.path_vram_write_count = metrics.vram_write_count;
         summary.path_gpu_gp0_command_count = metrics.gpu_gp0_command_count;
@@ -241,17 +372,22 @@ private:
         summary.path_dma_transfer_count = metrics.dma_transfer_count;
         summary.path_dependency_count = path_dependencies.size();
 
-        const auto node_index = summary.index;
-        report_.nodes.push_back(summary);
-
-        bool can_expand = has_frontier && depth < options_.max_branch_depth;
+        bool can_expand = has_bios_frontier && depth < options_.max_branch_depth;
+        if (!has_bios_frontier || !report_.frontiers[frontier_index].expandable) {
+            summary.expansion_stop = Ps1Max3ExpansionStop::terminal_frontier;
+        } else if (depth >= options_.max_branch_depth) {
+            summary.expansion_stop = Ps1Max3ExpansionStop::branch_depth;
+        }
         if (can_expand) {
-            const FrontierKey key{frontier_table, frontier_selector, summary.state_hash};
-            if (!expanded_frontiers_.insert(key).second) {
-                report_.nodes[node_index].deduplicated = true;
+            const ExpandedBiosKey key{frontier_table, frontier_selector, state_hash};
+            if (!expanded_bios_frontiers_.insert(key).second) {
+                summary.deduplicated = true;
+                summary.expansion_stop = Ps1Max3ExpansionStop::deduplicated;
                 can_expand = false;
             }
         }
+
+        report_.nodes.push_back(summary);
 
         if (report_.nodes.size() == 1u ||
             outranks(report_.nodes[node_index], report_.nodes[report_.best_node])) {
@@ -278,11 +414,21 @@ private:
 
             auto child = runtime;
             if (!child.apply_diagnostic_bios_fallback(policy)) continue;
+            Ps1Max3Decision decision{};
+            decision.kind = Ps1Max3DecisionKind::bios_fallback;
+            decision.table = frontier_table;
+            decision.selector = frontier_selector;
+            decision.fallback = policy;
+
             auto child_path = path;
-            child_path.push_back(Ps1Max3Decision{frontier_table, frontier_selector, policy});
+            child_path.push_back(decision);
+            auto child_chain = assumption_chain;
+            child_chain.push_back(decision);
             visit(std::move(child), depth + 1u, node_index, policy,
                   summary.cumulative_retired, metrics,
-                  std::move(child_path), path_dependencies);
+                  std::move(child_path), path_dependencies,
+                  Ps1Max3EvidenceClass::speculative, speculative_depth + 1u,
+                  decision, frontier_index, std::move(child_chain));
             if (report_.termination_reason != Ps1Max3TerminationReason::completed) return;
         }
     }
@@ -290,7 +436,8 @@ private:
     const Ps1Max3Options& options_;
     Ps1Max3Report report_{};
     std::set<DependencyKey> global_dependencies_;
-    std::set<FrontierKey> expanded_frontiers_;
+    std::set<ExpandedBiosKey> expanded_bios_frontiers_;
+    std::map<FrontierRecordKey, std::size_t> frontier_indices_;
 };
 
 } // namespace
