@@ -79,6 +79,12 @@ if(WIN32)
   add_test(NAME jojo_win32_image_selection_tests COMMAND jojo_win32_image_selection_tests)
   set_tests_properties(jojo_win32_image_selection_tests PROPERTIES TIMEOUT 45)
 
+  add_executable(jojo_win32_omega_controls_tests tests/test_win32_omega_controls.cpp src/app_win32/main.cpp)
+  target_compile_definitions(jojo_win32_omega_controls_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+  target_link_libraries(jojo_win32_omega_controls_tests PRIVATE jojo_core shell32 ole32 uuid)
+  add_test(NAME jojo_win32_omega_controls_tests COMMAND jojo_win32_omega_controls_tests)
+  set_tests_properties(jojo_win32_omega_controls_tests PROPERTIES TIMEOUT 45)
+
   add_executable(jojo_win32_presentation_tests tests/test_win32_presentation.cpp src/app_win32/presentation_host.cpp)
   target_compile_definitions(jojo_win32_presentation_tests PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
   target_link_libraries(jojo_win32_presentation_tests PRIVATE jojo_core d3d11 dxgi)
