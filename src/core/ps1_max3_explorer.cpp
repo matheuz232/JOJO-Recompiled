@@ -1,6 +1,7 @@
 #include "core/ps1_max3_explorer.h"
 
 #include "core/ps1_max3_candidate_engine.h"
+#include "core/ps1_max3_frontier_priority.h"
 #include "core/ps1_max3_search_policy.h"
 
 #include <algorithm>
@@ -264,6 +265,7 @@ public:
             process(std::move(item));
         }
 
+        report_.frontier_clusters = cluster_and_rank_ps1_max3_frontiers(report_);
         return Result<Ps1Max3Report>::success(std::move(report_));
     }
 
