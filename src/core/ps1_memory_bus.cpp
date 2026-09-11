@@ -142,6 +142,47 @@ std::optional<std::uint32_t> Ps1MemoryBus::guest_to_physical(std::uint32_t guest
     return std::nullopt;
 }
 
+bool Ps1MemoryBus::arm_diagnostic_mmio_read_override(
+    const Ps1UnsupportedAccess& access,
+    std::uint32_t value) noexcept {
+    if (access.write) return false;
+    if (access.width != 1u && access.width != 2u && access.width != 4u) return false;
+    const auto physical = guest_to_physical(access.guest_address);
+    if (!physical || *physical != access.physical_address) return false;
+
+    std::uint32_t masked = value;
+    if (access.width == 1u) masked &= 0xFFu;
+    if (access.width == 2u) masked &= 0xFFFFu;
+    diagnostic_mmio_read_override_ = Ps1DiagnosticMmioReadOverride{
+        access.guest_address,
+        access.physical_address,
+        access.width,
+        masked,
+    };
+    return true;
+}
+
+const std::optional<Ps1DiagnosticMmioReadOverride>&
+Ps1MemoryBus::diagnostic_mmio_read_override() const noexcept {
+    return diagnostic_mmio_read_override_;
+}
+
+std::optional<R3000aBusResult> Ps1MemoryBus::take_diagnostic_mmio_read_override(
+    std::uint32_t guest_address,
+    std::uint32_t physical_address,
+    std::uint8_t width) noexcept {
+    if (!diagnostic_mmio_read_override_) return std::nullopt;
+    const auto& armed = *diagnostic_mmio_read_override_;
+    if (armed.guest_address != guest_address ||
+        armed.physical_address != physical_address ||
+        armed.width != width) {
+        return std::nullopt;
+    }
+    const auto value = armed.value;
+    diagnostic_mmio_read_override_.reset();
+    return R3000aBusResult{R3000aBusStatus::ok, value};
+}
+
 R3000aBusResult Ps1MemoryBus::read8(std::uint32_t address) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
@@ -150,15 +191,24 @@ R3000aBusResult Ps1MemoryBus::read8(std::uint32_t address) noexcept {
             if (result.status == Ps1CdromIoStatus::ok) {
                 return {R3000aBusStatus::ok, result.value};
             }
+            if (const auto override = take_diagnostic_mmio_read_override(address, *physical, 1u)) {
+                return *override;
+            }
             last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 1u, false, 0u};
             return {R3000aBusStatus::unsupported, 0u};
         }
         if (*physical == kCdromData) {
+            if (const auto override = take_diagnostic_mmio_read_override(address, *physical, 1u)) {
+                return *override;
+            }
             last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 1u, false, 0u};
             return {R3000aBusStatus::unsupported, 0u};
         }
         if (auto* p = mapped_bytes(*physical, 1u, main_ram_, scratchpad_)) {
             return {R3000aBusStatus::ok, read_little_endian(p, 1u)};
+        }
+        if (const auto override = take_diagnostic_mmio_read_override(address, *physical, 1u)) {
+            return *override;
         }
         if (diagnostic_mmio_probe_enabled_) {
             if (auto* p = diagnostic_mmio_bytes(*physical, 1u, diagnostic_mmio_shadow_)) {
@@ -178,6 +228,9 @@ R3000aBusResult Ps1MemoryBus::read16(std::uint32_t address) noexcept {
     const auto physical = guest_to_physical(address);
     if (physical) {
         if (is_cdrom_register_window(*physical)) {
+            if (const auto override = take_diagnostic_mmio_read_override(address, *physical, 2u)) {
+                return *override;
+            }
             last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 2u, false, 0u};
             return {R3000aBusStatus::unsupported, 0u};
         }
@@ -189,6 +242,9 @@ R3000aBusResult Ps1MemoryBus::read16(std::uint32_t address) noexcept {
         }
         if (auto* p = mapped_bytes(*physical, 2u, main_ram_, scratchpad_)) {
             return {R3000aBusStatus::ok, read_little_endian(p, 2u)};
+        }
+        if (const auto override = take_diagnostic_mmio_read_override(address, *physical, 2u)) {
+            return *override;
         }
         if (diagnostic_mmio_probe_enabled_) {
             if (auto* p = diagnostic_mmio_bytes(*physical, 2u, diagnostic_mmio_shadow_)) {
@@ -211,6 +267,9 @@ R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
             return {R3000aBusStatus::ok, interrupt_status_};
         }
         if (is_cdrom_register_window(*physical)) {
+            if (const auto override = take_diagnostic_mmio_read_override(address, *physical, 4u)) {
+                return *override;
+            }
             last_unsupported_ = Ps1UnsupportedAccess{address, *physical, 4u, false, 0u};
             return {R3000aBusStatus::unsupported, 0u};
         }
@@ -243,6 +302,9 @@ R3000aBusResult Ps1MemoryBus::read32(std::uint32_t address) noexcept {
         }
         if (auto* p = mapped_bytes(*physical, 4u, main_ram_, scratchpad_)) {
             return {R3000aBusStatus::ok, read_little_endian(p, 4u)};
+        }
+        if (const auto override = take_diagnostic_mmio_read_override(address, *physical, 4u)) {
+            return *override;
         }
         if (diagnostic_mmio_probe_enabled_) {
             if (auto* p = diagnostic_mmio_bytes(*physical, 4u, diagnostic_mmio_shadow_)) {
@@ -479,6 +541,13 @@ std::uint64_t Ps1MemoryBus::diagnostic_state_hash() const noexcept {
     hash_u64(hash, gpu_.diagnostic_state_hash());
     hash_bytes(hash, std::span<const std::uint8_t>{
         diagnostic_mmio_shadow_.data(), diagnostic_mmio_shadow_.size()});
+    hash_byte(hash, diagnostic_mmio_read_override_.has_value() ? 1u : 0u);
+    if (diagnostic_mmio_read_override_) {
+        hash_u32(hash, diagnostic_mmio_read_override_->guest_address);
+        hash_u32(hash, diagnostic_mmio_read_override_->physical_address);
+        hash_byte(hash, diagnostic_mmio_read_override_->width);
+        hash_u32(hash, diagnostic_mmio_read_override_->value);
+    }
     return hash;
 }
 
