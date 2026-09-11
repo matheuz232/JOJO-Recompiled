@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <string_view>
 
 namespace jojo {
 
@@ -88,5 +89,9 @@ private:
 
 [[nodiscard]] bool ps1_omega_infinity_has_resumable_session(
     const std::filesystem::path& session_root);
+
+[[nodiscard]] bool ps1_omega_infinity_has_compatible_resumable_session(
+    const std::filesystem::path& session_root,
+    std::string_view executable_identity);
 
 } // namespace jojo
