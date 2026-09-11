@@ -238,6 +238,13 @@ struct Ps1Max3Report {
     std::vector<Ps1Max3FrontierCluster> frontier_clusters;
 };
 
+[[nodiscard]] inline bool ps1_max3_best_is_strict_authoritative(
+    const Ps1Max3Report& report) noexcept {
+    return !report.nodes.empty() &&
+           report.best_node < report.nodes.size() &&
+           report.nodes[report.best_node].evidence == Ps1Max3EvidenceClass::strict;
+}
+
 [[nodiscard]] Ps1Max3Options ps1_max3_options(Ps1Max3Profile profile) noexcept;
 [[nodiscard]] Ps1Max3Options ps1_max3_local_evidence_options() noexcept;
 [[nodiscard]] Result<Ps1Max3Report> explore_ps1_max3(
