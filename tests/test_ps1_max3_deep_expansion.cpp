@@ -43,8 +43,8 @@ static void append_mmio_base(std::vector<std::uint32_t>& words) {
 static std::vector<std::uint32_t> two_read_chain() {
     std::vector<std::uint32_t> words;
     append_mmio_base(words);
-    words.push_back(test_mips::i(0x24u, 8u, 9u, 0u)); // LBU t1,0(t0)
-    words.push_back(test_mips::i(0x24u, 8u, 10u, 0u)); // LBU t2,0(t0)
+    words.push_back(test_mips::i(0x24u, 8u, 9u, 0u));
+    words.push_back(test_mips::i(0x24u, 8u, 10u, 0u));
     words.push_back(test_mips::j(0x02u, 0x80010010u >> 2));
     words.push_back(0u);
     return words;
@@ -55,7 +55,7 @@ static std::vector<std::uint32_t> read_then_write() {
     append_mmio_base(words);
     words.push_back(test_mips::i(0x24u, 8u, 9u, 0u));
     words.push_back(test_mips::i(0x09u, 0u, 10u, 0x55u));
-    words.push_back(test_mips::i(0x28u, 8u, 10u, 0u)); // SB t2,0(t0)
+    words.push_back(test_mips::i(0x28u, 8u, 10u, 0u));
     return words;
 }
 
@@ -88,11 +88,11 @@ static std::vector<std::uint32_t> candidate_split_to_bios() {
     std::vector<std::uint32_t> words;
     append_mmio_base(words);
     words.push_back(test_mips::i(0x24u, 8u, 11u, 0u));
-    words.push_back(0u); // retire load delay
-    words.push_back(test_mips::i(0x04u, 11u, 0u, 3u)); // BEQ t3,zero -> selector 0x33 path
+    words.push_back(0u);
+    words.push_back(test_mips::i(0x04u, 11u, 0u, 4u));
     words.push_back(0u);
     words.push_back(test_mips::i(0x09u, 0u, 9u, 0x34u));
-    words.push_back(test_mips::j(0x02u, 0x80010024u >> 2));
+    words.push_back(test_mips::j(0x02u, 0x80010028u >> 2));
     words.push_back(0u);
     words.push_back(test_mips::i(0x09u, 0u, 9u, 0x33u));
     words.push_back(test_mips::i(0x09u, 0u, 10u, 0xA0u));
