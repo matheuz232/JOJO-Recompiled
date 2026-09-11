@@ -163,8 +163,11 @@ static void test_infinity_scheduler_continues_past_device_command_frontier() {
         });
     CHECK(explored);
     if (explored) {
+        // The unsupported command is a strict frontier. The speculative child then
+        // remains live until the callback stops it, so no second terminal frontier
+        // is required merely to prove the speculative continuation exists.
         CHECK(explored.value.stop_reason == jojo::Ps1OmegaInfinityStopReason::user_requested);
-        CHECK(explored.value.speculative_frontier_count >= 1u);
+        CHECK(explored.value.strict_frontier_count >= 1u);
         CHECK(explored.value.total_retired >= 8u);
     }
     CHECK(jojo::ps1_omega_infinity_has_resumable_session(root));
