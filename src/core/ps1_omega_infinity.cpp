@@ -435,7 +435,6 @@ Result<Ps1OmegaInfinitySummary> explore_ps1_omega_infinity(
     std::uint64_t max_presented_frames{};
     std::optional<std::uint32_t> latest_strict_pc;
     std::optional<std::uint32_t> latest_strict_address;
-    std::uint64_t processed_in_epoch{};
 
     Ps1OmegaInfinitySummary summary{};
     summary.session_root = session_root;
@@ -468,7 +467,7 @@ Result<Ps1OmegaInfinitySummary> explore_ps1_omega_infinity(
             break;
         }
 
-        if (epoch_retired >= options.epoch_retired_limit || processed_in_epoch >= omega.max_nodes) {
+        if (ps1_omega_infinity_epoch_complete(epoch_retired, options)) {
             const auto coverage_payload = encode_ps1_omega_coverage(coverage);
             const auto saved = append_checked(recorder, Ps1OmegaEvidenceCategory::coverage,
                                               epoch, coverage_payload);
@@ -481,7 +480,6 @@ Result<Ps1OmegaInfinitySummary> explore_ps1_omega_infinity(
             if (!persist_queue(Ps1OmegaInfinityStopReason::fatal_no_safe_continuation)) break;
             ++epoch;
             epoch_retired = 0u;
-            processed_in_epoch = 0u;
             update_progress();
             continue;
         }
@@ -501,7 +499,6 @@ Result<Ps1OmegaInfinitySummary> explore_ps1_omega_infinity(
         const auto remaining_epoch = options.epoch_retired_limit - epoch_retired;
         const auto quantum = std::min(options.instruction_quantum, remaining_epoch);
         auto report = item.runtime.run(segment_options(options, quantum));
-        ++processed_in_epoch;
         epoch_retired += report.instructions_retired;
         total_retired += report.instructions_retired;
         item.cumulative_retired += report.instructions_retired;
