@@ -101,7 +101,10 @@ static void test_multi_epoch_stop_resume_and_identity_rejection() {
     std::error_code ec;
     fs::remove_all(root, ec);
 
+    // Infinite control flow with an evolving register so exact-state deduplication
+    // does not intentionally collapse the fixture before the epoch boundary.
     const auto executable = make_executable({
+        test_mips::i(0x09u, 2u, 2u, 1u),
         test_mips::j(0x02u, 0x80010000u >> 2),
         0x00000000u,
     });
