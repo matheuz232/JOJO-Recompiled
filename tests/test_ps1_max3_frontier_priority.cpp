@@ -128,6 +128,28 @@ static void test_strict_evidence_and_unlock_value_rank_deterministically() {
     }
 }
 
+static void test_strict_cluster_always_precedes_speculative_progress() {
+    jojo::Ps1Max3Report report{};
+    report.frontiers.push_back(mmio_frontier(
+        0u, 0x80010000u, false, jojo::Ps1Max3EvidenceClass::strict, 1u));
+    report.frontiers.push_back(mmio_frontier(
+        1u, 0x80020000u, true, jojo::Ps1Max3EvidenceClass::speculative, 1u));
+
+    jojo::Ps1Max3NodeSummary speculative_progress{};
+    speculative_progress.frontier = 1u;
+    speculative_progress.evidence = jojo::Ps1Max3EvidenceClass::speculative;
+    speculative_progress.path_presented_frames =
+        std::numeric_limits<std::uint64_t>::max();
+    report.nodes.push_back(speculative_progress);
+
+    const auto clusters = jojo::cluster_and_rank_ps1_max3_frontiers(report);
+    CHECK(clusters.size() == 2u);
+    if (clusters.size() == 2u) {
+        CHECK(clusters[0].evidence == jojo::Ps1Max3EvidenceClass::strict);
+        CHECK(clusters[1].evidence == jojo::Ps1Max3EvidenceClass::speculative);
+    }
+}
+
 static jojo::Ps1Executable make_executable() {
     const std::vector<std::uint32_t> words{
         test_mips::i(0x09u, 0u, 9u, 0x33u),
@@ -163,6 +185,7 @@ int main() {
     test_mmio_root_causes_cluster_across_callsites_but_not_direction();
     test_bios_selector_clusters_across_callsites();
     test_strict_evidence_and_unlock_value_rank_deterministically();
+    test_strict_cluster_always_precedes_speculative_progress();
     test_explorer_appends_ranked_clusters_to_report();
     return failures ? 1 : 0;
 }
