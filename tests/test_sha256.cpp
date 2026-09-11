@@ -1,3 +1,4 @@
+#include "core/ps1_omega_session_io.h"
 #include "core/sha256.h"
 
 #include <filesystem>
@@ -51,12 +52,53 @@ int main() {
     const auto missing = sha256_file(root / "missing.bin");
     CHECK(!missing);
 
+    const auto session_root = root / "omega-session";
+    Ps1OmegaEvidenceRecorder recorder(session_root, 1024u * 1024u);
+    CHECK(recorder.ready());
+    const std::vector<std::uint8_t> mmio_payload{0x07u, 0x02u, 0x18u, 0x1Fu};
+    const auto appended = recorder.append(Ps1OmegaEvidenceCategory::mmio, 1u, mmio_payload);
+    CHECK(appended);
+    if (appended) {
+        CHECK(appended.record.sequence == 0u);
+        CHECK(appended.record.epoch == 1u);
+        CHECK(appended.record.category == Ps1OmegaEvidenceCategory::mmio);
+        CHECK(appended.record.payload_bytes == mmio_payload.size());
+        CHECK(std::filesystem::is_regular_file(session_root / appended.record.relative_path));
+        CHECK(!std::filesystem::exists((session_root / appended.record.relative_path).string() + ".tmp"));
+        CHECK(recorder.verify_chunk(appended.record));
+    }
+    CHECK(recorder.manifest().chunks.size() == 1u);
+    CHECK(recorder.manifest().next_sequence == 1u);
+    CHECK(recorder.manifest().committed_bytes >= mmio_payload.size());
+
+    const auto orphan = session_root / "events" / "orphan.bin.tmp";
+    std::filesystem::create_directories(orphan.parent_path(), ec);
+    {
+        std::ofstream out(orphan, std::ios::binary);
+        out << "partial";
+    }
+    const auto reloaded = load_ps1_omega_session_manifest(session_root);
+    CHECK(reloaded);
+    if (reloaded) {
+        CHECK(reloaded.value.chunks.size() == 1u);
+        CHECK(reloaded.value.chunks.front().sequence == 0u);
+    }
+
+    const auto tiny_root = root / "omega-session-tiny";
+    Ps1OmegaEvidenceRecorder tiny(tiny_root, 2u);
+    CHECK(tiny.ready());
+    const auto rejected = tiny.append(Ps1OmegaEvidenceCategory::mmio, 1u, mmio_payload);
+    CHECK(!rejected);
+    CHECK(rejected.status == Ps1OmegaSessionIoStatus::disk_budget_exhausted);
+    CHECK(tiny.manifest().chunks.empty());
+    CHECK(!std::filesystem::exists(tiny_root / "events" / "mmio-0000000000000000.bin"));
+
     std::filesystem::remove_all(root, ec);
 
     if (failures != 0) {
-        std::cerr << failures << " sha256 test(s) failed\n";
+        std::cerr << failures << " sha256/session-io test(s) failed\n";
         return 1;
     }
-    std::cout << "sha256 tests passed\n";
+    std::cout << "sha256/session-io tests passed\n";
     return 0;
 }
