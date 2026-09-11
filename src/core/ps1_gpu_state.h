@@ -24,6 +24,8 @@ public:
     [[nodiscard]] std::uint16_t vertical_start() const noexcept;
     [[nodiscard]] std::uint16_t vertical_end() const noexcept;
     [[nodiscard]] std::uint8_t display_mode() const noexcept;
+    [[nodiscard]] bool irq1() const noexcept { return irq1_; }
+    [[nodiscard]] std::uint32_t gp0_read_latch() const noexcept { return gp0_read_latch_; }
 
 private:
     void reset_control_state() noexcept;
