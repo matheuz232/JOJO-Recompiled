@@ -442,11 +442,20 @@ private:
 
 } // namespace
 
-Ps1Max3Options ps1_max3_local_evidence_options() noexcept {
+Ps1Max3Options ps1_max3_options(Ps1Max3Profile profile) noexcept {
     Ps1Max3Options options{};
+    options.profile = profile;
     options.max_nodes = 5461u;
     options.max_branch_depth = 6u;
     options.max_total_retired = 1000000000ull;
+    options.max_unique_frontiers = 32u;
+    options.max_speculative_depth = 8u;
+    options.max_candidates_per_read = 3u;
+    options.max_unique_states = 65536u;
+    options.max_queued_states = 16384u;
+    options.max_descendants_per_frontier = 512u;
+    options.max_cycle_repeats = 1u;
+    options.max_serialized_diagnostic_bytes = 64ull * 1024ull * 1024ull;
     options.segment_options = Ps1BootOptions{
         std::numeric_limits<std::uint64_t>::max(),
         131072u,
@@ -455,7 +464,21 @@ Ps1Max3Options ps1_max3_local_evidence_options() noexcept {
         65536u,
         2000000u,
     };
+    options.deep_frontier_enabled = profile != Ps1Max3Profile::strict;
+
+    if (profile == Ps1Max3Profile::omega) {
+        options.max_nodes = 16383u;
+        options.max_branch_depth = 32u;
+        options.max_total_retired = 3000000000ull;
+        options.max_unique_frontiers = 96u;
+        options.max_speculative_depth = 24u;
+        options.max_candidates_per_read = 8u;
+    }
     return options;
+}
+
+Ps1Max3Options ps1_max3_local_evidence_options() noexcept {
+    return ps1_max3_options(Ps1Max3Profile::deep);
 }
 
 Result<Ps1Max3Report> explore_ps1_max3(
