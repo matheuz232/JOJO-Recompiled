@@ -224,11 +224,17 @@ static void test_bounds_and_progress_ranking_are_deterministic() {
     const auto ranked = jojo::explore_ps1_max3(ranked_executable, ranked_options);
     CHECK(ranked);
     if (ranked) {
-        CHECK(!ranked.value.best_path.empty());
-        CHECK(ranked.value.best_path.front().fallback == jojo::Ps1BiosFallback::return_zero ||
-              ranked.value.best_path.front().fallback == jojo::Ps1BiosFallback::return_minus_one ||
-              ranked.value.best_path.front().fallback == jojo::Ps1BiosFallback::preserve_v0);
-        CHECK(ranked.value.nodes[ranked.value.best_node].path_dependency_count >= 2u);
+        CHECK(ranked.value.best_node < ranked.value.nodes.size());
+        if (ranked.value.best_node < ranked.value.nodes.size()) {
+            CHECK(ranked.value.nodes[ranked.value.best_node].evidence ==
+                  jojo::Ps1Max3EvidenceClass::strict);
+        }
+        CHECK(ranked.value.best_path.empty());
+        CHECK(ranked.value.best_report.stop_reason ==
+              jojo::Ps1BootStopReason::bios_call_unimplemented);
+        CHECK(std::any_of(ranked.value.nodes.begin(), ranked.value.nodes.end(), [](const auto& node) {
+            return node.evidence == jojo::Ps1Max3EvidenceClass::speculative;
+        }));
     }
 }
 
@@ -448,6 +454,20 @@ static void test_interrupt_continuation_removes_fake_a035_max3_frontier() {
     }));
 }
 
+static void test_best_report_authority_requires_strict_best_node() {
+    jojo::Ps1Max3Report speculative{};
+    speculative.nodes.resize(1u);
+    speculative.nodes[0].evidence = jojo::Ps1Max3EvidenceClass::speculative;
+    speculative.best_node = 0u;
+    speculative.best_report.stop_reason =
+        jojo::Ps1BootStopReason::commercial_frame_presented;
+    CHECK(!jojo::ps1_max3_best_is_strict_authoritative(speculative));
+
+    jojo::Ps1Max3Report strict = speculative;
+    strict.nodes[0].evidence = jojo::Ps1Max3EvidenceClass::strict;
+    CHECK(jojo::ps1_max3_best_is_strict_authoritative(strict));
+}
+
 int main() {
     test_one_frontier_branches_four_ways();
     test_converged_frontier_state_is_expanded_once();
@@ -457,5 +477,6 @@ int main() {
     test_terminal_mmio_write_is_classified_without_branching();
     test_observed_cdrom_sequence_is_real_max3_progress();
     test_interrupt_continuation_removes_fake_a035_max3_frontier();
+    test_best_report_authority_requires_strict_best_node();
     return failures ? 1 : 0;
 }
