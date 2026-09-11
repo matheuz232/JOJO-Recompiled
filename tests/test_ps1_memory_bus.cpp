@@ -182,5 +182,67 @@ int main() {
         CHECK(left.diagnostic_state_hash() == right.diagnostic_state_hash());
     }
 
+    {
+        jojo::Ps1MemoryBus override_bus;
+        const jojo::Ps1UnsupportedAccess byte_access{
+            0x1F801802u, 0x1F801802u, 1u, false, 0u,
+        };
+        CHECK(override_bus.arm_diagnostic_mmio_read_override(byte_access, 0x12345680u));
+        CHECK(override_bus.diagnostic_mmio_read_override().has_value());
+
+        const auto supported_istat = override_bus.read32(0x1F801070u);
+        CHECK(supported_istat.status == jojo::R3000aBusStatus::ok);
+        CHECK(supported_istat.value == 0u);
+        CHECK(override_bus.diagnostic_mmio_read_override().has_value());
+
+        const auto wrong_width = override_bus.read16(0x1F801802u);
+        CHECK(wrong_width.status == jojo::R3000aBusStatus::unsupported);
+        CHECK(override_bus.diagnostic_mmio_read_override().has_value());
+
+        const auto first = override_bus.read8(0x1F801802u);
+        CHECK(first.status == jojo::R3000aBusStatus::ok);
+        CHECK(first.value == 0x80u);
+        CHECK(!override_bus.diagnostic_mmio_read_override().has_value());
+        CHECK(override_bus.read8(0x1F801802u).status == jojo::R3000aBusStatus::unsupported);
+
+        const jojo::Ps1UnsupportedAccess half_access{
+            0x1F801800u, 0x1F801800u, 2u, false, 0u,
+        };
+        CHECK(override_bus.arm_diagnostic_mmio_read_override(half_access, 0x12348001u));
+        const auto half = override_bus.read16(0x1F801800u);
+        CHECK(half.status == jojo::R3000aBusStatus::ok);
+        CHECK(half.value == 0x8001u);
+
+        const jojo::Ps1UnsupportedAccess word_access{
+            0x1F801800u, 0x1F801800u, 4u, false, 0u,
+        };
+        CHECK(override_bus.arm_diagnostic_mmio_read_override(word_access, 0x89ABCDEFu));
+        const auto word = override_bus.read32(0x1F801800u);
+        CHECK(word.status == jojo::R3000aBusStatus::ok);
+        CHECK(word.value == 0x89ABCDEFu);
+
+        auto write_access = byte_access;
+        write_access.write = true;
+        CHECK(!override_bus.arm_diagnostic_mmio_read_override(write_access, 0u));
+        auto invalid_width = byte_access;
+        invalid_width.width = 3u;
+        CHECK(!override_bus.arm_diagnostic_mmio_read_override(invalid_width, 0u));
+    }
+
+    {
+        jojo::Ps1MemoryBus zero_bus;
+        jojo::Ps1MemoryBus one_bus;
+        CHECK(zero_bus.diagnostic_state_hash() == one_bus.diagnostic_state_hash());
+        const jojo::Ps1UnsupportedAccess access{
+            0x1F801802u, 0x1F801802u, 1u, false, 0u,
+        };
+        CHECK(zero_bus.arm_diagnostic_mmio_read_override(access, 0u));
+        CHECK(one_bus.arm_diagnostic_mmio_read_override(access, 1u));
+        CHECK(zero_bus.diagnostic_state_hash() != one_bus.diagnostic_state_hash());
+        CHECK(zero_bus.read8(0x1F801802u).status == jojo::R3000aBusStatus::ok);
+        CHECK(one_bus.read8(0x1F801802u).status == jojo::R3000aBusStatus::ok);
+        CHECK(zero_bus.diagnostic_state_hash() == one_bus.diagnostic_state_hash());
+    }
+
     return failures ? 1 : 0;
 }
