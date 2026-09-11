@@ -95,6 +95,7 @@ int main() {
         CHECK(!max3.value.nodes.empty());
         CHECK(max3.value.nodes.front().stop_reason == jojo::Ps1BootStopReason::bios_call_unimplemented);
         CHECK(max3.value.nodes.front().frontier_table == 0x000000A0u);
+        CHECK(jojo::ps1_max3_best_is_strict_authoritative(max3.value));
     }
 
     CHECK(fs::is_regular_file(report_path));
@@ -113,6 +114,10 @@ int main() {
     const auto checkpoint = jojo::bootstrap_runtime_local_evidence_to_file(
         install, compatibility_path);
     CHECK(checkpoint);
+    if (checkpoint) {
+        CHECK(checkpoint.value.stop_reason ==
+              jojo::Ps1BootStopReason::bios_call_unimplemented);
+    }
     CHECK(fs::is_regular_file(compatibility_path));
     CHECK(read_text(compatibility_path).find("format=jojo-max3-checkpoint-v1\n") == 0u);
 
