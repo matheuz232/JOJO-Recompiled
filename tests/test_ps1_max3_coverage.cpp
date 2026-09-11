@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <optional>
 
 static int failures = 0;
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__ << " CHECK failed: " #x "\n"; ++failures; } } while (0)
@@ -56,7 +57,7 @@ void test_new_semantic_items_then_repeats_are_zero_delta() {
 
     const auto first = coverage.observe(report, &frontier, 0x1234u);
     CHECK(first.new_states == 1u);
-    CHECK(first.new_pcs == 3u); // two trace PCs + diagnostic PC overlaps MMIO PC
+    CHECK(first.new_pcs == 4u); // trace + BIOS + MMIO/CPU frontier PCs
     CHECK(first.new_opcodes >= 2u);
     CHECK(first.new_bios_pairs == 1u);
     CHECK(first.new_mmio_tuples == 1u);
