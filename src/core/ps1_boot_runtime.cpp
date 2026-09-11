@@ -1,5 +1,6 @@
 #include "core/ps1_boot_runtime.h"
 
+#include "core/mips_decoder.h"
 #include "core/ps1_executable_loader.h"
 #include "core/r3000a_reference_executor.h"
 
@@ -37,6 +38,21 @@ bool is_initial_mmio_window(std::uint32_t physical) noexcept {
 
 bool is_syscall_opcode(std::uint32_t opcode) noexcept {
     return (opcode & kSyscallEncodingMask) == kSyscallEncoding;
+}
+
+bool expandable_mmio_load(std::uint32_t opcode, std::uint8_t width) noexcept {
+    switch (decode_mips(opcode).op) {
+        case MipsOp::lb:
+        case MipsOp::lbu:
+            return width == 1u;
+        case MipsOp::lh:
+        case MipsOp::lhu:
+            return width == 2u;
+        case MipsOp::lw:
+            return width == 4u;
+        default:
+            return false;
+    }
 }
 
 std::uint64_t bios_dependency_key(std::uint32_t table, std::uint32_t selector) noexcept {
@@ -167,6 +183,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
 
     while (report.instructions_retired < options.instruction_budget) {
         if (interrupt_continuation_.active()) {
+            diagnostic_mmio_read_frontier_.reset();
             const auto driven = interrupt_continuation_.drive(cpu_, bus_, hle_bios_);
             if (driven.status == Ps1InterruptDriveStatus::terminal) {
                 report.unsupported_access = bus_.last_unsupported_access();
@@ -178,6 +195,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
         report.last_pc = cpu_.pc;
         const auto physical_pc = Ps1MemoryBus::guest_to_physical(cpu_.pc);
         if (physical_pc && is_bios_table(*physical_pc)) {
+            diagnostic_mmio_read_frontier_.reset();
             if (observed_bios_dependencies.insert(bios_dependency_key(*physical_pc, cpu_.gpr[9])).second) {
                 instructions_since_progress = 0u;
             }
@@ -230,6 +248,7 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
         }
 
         diagnostic_bios_frontier_pending_ = false;
+        diagnostic_mmio_read_frontier_.reset();
         sync_interrupt_controller_to_cpu(cpu_, bus_);
         const auto observed_opcode = bus_.read32(cpu_.pc);
         if (observed_opcode.status == R3000aBusStatus::ok) report.last_opcode = observed_opcode.value;
@@ -330,6 +349,14 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
                     report.unsupported_access->width, report.unsupported_access->write,
                     report.unsupported_access->value, false,
                 }, options.mmio_event_capacity);
+                if (!report.unsupported_access->write && report.last_opcode &&
+                    expandable_mmio_load(*report.last_opcode, report.unsupported_access->width)) {
+                    diagnostic_mmio_read_frontier_ = Ps1DiagnosticMmioReadFrontier{
+                        report.last_pc,
+                        *report.last_opcode,
+                        *report.unsupported_access,
+                    };
+                }
                 return finish(Ps1BootStopReason::mmio_unimplemented);
             }
         }
@@ -354,6 +381,28 @@ bool Ps1BootRuntime::apply_diagnostic_bios_fallback(Ps1BiosFallback fallback) no
     }
     return_from_bios_call(cpu_);
     diagnostic_bios_frontier_pending_ = false;
+    return true;
+}
+
+const std::optional<Ps1DiagnosticMmioReadFrontier>&
+Ps1BootRuntime::diagnostic_mmio_read_frontier() const noexcept {
+    return diagnostic_mmio_read_frontier_;
+}
+
+bool Ps1BootRuntime::apply_diagnostic_mmio_read_fallback(std::uint32_t value) noexcept {
+    if (!diagnostic_mmio_read_frontier_) return false;
+    const auto frontier = *diagnostic_mmio_read_frontier_;
+    if (cpu_.pc != frontier.pc || frontier.access.write) return false;
+
+    const auto fetched = bus_.read32(frontier.pc);
+    if (fetched.status != R3000aBusStatus::ok || fetched.value != frontier.opcode) return false;
+    const auto physical = Ps1MemoryBus::guest_to_physical(frontier.access.guest_address);
+    if (!physical || *physical != frontier.access.physical_address) return false;
+    if (!expandable_mmio_load(frontier.opcode, frontier.access.width)) return false;
+    if (bus_.diagnostic_mmio_read_override().has_value()) return false;
+    if (!bus_.arm_diagnostic_mmio_read_override(frontier.access, value)) return false;
+
+    diagnostic_mmio_read_frontier_.reset();
     return true;
 }
 
@@ -382,6 +431,15 @@ std::uint64_t Ps1BootRuntime::diagnostic_state_hash() const noexcept {
     hash_u64(hash, hle_bios_.diagnostic_state_hash());
     hash_u64(hash, interrupt_continuation_.diagnostic_state_hash());
     hash_bool(hash, diagnostic_bios_frontier_pending_);
+    hash_bool(hash, diagnostic_mmio_read_frontier_.has_value());
+    if (diagnostic_mmio_read_frontier_) {
+        hash_u32(hash, diagnostic_mmio_read_frontier_->pc);
+        hash_u32(hash, diagnostic_mmio_read_frontier_->opcode);
+        hash_u32(hash, diagnostic_mmio_read_frontier_->access.guest_address);
+        hash_u32(hash, diagnostic_mmio_read_frontier_->access.physical_address);
+        hash_byte(hash, diagnostic_mmio_read_frontier_->access.width);
+        hash_bool(hash, diagnostic_mmio_read_frontier_->access.write);
+    }
     return hash;
 }
 
