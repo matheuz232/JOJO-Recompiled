@@ -387,7 +387,7 @@ Result<void> measure_zip_entry(ZipEntry& entry,
                                const std::function<bool()>& cancel) {
     std::ifstream in(entry.absolute, std::ios::binary);
     if (!in) return Result<void>::failure(ErrorCode::io_error, "failed to open ZIP source file");
-    std::array<std::uint8_t, 1024u * 1024u> buffer{};
+    std::vector<std::uint8_t> buffer(1024u * 1024u);
     std::uint32_t crc = 0xFFFFFFFFu;
     std::uint64_t size{};
     while (in) {
@@ -410,7 +410,7 @@ Result<void> copy_file_to_stream(const std::filesystem::path& path,
                                  const std::function<bool()>& cancel) {
     std::ifstream in(path, std::ios::binary);
     if (!in) return Result<void>::failure(ErrorCode::io_error, "failed to reopen ZIP source file");
-    std::array<char, 1024u * 1024u> buffer{};
+    std::vector<char> buffer(1024u * 1024u);
     while (in) {
         if (cancel && cancel()) return Result<void>::failure(ErrorCode::io_error, "OMEGA bundle packaging cancelled");
         in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
