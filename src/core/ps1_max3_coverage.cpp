@@ -18,11 +18,21 @@ void mix_byte(std::uint64_t& hash, std::uint8_t value) noexcept {
 template <class T>
 void mix_integral(std::uint64_t& hash, T value) noexcept {
     static_assert(std::is_integral_v<T> || std::is_enum_v<T>);
-    using Raw = std::conditional_t<std::is_enum_v<T>, std::underlying_type_t<T>, T>;
-    using Unsigned = std::make_unsigned_t<Raw>;
-    const auto raw = static_cast<Unsigned>(value);
-    for (std::size_t shift = 0u; shift < sizeof(Unsigned); ++shift) {
-        mix_byte(hash, static_cast<std::uint8_t>((raw >> (shift * 8u)) & 0xffu));
+    if constexpr (std::is_enum_v<T>) {
+        using Raw = std::underlying_type_t<T>;
+        using Unsigned = std::make_unsigned_t<Raw>;
+        const auto raw = static_cast<Unsigned>(value);
+        for (std::size_t shift = 0u; shift < sizeof(Unsigned); ++shift) {
+            mix_byte(hash, static_cast<std::uint8_t>((raw >> (shift * 8u)) & 0xffu));
+        }
+    } else if constexpr (std::is_same_v<T, bool>) {
+        mix_byte(hash, value ? 1u : 0u);
+    } else {
+        using Unsigned = std::make_unsigned_t<T>;
+        const auto raw = static_cast<Unsigned>(value);
+        for (std::size_t shift = 0u; shift < sizeof(Unsigned); ++shift) {
+            mix_byte(hash, static_cast<std::uint8_t>((raw >> (shift * 8u)) & 0xffu));
+        }
     }
 }
 
