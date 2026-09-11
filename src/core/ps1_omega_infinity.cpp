@@ -154,8 +154,11 @@ bool decision_matches_and_apply(Ps1BootRuntime& runtime,
             return false;
         }
         return runtime.apply_diagnostic_mmio_read_fallback(decision.value);
-    case Ps1Max3DecisionKind::mmio_write_no_effect:
-        if (report.stop_reason != Ps1BootStopReason::mmio_unimplemented ||
+    case Ps1Max3DecisionKind::mmio_write_no_effect: {
+        const bool supported_stop =
+            report.stop_reason == Ps1BootStopReason::mmio_unimplemented ||
+            report.stop_reason == Ps1BootStopReason::device_command_unimplemented;
+        if (!supported_stop ||
             !report.unsupported_access || !report.unsupported_access->write ||
             report.unsupported_access->physical_address != decision.address ||
             report.unsupported_access->width != decision.width ||
@@ -163,6 +166,7 @@ bool decision_matches_and_apply(Ps1BootRuntime& runtime,
             return false;
         }
         return runtime.apply_diagnostic_mmio_write_no_effect(report);
+    }
     }
     return false;
 }
@@ -620,7 +624,10 @@ Result<Ps1OmegaInfinitySummary> explore_ps1_omega_infinity(
             continue;
         }
 
-        if (report.stop_reason == Ps1BootStopReason::mmio_unimplemented &&
+        const bool no_effect_write_frontier =
+            report.stop_reason == Ps1BootStopReason::mmio_unimplemented ||
+            report.stop_reason == Ps1BootStopReason::device_command_unimplemented;
+        if (no_effect_write_frontier &&
             report.unsupported_access && report.unsupported_access->write) {
             auto child_runtime = item.runtime;
             if (child_runtime.apply_diagnostic_mmio_write_no_effect(report)) {
