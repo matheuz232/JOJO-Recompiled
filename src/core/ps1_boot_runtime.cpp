@@ -12,12 +12,6 @@ namespace {
 constexpr std::uint32_t kBiosA0 = 0x000000A0u;
 constexpr std::uint32_t kBiosB0 = 0x000000B0u;
 constexpr std::uint32_t kBiosC0 = 0x000000C0u;
-constexpr std::uint32_t kBiosA0InitHeap = 0x00000039u;
-constexpr std::uint32_t kBiosA0RemoveIso9660 = 0x00000056u;
-constexpr std::uint32_t kBiosA0RemoveIso9660Alias = 0x00000072u;
-constexpr std::uint32_t kBiosB0HookEntryInt = 0x00000019u;
-constexpr std::uint32_t kBiosB0ChangeClearPad = 0x0000005Bu;
-constexpr std::uint32_t kBiosC0ChangeClearRCnt = 0x0000000Au;
 constexpr std::uint64_t kFnvOffset = 14695981039346656037ull;
 constexpr std::uint64_t kFnvPrime = 1099511628211ull;
 
@@ -62,18 +56,6 @@ void hash_u64(std::uint64_t& hash, std::uint64_t value) noexcept {
     }
 }
 
-void hash_optional_u32(std::uint64_t& hash,
-                       const std::optional<std::uint32_t>& value) noexcept {
-    hash_bool(hash, value.has_value());
-    if (value) hash_u32(hash, *value);
-}
-
-void hash_optional_bool(std::uint64_t& hash,
-                        const std::optional<bool>& value) noexcept {
-    hash_bool(hash, value.has_value());
-    if (value) hash_bool(hash, *value);
-}
-
 void record_recent_trace(Ps1BootReport& report,
                          std::uint32_t pc,
                          const std::optional<std::uint32_t>& opcode,
@@ -110,53 +92,6 @@ void return_from_bios_call(R3000aState& cpu) noexcept {
     cpu.next_pc = cpu.pc + 4u;
     cpu.delay_slot = {};
     cpu.gpr[0] = 0u;
-}
-
-bool handle_bios_call(
-    R3000aState& cpu,
-    std::optional<Ps1BiosHeapState>& heap_state,
-    std::optional<std::uint32_t>& interrupt_hook_address,
-    std::optional<bool>& pad_card_auto_ack_enabled,
-    std::array<std::optional<bool>, 4>& root_counter_auto_ack_enabled,
-    bool& iso9660_removed,
-    std::uint32_t table_physical,
-    std::uint32_t selector) noexcept {
-    if (table_physical == kBiosA0 && selector == kBiosA0InitHeap) {
-        heap_state = Ps1BiosHeapState{cpu.gpr[4], cpu.gpr[5]};
-        return_from_bios_call(cpu);
-        return true;
-    }
-
-    if (table_physical == kBiosA0 &&
-        (selector == kBiosA0RemoveIso9660 || selector == kBiosA0RemoveIso9660Alias)) {
-        iso9660_removed = true;
-        return_from_bios_call(cpu);
-        return true;
-    }
-
-    if (table_physical == kBiosB0 && selector == kBiosB0HookEntryInt) {
-        interrupt_hook_address = cpu.gpr[4];
-        return_from_bios_call(cpu);
-        return true;
-    }
-
-    if (table_physical == kBiosB0 && selector == kBiosB0ChangeClearPad) {
-        pad_card_auto_ack_enabled = cpu.gpr[4] != 0u;
-        return_from_bios_call(cpu);
-        return true;
-    }
-
-    if (table_physical == kBiosC0 && selector == kBiosC0ChangeClearRCnt &&
-        cpu.gpr[4] < root_counter_auto_ack_enabled.size()) {
-        const auto index = static_cast<std::size_t>(cpu.gpr[4]);
-        const bool previous = root_counter_auto_ack_enabled[index].value_or(false);
-        root_counter_auto_ack_enabled[index] = cpu.gpr[5] != 0u;
-        cpu.gpr[2] = previous ? 1u : 0u;
-        return_from_bios_call(cpu);
-        return true;
-    }
-
-    return false;
 }
 
 } // namespace
@@ -201,10 +136,8 @@ Ps1BootReport Ps1BootRuntime::run(const Ps1BootOptions& options) noexcept {
                 cpu_.gpr[7],
                 cpu_.gpr[31],
             }, options.bios_event_capacity);
-            if (handle_bios_call(cpu_, bios_heap_state_, bios_interrupt_hook_address_,
-                                 bios_pad_card_auto_ack_enabled_,
-                                 bios_root_counter_auto_ack_enabled_,
-                                 bios_iso9660_removed_, *physical_pc, cpu_.gpr[9])) {
+            const auto bios_status = bios_.dispatch(cpu_, *physical_pc, cpu_.gpr[9]);
+            if (bios_status == Ps1HleBiosDispatchStatus::handled) {
                 diagnostic_bios_frontier_pending_ = false;
                 continue;
             }
@@ -334,17 +267,7 @@ std::uint64_t Ps1BootRuntime::diagnostic_state_hash() const noexcept {
     hash_u32(hash, cpu_.cop0.epc);
     hash_byte(hash, cpu_.external_interrupt_pending);
 
-    hash_bool(hash, bios_heap_state_.has_value());
-    if (bios_heap_state_) {
-        hash_u32(hash, bios_heap_state_->base);
-        hash_u32(hash, bios_heap_state_->size);
-    }
-    hash_optional_u32(hash, bios_interrupt_hook_address_);
-    hash_optional_bool(hash, bios_pad_card_auto_ack_enabled_);
-    for (const auto& state : bios_root_counter_auto_ack_enabled_) {
-        hash_optional_bool(hash, state);
-    }
-    hash_bool(hash, bios_iso9660_removed_);
+    hash_u64(hash, bios_.diagnostic_state_hash());
     hash_bool(hash, diagnostic_bios_frontier_pending_);
     return hash;
 }
@@ -354,29 +277,26 @@ const R3000aState& Ps1BootRuntime::cpu_state() const noexcept {
 }
 
 const std::optional<Ps1BiosHeapState>& Ps1BootRuntime::bios_heap_state() const noexcept {
-    return bios_heap_state_;
+    return bios_.heap_state();
 }
 
 const std::optional<std::uint32_t>&
 Ps1BootRuntime::bios_interrupt_hook_address() const noexcept {
-    return bios_interrupt_hook_address_;
+    return bios_.interrupt_hook_address();
 }
 
 const std::optional<bool>&
 Ps1BootRuntime::bios_pad_card_auto_ack_enabled() const noexcept {
-    return bios_pad_card_auto_ack_enabled_;
+    return bios_.pad_card_auto_ack_enabled();
 }
 
 std::optional<bool> Ps1BootRuntime::bios_root_counter_auto_ack_enabled(
     std::uint32_t counter) const noexcept {
-    if (counter >= bios_root_counter_auto_ack_enabled_.size()) {
-        return std::nullopt;
-    }
-    return bios_root_counter_auto_ack_enabled_[static_cast<std::size_t>(counter)];
+    return bios_.root_counter_auto_ack_enabled(counter);
 }
 
 bool Ps1BootRuntime::bios_iso9660_removed() const noexcept {
-    return bios_iso9660_removed_;
+    return bios_.iso9660_removed();
 }
 
 Ps1MemoryBus& Ps1BootRuntime::bus() noexcept {
