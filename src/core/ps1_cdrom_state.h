@@ -38,6 +38,9 @@ public:
     [[nodiscard]] std::uint8_t drive_status() const noexcept;
     [[nodiscard]] std::uint8_t interrupt_enable() const noexcept;
     [[nodiscard]] std::uint8_t interrupt_status() const noexcept;
+    [[nodiscard]] bool response_pending() const noexcept { return response_.has_value(); }
+    [[nodiscard]] const std::optional<std::uint8_t>& response_value() const noexcept { return response_; }
+    [[nodiscard]] bool irq_rising_edge_pending() const noexcept { return irq_rising_edge_pending_; }
     [[nodiscard]] std::uint64_t diagnostic_state_hash() const noexcept;
 
 private:
