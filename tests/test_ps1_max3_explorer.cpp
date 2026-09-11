@@ -50,7 +50,9 @@ static std::vector<std::uint32_t> one_frontier_then_loop() {
 
 static void test_one_frontier_branches_four_ways() {
     const auto executable = make_executable(one_frontier_then_loop());
-    const auto explored = jojo::explore_ps1_max3(executable, fast_options());
+    auto options = fast_options();
+    options.deep_frontier_enabled = false;
+    const auto explored = jojo::explore_ps1_max3(executable, options);
     CHECK(explored);
     if (!explored) return;
 
@@ -60,6 +62,8 @@ static void test_one_frontier_branches_four_ways() {
     CHECK(report.nodes[0].stop_reason == jojo::Ps1BootStopReason::bios_call_unimplemented);
     CHECK(report.nodes[0].frontier_table == 0x000000A0u);
     CHECK(report.nodes[0].frontier_selector == 0x00000033u);
+    CHECK(report.nodes[0].evidence == jojo::Ps1Max3EvidenceClass::strict);
+    CHECK(report.nodes[0].speculative_depth == 0u);
 
     const std::vector<jojo::Ps1BiosFallback> expected{
         jojo::Ps1BiosFallback::return_zero,
@@ -71,6 +75,12 @@ static void test_one_frontier_branches_four_ways() {
     for (std::size_t i = 1; i < report.nodes.size(); ++i) {
         CHECK(report.nodes[i].depth == 1u);
         CHECK(report.nodes[i].fallback.has_value());
+        CHECK(report.nodes[i].evidence == jojo::Ps1Max3EvidenceClass::speculative);
+        CHECK(report.nodes[i].speculative_depth == 1u);
+        CHECK(report.nodes[i].decision.has_value());
+        if (report.nodes[i].decision) {
+            CHECK(report.nodes[i].decision->kind == jojo::Ps1Max3DecisionKind::bios_fallback);
+        }
         if (report.nodes[i].fallback) seen.push_back(*report.nodes[i].fallback);
     }
     CHECK(seen == expected);
@@ -78,6 +88,14 @@ static void test_one_frontier_branches_four_ways() {
     CHECK(report.dependencies[0].kind == jojo::Ps1Max3DependencyKind::bios_frontier);
     CHECK(report.dependencies[0].table == 0x000000A0u);
     CHECK(report.dependencies[0].selector == 0x00000033u);
+    CHECK(report.frontiers.size() == 1u);
+    if (!report.frontiers.empty()) {
+        CHECK(report.frontiers[0].kind == jojo::Ps1Max3FrontierKind::bios);
+        CHECK(report.frontiers[0].evidence == jojo::Ps1Max3EvidenceClass::strict);
+        CHECK(report.frontiers[0].table == 0x000000A0u);
+        CHECK(report.frontiers[0].selector == 0x00000033u);
+        CHECK(report.frontiers[0].expandable);
+    }
 }
 
 static std::vector<std::uint32_t> two_frontiers_with_convergence() {
@@ -235,9 +253,41 @@ static void test_terminal_gpu_mmio_is_recorded_as_dependency_with_value() {
         CHECK(report.dependencies[0].width == 4u);
         CHECK(report.dependencies[0].write);
     }
+    CHECK(report.frontiers.size() == 1u);
+    if (!report.frontiers.empty()) {
+        CHECK(report.frontiers[0].kind == jojo::Ps1Max3FrontierKind::gpu_command);
+        CHECK(report.frontiers[0].evidence == jojo::Ps1Max3EvidenceClass::strict);
+        CHECK(report.frontiers[0].write);
+        CHECK(!report.frontiers[0].expandable);
+        CHECK(report.nodes[0].expansion_stop == jojo::Ps1Max3ExpansionStop::terminal_frontier);
+    }
     const auto text = jojo::format_ps1_max3_report(report);
     CHECK(text.find("dependency_0_kind=terminal_mmio") != std::string::npos);
     CHECK(text.find("dependency_0_value=0xff000000") != std::string::npos);
+}
+
+static void test_terminal_mmio_write_is_classified_without_branching() {
+    const auto executable = make_executable({
+        test_mips::i(0x0Fu, 0u, 8u, 0x1F80u),
+        test_mips::i(0x0Du, 8u, 8u, 0x1802u),
+        test_mips::i(0x09u, 0u, 9u, 0x0055u),
+        test_mips::i(0x28u, 8u, 9u, 0u),
+    });
+    auto options = fast_options();
+    options.deep_frontier_enabled = false;
+    const auto explored = jojo::explore_ps1_max3(executable, options);
+    CHECK(explored);
+    if (!explored) return;
+    const auto& report = explored.value;
+    CHECK(report.nodes.size() == 1u);
+    CHECK(report.frontiers.size() == 1u);
+    if (!report.frontiers.empty()) {
+        CHECK(report.frontiers[0].kind == jojo::Ps1Max3FrontierKind::terminal_mmio_write);
+        CHECK(report.frontiers[0].evidence == jojo::Ps1Max3EvidenceClass::strict);
+        CHECK(report.frontiers[0].write);
+        CHECK(!report.frontiers[0].expandable);
+    }
+    CHECK(report.nodes[0].expansion_stop == jojo::Ps1Max3ExpansionStop::terminal_frontier);
 }
 
 static std::vector<std::uint32_t> observed_cdrom_sequence_program() {
@@ -402,6 +452,7 @@ int main() {
     test_hle_state_prevents_false_max3_frontier_deduplication();
     test_bounds_and_progress_ranking_are_deterministic();
     test_terminal_gpu_mmio_is_recorded_as_dependency_with_value();
+    test_terminal_mmio_write_is_classified_without_branching();
     test_observed_cdrom_sequence_is_real_max3_progress();
     test_interrupt_continuation_removes_fake_a035_max3_frontier();
     return failures ? 1 : 0;
