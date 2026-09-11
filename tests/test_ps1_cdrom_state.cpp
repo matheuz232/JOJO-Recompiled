@@ -1,4 +1,5 @@
 #include "core/ps1_cdrom_state.h"
+#include "core/ps1_memory_bus.h"
 #include <iostream>
 
 static int failures = 0;
@@ -108,6 +109,38 @@ static void test_bank1_hclrctl_rejects_unmodeled_side_effect_bits() {
     }
 }
 
+static void test_memory_bus_preserves_istat_across_hclrctl_ack() {
+    jojo::Ps1MemoryBus bus;
+    bus.cdrom().seed_post_bios(0x02u, 0x1Fu);
+    bus.set_diagnostic_mmio_probe_enabled(true);
+
+    CHECK(bus.write8(0x1F801800u, 0x00u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.write8(0x1F801801u, 0x01u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.interrupt_status() == 0x0004u);
+    CHECK(bus.cdrom().interrupt_status() == 3u);
+    CHECK(bus.cdrom().irq_line());
+
+    const auto response = bus.read8(0x1F801801u);
+    CHECK(response.status == jojo::R3000aBusStatus::ok);
+    CHECK(response.value == 0x02u);
+
+    CHECK(bus.write8(0x1F801800u, 0x01u).status == jojo::R3000aBusStatus::ok);
+    bus.clear_last_diagnostic_mmio_probe();
+    bus.clear_last_unsupported_access();
+
+    const auto ack = bus.write8(0x1F801803u, 0x07u);
+    CHECK(ack.status == jojo::R3000aBusStatus::ok);
+    CHECK(!bus.last_diagnostic_mmio_probe().has_value());
+    CHECK(!bus.last_unsupported_access().has_value());
+    CHECK(bus.cdrom().interrupt_status() == 0u);
+    CHECK(!bus.cdrom().irq_line());
+
+    CHECK(bus.interrupt_status() == 0x0004u);
+    CHECK(bus.read16(0x1F801070u).value == 0x0004u);
+    CHECK(bus.write16(0x1F801070u, 0x0000u).status == jojo::R3000aBusStatus::ok);
+    CHECK(bus.interrupt_status() == 0u);
+}
+
 int main() {
     jojo::Ps1CdromState first;
     CHECK(first.index() == 0u);
@@ -162,5 +195,6 @@ int main() {
     test_bank1_hclrctl_acknowledges_getstat_irq();
     test_bank1_hclrctl_drains_result_fifo();
     test_bank1_hclrctl_rejects_unmodeled_side_effect_bits();
+    test_memory_bus_preserves_istat_across_hclrctl_ack();
     return failures ? 1 : 0;
 }
