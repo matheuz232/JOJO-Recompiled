@@ -73,6 +73,12 @@ private:
     return Ps1OmegaInfinityOptions{};
 }
 
+[[nodiscard]] constexpr bool ps1_omega_infinity_epoch_complete(
+    std::uint64_t epoch_retired,
+    const Ps1OmegaInfinityOptions& options) noexcept {
+    return epoch_retired >= options.epoch_retired_limit;
+}
+
 [[nodiscard]] Result<Ps1OmegaInfinitySummary> explore_ps1_omega_infinity(
     const Ps1Executable& executable,
     const std::filesystem::path& session_root,
