@@ -103,8 +103,9 @@ std::vector<std::uint32_t> following_opcodes(const Ps1BootRuntime& runtime,
                                               std::uint32_t pc) {
     std::vector<std::uint32_t> result;
     result.reserve(8u);
+    auto inspector = runtime;
     for (std::uint32_t i = 1u; i <= 8u; ++i) {
-        const auto read = runtime.bus().read32(pc + i * 4u);
+        const auto read = inspector.bus().read32(pc + i * 4u);
         if (read.status != R3000aBusStatus::ok) break;
         result.push_back(read.value);
     }
@@ -561,8 +562,8 @@ Result<Ps1OmegaInfinitySummary> explore_ps1_omega_infinity(
                                 item.speculative_depth < omega.max_speculative_depth;
         if (!can_assume) continue;
 
-        const auto enqueue_child = [&](Ps1BootRuntime child_runtime,
-                                       Ps1Max3Decision decision) mutable {
+        auto enqueue_child = [&](Ps1BootRuntime child_runtime,
+                                 Ps1Max3Decision decision) {
             if (queue.size() >= omega.max_queued_states) return;
             WorkItem child{};
             child.runtime = std::move(child_runtime);
