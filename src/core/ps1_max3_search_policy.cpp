@@ -34,6 +34,8 @@ bool progress_not_worse(const Ps1Max3SearchScore& incumbent,
 
 bool ps1_max3_search_outranks(const Ps1Max3SearchScore& candidate,
                               const Ps1Max3SearchScore& current) noexcept {
+    if (candidate.evidence != current.evidence)
+        return evidence_outranks(candidate.evidence, current.evidence);
     if (candidate.presented_frames != current.presented_frames)
         return candidate.presented_frames > current.presented_frames;
     if (candidate.vram_write_count != current.vram_write_count)
@@ -52,8 +54,6 @@ bool ps1_max3_search_outranks(const Ps1Max3SearchScore& candidate,
         return candidate.new_frontier_count > current.new_frontier_count;
     if (candidate.new_coverage_count != current.new_coverage_count)
         return candidate.new_coverage_count > current.new_coverage_count;
-    if (candidate.evidence != current.evidence)
-        return evidence_outranks(candidate.evidence, current.evidence);
     if (candidate.assumption_count != current.assumption_count)
         return candidate.assumption_count < current.assumption_count;
     if (candidate.speculative_depth != current.speculative_depth)
