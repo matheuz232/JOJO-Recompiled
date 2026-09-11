@@ -3,6 +3,8 @@
 #include "core/conversion.h"
 #include "core/ps1_boot_report_io.h"
 #include "core/ps1_installation.h"
+#include "core/ps1_omega_summary.h"
+#include "core/ps1_omega_ui_state.h"
 #include "core/runtime.h"
 #include "core/settings.h"
 #include <windows.h>
@@ -15,6 +17,7 @@
 #include <deque>
 #include <filesystem>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -23,15 +26,18 @@ namespace {
 namespace fs = std::filesystem;
 constexpr UINT WM_PROGRESS = WM_APP + 10;
 constexpr UINT WM_FINISHED = WM_APP + 11;
+constexpr UINT WM_OMEGA_PROGRESS = WM_APP + 12;
+constexpr UINT WM_OMEGA_FINISHED = WM_APP + 13;
 constexpr int ID_SOURCE_PATH = 1001;
 constexpr int ID_SELECT_SOURCE = 1002;
 constexpr int ID_PREPARE = 1003;
 constexpr int ID_INSTALL_PATH = 1004;
 constexpr int ID_SELECT_INSTALL = 1005;
 constexpr int ID_RUN_CHECKPOINT = 1006;
+constexpr int ID_RUN_OMEGA_INFINITY = 1007;
 constexpr COLORREF BG=RGB(13,8,22), PANEL=RGB(35,21,53), TEXT=RGB(248,244,252), MUTED=RGB(185,169,198);
 constexpr COLORREF PURPLE=RGB(119,73,196), MAGENTA=RGB(220,64,166), GOLD=RGB(235,193,83);
-HWND win{}, source_box{}, source_btn{}, install_box{}, install_btn{}, prepare_btn{}, checkpoint_btn{};
+HWND win{}, source_box{}, source_btn{}, install_box{}, install_btn{}, prepare_btn{}, checkpoint_btn{}, omega_btn{};
 HFONT title_font{}, body_font{}, small_font{}, button_font{};
 HBRUSH edit_brush{};
 fs::path game_dir, settings_path;
@@ -41,8 +47,21 @@ std::deque<std::wstring> logs;
 int percent=0;
 bool running=false, converted=false;
 std::atomic_bool closing{false};
+std::thread omega_thread;
+std::unique_ptr<jojo::Ps1OmegaInfinityControl> omega_control;
+jojo::Ps1OmegaUiStateMachine omega_state;
+
 struct ProgressMsg { jojo::ConversionProgress p; };
 struct FinishMsg { jojo::Result<jojo::ConversionManifest> r; };
+struct OmegaProgressMsg { jojo::Ps1OmegaInfinityProgress p; };
+struct OmegaFinishMsg {
+    bool ok{};
+    bool resumable{};
+    bool paused{};
+    jojo::Ps1OmegaInfinitySummary summary{};
+    fs::path zip_path;
+    std::string detail;
+};
 
 std::wstring wide(const std::string& s) {
     if (s.empty()) return {};
@@ -67,6 +86,23 @@ fs::path app_root() {
     if(FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData,KF_FLAG_DEFAULT,nullptr,&raw)))
         return fs::current_path()/L"JOJO Recompiled User Data";
     fs::path p(raw); CoTaskMemFree(raw); return p/L"JOJO Recompiled";
+}
+
+fs::path omega_parent_root(){
+    return app_root()/L"diagnostics"/L"omega-infinity";
+}
+
+fs::path omega_session_root(){
+    return omega_parent_root()/L"OMEGA-Infinity-Session";
+}
+
+fs::path omega_zip_path(){
+    return omega_parent_root()/L"OMEGA-Infinity-Session.zip";
+}
+
+bool omega_active(){
+    const auto state=omega_state.state();
+    return state==jojo::Ps1OmegaUiState::running || state==jojo::Ps1OmegaUiState::stop_requested;
 }
 
 void add_log(std::wstring s) {
@@ -123,6 +159,24 @@ bool usable_image(const fs::path& image) {
     return attributes!=INVALID_FILE_ATTRIBUTES && (attributes&FILE_ATTRIBUTE_DIRECTORY)==0 && supported_image(image);
 }
 
+void set_omega_idle_label(bool resumable){
+    if(!omega_btn) return;
+    SetWindowTextW(omega_btn,resumable?L"RETOMAR OMEGA INFINITY":L"EXECUTAR OMEGA INFINITY");
+}
+
+void refresh_omega_resume_state(std::string_view executable_identity){
+    if(omega_active()) return;
+    const bool resumable=jojo::ps1_omega_infinity_has_compatible_resumable_session(
+        omega_session_root(),executable_identity);
+    if(resumable){
+        if(omega_state.state()!=jojo::Ps1OmegaUiState::resumable)
+            (void)omega_state.transition(jojo::Ps1OmegaUiState::resumable);
+    }else if(omega_state.state()==jojo::Ps1OmegaUiState::resumable){
+        (void)omega_state.transition(jojo::Ps1OmegaUiState::idle);
+    }
+    set_omega_idle_label(resumable);
+}
+
 void refresh_install(){
     converted=false;
     auto kind=jojo::classify_installation(game_dir);
@@ -131,7 +185,9 @@ void refresh_install(){
         status=L"Instalação inválida: "+wide(kind.detail);
         add_log(L"A instalação selecionada não pôde ser classificada.");
         SetWindowTextW(prepare_btn,L"PREPARAR JOGO");
+        set_omega_idle_label(false);
         EnableWindow(checkpoint_btn,FALSE);
+        EnableWindow(omega_btn,FALSE);
         InvalidateRect(win,nullptr,FALSE);
         return;
     }
@@ -143,12 +199,14 @@ void refresh_install(){
             ? L"Selecione a imagem PS1 da sua própria cópia do jogo."
             : L"Imagem PS1 selecionada. Pronto para preparar na pasta escolhida.";
         SetWindowTextW(prepare_btn,L"PREPARAR JOGO");
+        set_omega_idle_label(false);
         break;
     case jojo::InstallationKind::legacy_v1:
         percent=0;
         status=L"Instalação legada Dreamcast/SH-4 incompatível detectada. Reconverta sua imagem PS1 nesta pasta.";
         add_log(L"Instalação legada preservada; uma nova geração PS1 será criada ao reconverter.");
         SetWindowTextW(prepare_btn,L"RECONVERTER NESTA PASTA");
+        set_omega_idle_label(false);
         break;
     case jojo::InstallationKind::ps1_m1:{
         auto validated=jojo::validate_installation(game_dir);
@@ -157,17 +215,20 @@ void refresh_install(){
             status=L"Instalação PS1 inválida: "+wide(validated.detail);
             add_log(L"A geração PS1 ativa falhou na validação.");
             SetWindowTextW(prepare_btn,L"REFAZER PREPARAÇÃO");
+            set_omega_idle_label(false);
             break;
         }
         converted=true;
         percent=100;
-        status=L"Executável PS1 identificado e instalação validada. Checkpoint R3000A disponível.";
+        status=L"Executável PS1 identificado e instalação validada. Checkpoint e OMEGA Infinity disponíveis.";
         add_log(L"Geração PS1 M1 validada a partir dos dados locais preparados.");
         SetWindowTextW(prepare_btn,L"REFAZER PREPARAÇÃO");
+        refresh_omega_resume_state(validated.value.manifest.psx_exe_hash_fnv1a64);
         break;
     }
     }
-    EnableWindow(checkpoint_btn,converted&&!running);
+    EnableWindow(checkpoint_btn,converted&&!running&&!omega_active());
+    EnableWindow(omega_btn,converted&&!running&&!omega_active());
     InvalidateRect(win,nullptr,FALSE);
 }
 
@@ -223,11 +284,20 @@ void set_enabled(bool on){
     EnableWindow(source_btn,on);
     EnableWindow(install_btn,on);
     EnableWindow(prepare_btn,on);
-    EnableWindow(checkpoint_btn,on&&converted);
+    EnableWindow(checkpoint_btn,on&&converted&&!omega_active());
+    EnableWindow(omega_btn,on&&converted&&!omega_active());
+}
+
+void set_infinity_controls_running(){
+    EnableWindow(source_btn,FALSE);
+    EnableWindow(install_btn,FALSE);
+    EnableWindow(prepare_btn,FALSE);
+    EnableWindow(checkpoint_btn,FALSE);
+    EnableWindow(omega_btn,TRUE);
 }
 
 void run_checkpoint(){
-    if(!converted||running) return;
+    if(!converted||running||omega_active()) return;
 
     const auto report_path=app_root()/L"diagnostics"/L"m3a-checkpoint.txt";
     const auto result=jojo::bootstrap_runtime_local_evidence_to_file(game_dir,report_path);
@@ -241,8 +311,135 @@ void run_checkpoint(){
     InvalidateRect(win,nullptr,FALSE);
 }
 
+std::wstring omega_progress_text(const jojo::Ps1OmegaInfinityProgress& p){
+    std::wostringstream out;
+    out<<L"OMEGA Infinity • época "<<p.epoch
+       <<L" • aposentadas "<<p.total_retired
+       <<L" • strict "<<p.strict_frontier_count
+       <<L" • speculative "<<p.speculative_frontier_count
+       <<L" • disco "<<(p.committed_disk_bytes/(1024ull*1024ull))<<L" MiB";
+    if(p.latest_strict_pc){
+        out<<L" • PC strict 0x"<<std::hex<<*p.latest_strict_pc<<std::dec;
+    }
+    if(p.latest_strict_address){
+        out<<L" • MMIO 0x"<<std::hex<<*p.latest_strict_address<<std::dec;
+    }
+    return out.str();
+}
+
+void run_or_stop_omega(){
+    if(omega_state.state()==jojo::Ps1OmegaUiState::running){
+        if(omega_control) omega_control->request_stop();
+        (void)omega_state.transition(jojo::Ps1OmegaUiState::stop_requested);
+        SetWindowTextW(omega_btn,L"PARANDO OMEGA...");
+        EnableWindow(omega_btn,FALSE);
+        status=L"Solicitação de parada enviada. O estado será persistido antes de encerrar.";
+        add_log(L"OMEGA Infinity: parada graciosa solicitada.");
+        InvalidateRect(win,nullptr,FALSE);
+        return;
+    }
+    if(omega_state.state()==jojo::Ps1OmegaUiState::stop_requested||running||!converted) return;
+
+    const auto validated=jojo::validate_installation(game_dir);
+    if(!validated){
+        status=L"OMEGA Infinity não pôde validar a instalação: "+wide(validated.detail);
+        add_log(L"OMEGA Infinity bloqueado por instalação inválida.");
+        InvalidateRect(win,nullptr,FALSE);
+        return;
+    }
+
+    const std::string identity=validated.value.manifest.psx_exe_hash_fnv1a64;
+    const fs::path session=omega_session_root();
+    const fs::path zip=omega_zip_path();
+    const bool has_resume=jojo::ps1_omega_infinity_has_resumable_session(session);
+    const bool compatible=jojo::ps1_omega_infinity_has_compatible_resumable_session(session,identity);
+
+    if(has_resume&&!compatible){
+        status=L"Existe uma sessão OMEGA Infinity pausada incompatível com o executável atual. Ela foi preservada.";
+        add_log(L"OMEGA Infinity recusou sobrescrever uma sessão incompatível.");
+        (void)omega_state.transition(jojo::Ps1OmegaUiState::failed);
+        set_omega_idle_label(false);
+        InvalidateRect(win,nullptr,FALSE);
+        return;
+    }
+
+    if(!compatible&&fs::exists(session)){
+        std::error_code ec;
+        if(fs::is_regular_file(session/L"manifest.json",ec)&&!ec){
+            fs::remove_all(session,ec);
+            if(ec){
+                status=L"Não foi possível limpar a sessão OMEGA Infinity já finalizada: "+wide(ec.message());
+                add_log(L"Falha ao preparar nova sessão OMEGA Infinity.");
+                InvalidateRect(win,nullptr,FALSE);
+                return;
+            }
+        }else{
+            status=L"Existe uma sessão OMEGA Infinity incompleta sem estado de retomada seguro. Ela foi preservada.";
+            add_log(L"OMEGA Infinity não sobrescreveu diagnóstico incompleto.");
+            InvalidateRect(win,nullptr,FALSE);
+            return;
+        }
+    }
+
+    if(omega_thread.joinable()) omega_thread.join();
+    omega_control=std::make_unique<jojo::Ps1OmegaInfinityControl>();
+    if(!omega_state.transition(jojo::Ps1OmegaUiState::running)){
+        omega_control.reset();
+        status=L"Transição interna inválida ao iniciar OMEGA Infinity.";
+        add_log(L"OMEGA Infinity não foi iniciado.");
+        InvalidateRect(win,nullptr,FALSE);
+        return;
+    }
+
+    SetWindowTextW(omega_btn,L"PARAR OMEGA INFINITY");
+    set_infinity_controls_running();
+    status=compatible?L"Retomando OMEGA Infinity...":L"Executando OMEGA Infinity...";
+    add_log(compatible?L"OMEGA Infinity retomado do estado persistido.":L"OMEGA Infinity iniciado em sessão nova.");
+    InvalidateRect(win,nullptr,FALSE);
+
+    const fs::path install=game_dir;
+    const HWND target=win;
+    auto* control=omega_control.get();
+    omega_thread=std::thread([install,session,zip,identity,target,control](){
+        auto run=jojo::bootstrap_runtime_omega_infinity(
+            install,session,jojo::ps1_omega_infinity_options(),*control,
+            [target](const jojo::Ps1OmegaInfinityProgress& p){
+                if(closing.load()) return;
+                auto* msg=new OmegaProgressMsg{p};
+                if(!PostMessageW(target,WM_OMEGA_PROGRESS,0,reinterpret_cast<LPARAM>(msg))) delete msg;
+            });
+
+        auto* finished=new OmegaFinishMsg{};
+        if(!run){
+            finished->detail=run.detail;
+        }else{
+            finished->summary=run.value;
+            if(run.value.stop_reason==jojo::Ps1OmegaInfinityStopReason::invalid_resume_state){
+                finished->detail="OMEGA Infinity recusou estado de retomada incompatível";
+            }else{
+                const auto packaged=jojo::package_ps1_omega_bundle_zip(
+                    session,zip,[](){return closing.load();});
+                if(!packaged){
+                    finished->detail=packaged.detail;
+                }else{
+                    finished->ok=true;
+                    finished->zip_path=packaged.value;
+                    finished->paused=run.value.stop_reason==jojo::Ps1OmegaInfinityStopReason::user_requested;
+                    finished->resumable=jojo::ps1_omega_infinity_has_compatible_resumable_session(session,identity);
+                }
+            }
+        }
+
+        if(closing.load()){
+            delete finished;
+            return;
+        }
+        if(!PostMessageW(target,WM_OMEGA_FINISHED,0,reinterpret_cast<LPARAM>(finished))) delete finished;
+    });
+}
+
 void start_conversion(){
-    if(running) return;
+    if(running||omega_active()) return;
     if(source.empty()){
         status=L"Selecione uma imagem .ISO, .BIN ou .CUE.";
         add_log(L"Nenhuma imagem PS1 selecionada.");
@@ -275,8 +472,9 @@ void create_controls(HWND parent){
     source_btn=CreateWindowExW(0,L"BUTTON",L"SELECIONAR IMAGEM",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,712,249,208,42,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_SELECT_SOURCE)),GetModuleHandleW(nullptr),nullptr);
     install_box=CreateWindowExW(0,L"EDIT",game_dir.wstring().c_str(),WS_CHILD|WS_VISIBLE|ES_READONLY|ES_AUTOHSCROLL,82,347,616,42,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_INSTALL_PATH)),GetModuleHandleW(nullptr),nullptr);
     install_btn=CreateWindowExW(0,L"BUTTON",L"SELECIONAR PASTA",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,712,347,208,42,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_SELECT_INSTALL)),GetModuleHandleW(nullptr),nullptr);
-    checkpoint_btn=CreateWindowExW(0,L"BUTTON",L"EXECUTAR CHECKPOINT",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,300,690,300,50,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_RUN_CHECKPOINT)),GetModuleHandleW(nullptr),nullptr);
-    prepare_btn=CreateWindowExW(0,L"BUTTON",L"PREPARAR JOGO",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,620,690,300,50,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_PREPARE)),GetModuleHandleW(nullptr),nullptr);
+    checkpoint_btn=CreateWindowExW(0,L"BUTTON",L"EXECUTAR CHECKPOINT",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,80,690,250,50,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_RUN_CHECKPOINT)),GetModuleHandleW(nullptr),nullptr);
+    omega_btn=CreateWindowExW(0,L"BUTTON",L"EXECUTAR OMEGA INFINITY",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,350,690,300,50,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_RUN_OMEGA_INFINITY)),GetModuleHandleW(nullptr),nullptr);
+    prepare_btn=CreateWindowExW(0,L"BUTTON",L"PREPARAR JOGO",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,670,690,250,50,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_PREPARE)),GetModuleHandleW(nullptr),nullptr);
     SendMessageW(source_box,WM_SETFONT,reinterpret_cast<WPARAM>(body_font),TRUE);
     SendMessageW(install_box,WM_SETFONT,reinterpret_cast<WPARAM>(body_font),TRUE);
     DragAcceptFiles(parent,TRUE);
@@ -285,10 +483,11 @@ void create_controls(HWND parent){
 void draw_button(DRAWITEMSTRUCT* d){
     const bool off=(d->itemState&ODS_DISABLED)!=0, press=(d->itemState&ODS_SELECTED)!=0;
     COLORREF c=d->CtlID==ID_PREPARE?MAGENTA:PURPLE;
+    if(d->CtlID==ID_RUN_OMEGA_INFINITY)c=GOLD;
     if(press)c=RGB(GetRValue(c)*3/4,GetGValue(c)*3/4,GetBValue(c)*3/4);
     if(off)c=RGB(68,54,76);
     fill_round(d->hDC,d->rcItem,c);
-    wchar_t t[96]{};GetWindowTextW(d->hwndItem,t,96);draw_text(d->hDC,t,d->rcItem,button_font,off?MUTED:TEXT,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+    wchar_t t[96]{};GetWindowTextW(d->hwndItem,t,96);draw_text(d->hDC,t,d->rcItem,button_font,off?MUTED:(d->CtlID==ID_RUN_OMEGA_INFINITY?BG:TEXT),DT_CENTER|DT_VCENTER|DT_SINGLELINE);
 }
 
 LRESULT CALLBACK proc(HWND h,UINT m,WPARAM w,LPARAM l){
@@ -307,6 +506,7 @@ LRESULT CALLBACK proc(HWND h,UINT m,WPARAM w,LPARAM l){
             return 0;
         }
         if(LOWORD(w)==ID_RUN_CHECKPOINT){run_checkpoint();return 0;}
+        if(LOWORD(w)==ID_RUN_OMEGA_INFINITY){run_or_stop_omega();return 0;}
         if(LOWORD(w)==ID_PREPARE){start_conversion();return 0;}
         break;
     case WM_DROPFILES:{
@@ -334,11 +534,59 @@ LRESULT CALLBACK proc(HWND h,UINT m,WPARAM w,LPARAM l){
         }
         InvalidateRect(h,nullptr,FALSE);return 0;
     }
+    case WM_OMEGA_PROGRESS:{
+        std::unique_ptr<OmegaProgressMsg> p(reinterpret_cast<OmegaProgressMsg*>(l));
+        if(p){
+            status=omega_progress_text(p->p);
+            add_log(L"OMEGA época "+std::to_wstring(p->p.epoch)+L": "+std::to_wstring(p->p.total_retired)+L" instruções aposentadas.");
+            InvalidateRect(h,nullptr,FALSE);
+        }
+        return 0;
+    }
+    case WM_OMEGA_FINISHED:{
+        std::unique_ptr<OmegaFinishMsg> p(reinterpret_cast<OmegaFinishMsg*>(l));
+        if(omega_thread.joinable()) omega_thread.join();
+        omega_control.reset();
+
+        if(!p){
+            if(omega_state.state()==jojo::Ps1OmegaUiState::running||omega_state.state()==jojo::Ps1OmegaUiState::stop_requested)
+                (void)omega_state.transition(jojo::Ps1OmegaUiState::failed);
+            status=L"OMEGA Infinity terminou sem resultado de worker.";
+            add_log(L"Falha interna no worker OMEGA Infinity.");
+            set_omega_idle_label(false);
+        }else if(p->resumable){
+            if(omega_state.state()==jojo::Ps1OmegaUiState::running||omega_state.state()==jojo::Ps1OmegaUiState::stop_requested)
+                (void)omega_state.transition(jojo::Ps1OmegaUiState::resumable);
+            set_omega_idle_label(true);
+            status=L"OMEGA Infinity pausado com segurança. Pacote: "+p->zip_path.wstring();
+            add_log(L"Sessão OMEGA Infinity persistida e retomável.");
+        }else if(p->ok){
+            if(omega_state.state()==jojo::Ps1OmegaUiState::running||omega_state.state()==jojo::Ps1OmegaUiState::stop_requested)
+                (void)omega_state.transition(jojo::Ps1OmegaUiState::completed);
+            set_omega_idle_label(false);
+            status=L"OMEGA Infinity finalizado. Pacote: "+p->zip_path.wstring();
+            add_log(L"Bundle OMEGA Infinity finalizado e empacotado.");
+        }else{
+            if(omega_state.state()==jojo::Ps1OmegaUiState::running||omega_state.state()==jojo::Ps1OmegaUiState::stop_requested)
+                (void)omega_state.transition(jojo::Ps1OmegaUiState::failed);
+            set_omega_idle_label(false);
+            status=L"OMEGA Infinity falhou: "+wide(p->detail);
+            add_log(L"ERRO OMEGA: "+wide(p->detail));
+        }
+        set_enabled(true);
+        InvalidateRect(h,nullptr,FALSE);
+        return 0;
+    }
     case WM_DRAWITEM:draw_button(reinterpret_cast<DRAWITEMSTRUCT*>(l));return TRUE;
     case WM_CTLCOLOREDIT:case WM_CTLCOLORSTATIC:{HDC dc=reinterpret_cast<HDC>(w);SetTextColor(dc,TEXT);SetBkColor(dc,PANEL);return reinterpret_cast<INT_PTR>(edit_brush);}
     case WM_ERASEBKGND:return 1;
     case WM_PAINT:{PAINTSTRUCT ps{};HDC dc=BeginPaint(h,&ps);RECT c{};GetClientRect(h,&c);paint(dc,c);EndPaint(h,&ps);return 0;}
-    case WM_CLOSE:closing.store(true);DestroyWindow(h);return 0;
+    case WM_CLOSE:
+        closing.store(true);
+        if(omega_control) omega_control->request_stop();
+        if(omega_thread.joinable()) omega_thread.join();
+        omega_control.reset();
+        DestroyWindow(h);return 0;
     case WM_DESTROY:PostQuitMessage(0);return 0;
     }
     return DefWindowProcW(h,m,w,l);
@@ -363,6 +611,9 @@ int WINAPI wWinMain(HINSTANCE inst,HINSTANCE,PWSTR,int show){
     if(!win){CoUninitialize();return 4;}
     ShowWindow(win,show);UpdateWindow(win);
     MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}
+    if(omega_control) omega_control->request_stop();
+    if(omega_thread.joinable()) omega_thread.join();
+    omega_control.reset();
     if(title_font)DeleteObject(title_font);if(body_font)DeleteObject(body_font);if(small_font)DeleteObject(small_font);if(edit_brush)DeleteObject(edit_brush);CoUninitialize();return static_cast<int>(msg.wParam);
 }
 #endif
