@@ -1,4 +1,5 @@
 #include "core/ps1_max3_explorer.h"
+#include "core/ps1_omega_infinity.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -58,11 +59,27 @@ static void test_compatibility_wrapper_remains_deep_until_commercial_activation(
     const auto options = jojo::ps1_max3_local_evidence_options();
     CHECK(options.profile == jojo::Ps1Max3Profile::deep);
     CHECK(options.deep_frontier_enabled);
+    CHECK(options.max_total_retired == 1000000000ull);
+}
+
+static void test_infinity_uses_true_omega_epoch_defaults() {
+    const auto options = jojo::ps1_omega_infinity_options();
+    CHECK(options.epoch_retired_limit == 3000000000ull);
+    CHECK(options.chunk_target_bytes == 8ull * 1024ull * 1024ull);
+    CHECK(options.max_session_disk_bytes == 16ull * 1024ull * 1024ull * 1024ull);
+    CHECK(options.hot_trace_capacity == 262144u);
+    CHECK(options.stop_on_strict_commercial_frame);
+
+    jojo::Ps1OmegaInfinityControl control;
+    CHECK(!control.stop_requested());
+    control.request_stop();
+    CHECK(control.stop_requested());
 }
 
 int main() {
     test_profiles_have_explicit_deterministic_defaults();
     test_public_omega_model_types_are_available();
     test_compatibility_wrapper_remains_deep_until_commercial_activation();
+    test_infinity_uses_true_omega_epoch_defaults();
     return failures ? 1 : 0;
 }
