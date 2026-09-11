@@ -42,6 +42,7 @@ add_library(jojo_core STATIC
   src/core/ps1_max3_frontier_priority.cpp
   src/core/ps1_max3_report_io.cpp
   src/core/ps1_omega_infinity.cpp
+  src/core/ps1_omega_resume.cpp
   src/core/ps1_omega_summary.cpp
   src/core/mips_decoder.cpp
   src/core/r3000a_reference_executor.cpp
