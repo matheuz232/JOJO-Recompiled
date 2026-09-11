@@ -11,16 +11,16 @@
 - Plans A/B/C must pass promotion gates first.
 - Normal `bootstrap_runtime()` stays strict.
 - Exact commercial output filename: `diagnostics/m3a-omega-checkpoint.txt`.
-- Create a dedicated Windows-only `tests/test_win32_checkpoint_contract.cpp`; do not overload `test_win32_image_selection.cpp`.
+- Create dedicated tests `tests/test_version.cpp`, `tests/test_win32_checkpoint_contract.cpp`, and `tests/test_ps1_omega_artifact_contract.cpp`.
 - Build identity is supplied by CMake through `JOJO_BUILD_GIT_SHA`, exposed by `jojo::build_git_sha()` in `version.{h,cpp}`. CMake runs `git rev-parse HEAD` at configure time; fallback is literal `unknown`.
-- Sanitizers use one CMake option `JOJO_ENABLE_ASAN_UBSAN` in `CMakeLists.txt`; no optional helper file.
-- GitHub artifact stays `JOJO-Recompiled-Windows-x64` containing only `build/Release/JOJO-Recompiled.exe`.
+- Sanitizers use one CMake option `JOJO_ENABLE_ASAN_UBSAN` in `CMakeLists.txt`; no helper module.
+- GitHub artifact remains `JOJO-Recompiled-Windows-x64` and upload path remains exactly `build/Release/JOJO-Recompiled.exe`.
 
 ---
 
 ### Task D1 — Build SHA identity
 
-**Modify:** `CMakeLists.txt`, `src/core/version.{h,cpp}`, `tests/test_main.cpp` or a focused version test.
+**Modify:** `CMakeLists.txt`, `src/core/version.{h,cpp}`; **create:** `tests/test_version.cpp`.
 
 CMake contract:
 
@@ -42,8 +42,9 @@ Version API:
 const char* build_git_sha() noexcept;
 ```
 
-- [ ] RED: API missing / configured build expects 40-hex SHA or `unknown`.
+- [ ] RED `jojo_version_tests`: API missing; test accepts exactly 40 lowercase/uppercase hex characters or literal `unknown`.
 - [ ] GREEN macro fallback implementation; no runtime Git dependency.
+- [ ] Register test with `add_jojo_test(jojo_version_tests tests/test_version.cpp)`.
 - [ ] Commit: `feat: expose deterministic build SHA`.
 
 ### Task D2 — Explicit runtime checkpoint profile API
@@ -60,45 +61,31 @@ Result<Ps1Max3Report> bootstrap_runtime_max3_checkpoint_to_file(
     std::string build_sha = {});
 ```
 
-If `build_sha` is empty, use `build_git_sha()`. Call the exact Plan B save API with `Ps1Max3CheckpointIdentity`.
+If `build_sha` is empty, use `build_git_sha()`. Call Plan B's exact `save_ps1_max3_report_atomic(path, report, identity)` API.
 
 - [ ] RED strict/deep/omega temporary-installation tests validate report profile and saved v2 identity.
-- [ ] RED `bootstrap_runtime()` proves it does not invoke diagnostic fallback exploration.
-- [ ] GREEN wrapper implementation; keep old local-evidence function as compatibility wrapper delegating explicitly.
+- [ ] RED `bootstrap_runtime()` remains independent of MAX³ fallback exploration.
+- [ ] GREEN wrapper; keep old local-evidence API as explicit compatibility delegation.
 - [ ] Commit: `feat: expose MAX3 diagnostic profiles at runtime`.
 
 ### Task D3 — Windows `EXECUTAR CHECKPOINT` OMEGA contract
 
 **Modify:** `src/app_win32/main.cpp`, `CMakeLists.txt`; **create:** `tests/test_win32_checkpoint_contract.cpp`.
 
-- [ ] RED source/runtime contract requires `Ps1Max3Profile::omega` and exact filename `m3a-omega-checkpoint.txt`.
-- [ ] Windows-only test uses synthetic/local installation fixture and the shipping checkpoint helper seam; it must not require user's commercial data.
-- [ ] Keep existing button text `EXECUTAR CHECKPOINT`; update status to identify OMEGA/v2 path and MAX³ termination/health without claiming gameplay/rendering.
+- [ ] RED dedicated Windows test requires `Ps1Max3Profile::omega` and exact filename `m3a-omega-checkpoint.txt` using a synthetic/local installation fixture and shipping checkpoint helper seam.
+- [ ] Keep button text exactly `EXECUTAR CHECKPOINT`.
+- [ ] Update status text to identify OMEGA/v2 path and MAX³ termination/health without claiming gameplay/rendering.
 - [ ] Register `jojo_win32_checkpoint_contract_tests` under `if(WIN32)`.
-- [ ] GREEN Windows test + existing `jojo_win32_image_selection_tests`.
+- [ ] GREEN new contract + existing `jojo_win32_image_selection_tests`.
 - [ ] Commit: `feat: enable OMEGA commercial checkpoint`.
 
-### Task D4 — Register full OMEGA tests and warning-clean build
+### Task D4 — Register all OMEGA tests and warning-clean build
 
-**Modify:** `CMakeLists.txt` and only OMEGA-touched source files that emit new warnings.
+**Modify:** `CMakeLists.txt` and OMEGA-touched source files only when they emit a new warning.
 
-Register exact new targets from Plans A/B/C:
+Register exact new targets from A/B/C/D: candidate engine, coverage, search policy, budget, frontier priority, omega determinism, checkpoint v2, checkpoint parser, diagnostic state hash, synthetic corpus, property matrix, version, omega artifact contract, and Windows checkpoint contract.
 
-- candidate engine;
-- coverage;
-- search policy;
-- budget;
-- frontier priority;
-- omega determinism;
-- checkpoint v2;
-- checkpoint parser;
-- diagnostic state hash;
-- synthetic corpus;
-- property matrix;
-- omega artifact contract;
-- Win32 checkpoint contract under Windows.
-
-- [ ] GCC Release build with `-Wall -Wextra -Wpedantic` shows no new OMEGA narrowing/unhandled-enum/overflow warnings.
+- [ ] GCC Release build with existing `-Wall -Wextra -Wpedantic`; zero new OMEGA narrowing/unhandled-enum/overflow warnings.
 - [ ] Full `ctest --test-dir build --output-on-failure`.
 - [ ] Commit: `test: register MAX3 OMEGA verification suite`.
 
@@ -116,31 +103,39 @@ if(JOJO_ENABLE_ASAN_UBSAN AND NOT MSVC)
 endif()
 ```
 
-CI job `omega-sanitizers` on Ubuntu:
+- [ ] RED before implementation:
 
 ```bash
-cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DJOJO_ENABLE_ASAN_UBSAN=ON
+rm -rf build-sanitize
+cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DJOJO_ENABLE_ASAN_UBSAN=ON
+grep -q -- "-fsanitize=address,undefined" build-sanitize/compile_commands.json
+```
+
+Expected before GREEN: grep fails because flags are absent.
+
+- [ ] GREEN configure/build and focused run:
+
+```bash
 cmake --build build-sanitize --parallel 2
 ctest --test-dir build-sanitize -R "jojo_ps1_(max3|diagnostic).*tests" --output-on-failure
 ```
 
-- [ ] RED/CI configuration test where practical.
-- [ ] Existing Linux/MSVC jobs remain unchanged in authority.
-- [ ] Sanitizer runtime is never linked into Windows shipping EXE.
+- [ ] Add GitHub Actions job `omega-sanitizers` using those exact commands.
+- [ ] Existing Linux/MSVC jobs remain unchanged in authority; Windows shipping EXE never uses sanitizer option.
 - [ ] Commit: `ci: add portable MAX3 sanitizer coverage`.
 
 ### Task D6 — Checkpoint/artifact integrity contract
 
-**Create:** `tests/test_ps1_omega_artifact_contract.cpp`; modify `CMakeLists.txt`, `.github/workflows/build.yml` only if needed for the contract.
+**Create:** `tests/test_ps1_omega_artifact_contract.cpp`; **modify:** `CMakeLists.txt`.
 
-- [ ] Generate a synthetic omega report with default build identity; validator requires `format=jojo-max3-checkpoint-v2`, `profile=omega`, `build_sha` structural field, complete configuration fingerprint.
-- [ ] Reject/report forbidden artifact packaging patterns: `.iso`, `.bin`, `.cue`, BIOS/RAM/VRAM dumps, checkpoint files in public artifact.
-- [ ] Workflow upload remains exactly `build/Release/JOJO-Recompiled.exe`.
+- [ ] Generate synthetic OMEGA report using current `build_git_sha()` identity; validator requires `format=jojo-max3-checkpoint-v2`, `profile=omega`, `build_sha`, explorer version, and complete configuration fingerprint.
+- [ ] Test forbidden public-package suffix list (`.iso`, `.bin`, `.cue`, BIOS/RAM/VRAM dump names, checkpoint `.txt`) against the explicitly permitted artifact filename `JOJO-Recompiled.exe`; the contract documents that diagnostics are not public CI artifacts.
+- [ ] Audit `.github/workflows/build.yml` during review: upload step must still contain exactly `path: build/Release/JOJO-Recompiled.exe`; no implementation change to upload path is needed.
 - [ ] Commit: `test: verify OMEGA checkpoint artifact identity`.
 
-### Task D7 — Exact final verification commands
+### Task D7 — Exact final verification and artifact
 
-Fresh Linux build:
+Fresh Linux commands:
 
 ```bash
 rm -rf build
@@ -154,17 +149,16 @@ c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc tests/test_observed_disc_revision.
 ./observed_disc_revision_tests
 c++ -std=c++20 -Wall -Wextra -Wpedantic -Isrc tests/test_network_transport.cpp src/core/network_protocol.cpp -o network_transport_tests
 ./network_transport_tests
+ctest --test-dir build -R jojo_ps1_max3_omega_determinism_tests --repeat until-fail:3 --output-on-failure
 ```
 
-Determinism stress: execute the dedicated OMEGA determinism CTest at least 3 separate times and compare its canonical output/hash fixture.
-
-- [ ] Update `PROJECT-STATE.md`, `docs/NEXT-MILESTONES.md`, and `docs/BUILD-WINDOWS.md` with OMEGA status/instructions only; no gameplay claim.
-- [ ] Push exact final SHA; require GitHub Actions Linux, Windows/MSVC, OMEGA sanitizer, readiness, architecture, observed-disc, UDP, tests, artifact upload all `completed/success`.
-- [ ] Windows job continues exact commands already in workflow: VS2022 x64 configure/build, full `ctest -C Release`, readiness/architecture scripts, MSVC observed-disc/UDP contracts, single EXE upload.
-- [ ] Download GitHub artifact; record GitHub digest, local ZIP SHA-256, file list, EXE SHA-256; ZIP must contain only `JOJO-Recompiled.exe`.
-- [ ] Deliver artifact and ask user to run `EXECUTAR CHECKPOINT` once, then upload `m3a-omega-checkpoint.txt`.
+- [ ] Update `PROJECT-STATE.md`, `docs/NEXT-MILESTONES.md`, `docs/BUILD-WINDOWS.md` with OMEGA capability/instructions and explicit “rendering/gameplay unverified until strict commercial evidence” language.
+- [ ] Push exact final SHA; require GitHub Actions Linux, Windows/MSVC, `omega-sanitizers`, readiness, architecture, observed-disc, UDP, all tests, artifact upload = `completed/success`.
+- [ ] Windows required commands remain those in workflow: VS2022 x64 configure/build, `ctest --test-dir build -C Release --output-on-failure`, readiness/architecture scripts, MSVC observed-disc/UDP contracts, single EXE upload.
+- [ ] Download artifact; record GitHub digest, local ZIP SHA-256, contained file list, EXE SHA-256. ZIP must contain only `JOJO-Recompiled.exe`.
+- [ ] Deliver ZIP; user runs `EXECUTAR CHECKPOINT` once and uploads `m3a-omega-checkpoint.txt`.
 - [ ] Commit docs: `docs: record MAX3 OMEGA checkpoint milestone`.
 
 ## Plan D promotion gate
 
-One exact SHA passes Linux + Windows/MSVC + sanitizer OMEGA + all legacy gates; checkpoint self-validates and identifies build/profile/schema; Win32 uses OMEGA; artifact is single EXE with verified digests and no proprietary payload.
+One exact SHA passes Linux + Windows/MSVC + sanitizer OMEGA + legacy gates; checkpoint self-validates and identifies build/profile/schema; Win32 uses OMEGA; artifact is single EXE with verified digests and no proprietary payload.
