@@ -1,4 +1,5 @@
 #include "core/ps1_max3_search_policy.h"
+#include "core/ps1_omega_scheduler.h"
 
 #include <cstdint>
 #include <iostream>
@@ -179,6 +180,47 @@ void test_no_near_cycle_equivalence_is_inferred() {
         ancestors, 0xaaaaaaaaaaaaaaabull, 1u));
 }
 
+void test_omega_scheduler_round_trips_and_ranks_strict_first() {
+    jojo::Ps1OmegaReplayDescriptor strict{};
+    strict.evidence = jojo::Ps1Max3EvidenceClass::strict;
+    strict.expected_state_hash = 0x1122334455667788ull;
+    strict.insertion_sequence = 9u;
+    strict.cumulative_retired = 1234u;
+    strict.presented_frames = 0u;
+    strict.path.push_back(jojo::Ps1Max3Decision{});
+
+    auto speculative = strict;
+    speculative.evidence = jojo::Ps1Max3EvidenceClass::speculative;
+    speculative.insertion_sequence = 10u;
+    speculative.presented_frames = 9999u;
+    speculative.vram_write_count = 9999u;
+    speculative.gpu_gp0_command_count = 9999u;
+    speculative.speculative_depth = 1u;
+    speculative.assumption_chain.push_back(jojo::Ps1Max3Decision{});
+
+    const auto encoded = jojo::encode_ps1_omega_replay_descriptor(speculative);
+    const auto decoded = jojo::decode_ps1_omega_replay_descriptor(encoded);
+    CHECK(decoded.has_value());
+    if (decoded) {
+        CHECK(decoded->evidence == speculative.evidence);
+        CHECK(decoded->expected_state_hash == speculative.expected_state_hash);
+        CHECK(decoded->presented_frames == speculative.presented_frames);
+        CHECK(decoded->path.size() == speculative.path.size());
+        CHECK(decoded->assumption_chain.size() == speculative.assumption_chain.size());
+        CHECK(jojo::encode_ps1_omega_replay_descriptor(*decoded) == encoded);
+    }
+
+    jojo::Ps1OmegaFrontierScheduler scheduler;
+    scheduler.push(speculative);
+    scheduler.push(strict);
+    const auto first = scheduler.pop_best();
+    CHECK(first.has_value());
+    if (first) CHECK(first->evidence == jojo::Ps1Max3EvidenceClass::strict);
+    const auto second = scheduler.pop_best();
+    CHECK(second.has_value());
+    if (second) CHECK(second->evidence == jojo::Ps1Max3EvidenceClass::speculative);
+}
+
 } // namespace
 
 int main() {
@@ -189,5 +231,6 @@ int main() {
     test_evidence_authority_controls_state_dominance();
     test_exact_cycle_counts_only_identical_ancestor_hashes();
     test_no_near_cycle_equivalence_is_inferred();
+    test_omega_scheduler_round_trips_and_ranks_strict_first();
     return failures ? 1 : 0;
 }
