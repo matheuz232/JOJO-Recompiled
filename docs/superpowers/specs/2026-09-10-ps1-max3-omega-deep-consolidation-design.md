@@ -151,14 +151,16 @@ The OMEGA commercial preset uses an adaptive envelope rather than one massive fi
 Initial envelope:
 
 - `max_nodes = 16383`;
-- `max_branch_depth = 18`;
+- `max_branch_depth = 32`;
 - `max_speculative_depth = 24`;
 - `max_unique_frontiers = 96`;
 - `max_total_retired = 3,000,000,000`;
 - `max_candidates_per_read = 8`;
 - existing large trace capacity remains bounded and should be reduced by per-frontier tails where possible.
 
-Expandable ceiling, only when the explorer is still discovering materially new states/frontiers at a useful rate and memory safeguards allow it:
+The initial total branch-depth guard is deliberately greater than the speculative-depth guard so the path-local speculative limit is not shadowed by the older total-depth mechanism.
+
+Expandable ceiling, only when the explorer is still discovering materially new states/frontiers at a useful rate and configured deterministic resource safeguards allow it:
 
 - `max_nodes <= 262143`;
 - `max_branch_depth <= 64`;
@@ -175,8 +177,10 @@ The explorer may expand the current envelope only when all are true:
 
 - recent nodes produced new state hashes, frontiers, subsystem coverage, or progress landmarks;
 - queue diversity is above a deterministic threshold;
-- memory/checkpoint-size guards are healthy;
+- configured state-count, queue-count, event-payload, and checkpoint-size budgets remain below their deterministic thresholds;
 - the current stop would otherwise be a budget stop rather than a true terminal hardware frontier.
+
+Adaptive expansion must **never** inspect host free memory, wall-clock time, CPU speed, or other machine-dependent capacity to decide the search graph. The policy is entirely configuration- and counter-driven so the same inputs produce the same exploration decisions across supported hosts.
 
 The policy must be deterministic and integer-based; no wall-clock timing or random sampling may alter search results.
 
@@ -735,6 +739,8 @@ Safeguards include:
 - deterministic termination rather than host OOM.
 
 A resource-stop reason must distinguish at least node, retired, frontier, state/queue, and serialized-output caps when materially different.
+
+All safeguards that affect the explored graph are driven by configured deterministic counters and limits. Host memory availability may cause an unrecoverable process failure, but it must never be consulted as a branching/search-policy input.
 
 ## 21. Error handling and fail-closed behavior
 
