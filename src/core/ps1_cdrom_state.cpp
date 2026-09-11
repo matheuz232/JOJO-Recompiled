@@ -65,6 +65,16 @@ Ps1CdromIoResult Ps1CdromState::write8(std::uint32_t physical,
         return {Ps1CdromIoStatus::ok, 0u};
     }
     if (physical == kCdromRequestInterrupt) {
+        if (index_ == 1u) {
+            if ((value & 0xE0u) != 0u) {
+                return {};
+            }
+            interrupt_status_ = static_cast<std::uint8_t>(
+                interrupt_status_ & static_cast<std::uint8_t>(~value) & 0x1Fu);
+            response_.reset();
+            recompute_irq();
+            return {Ps1CdromIoStatus::ok, 0u};
+        }
         if (index_ == 0u && value == 0u) {
             return {Ps1CdromIoStatus::ok, 0u};
         }
