@@ -36,6 +36,45 @@ public:
     [[nodiscard]] const std::optional<Ps1DiagnosticMmioReadFrontier>&
         diagnostic_mmio_read_frontier() const noexcept;
     [[nodiscard]] bool apply_diagnostic_mmio_read_fallback(std::uint32_t value) noexcept;
+
+    [[nodiscard]] bool apply_diagnostic_mmio_write_no_effect(
+        const Ps1BootReport& frontier) noexcept {
+        if (frontier.stop_reason != Ps1BootStopReason::mmio_unimplemented ||
+            !frontier.unsupported_access ||
+            !frontier.unsupported_access->write ||
+            !frontier.last_opcode ||
+            !frontier.cpu_diagnostic) {
+            return false;
+        }
+        const auto& expected = *frontier.unsupported_access;
+        const auto& observed = bus_.last_unsupported_access();
+        if (!observed ||
+            observed->guest_address != expected.guest_address ||
+            observed->physical_address != expected.physical_address ||
+            observed->width != expected.width ||
+            !observed->write ||
+            observed->value != expected.value ||
+            cpu_.pc != frontier.last_pc ||
+            frontier.cpu_diagnostic->pc != frontier.last_pc) {
+            return false;
+        }
+        const auto fetched = bus_.read32(cpu_.pc);
+        if (fetched.status != R3000aBusStatus::ok || fetched.value != *frontier.last_opcode) {
+            return false;
+        }
+
+        // step_r3000a has already retired any prior delayed load before it reports
+        // an unsupported store boundary. Reproduce only the normal store-retirement
+        // epilogue: advance control flow and clear the consumed delay slot. No bus
+        // or device state is mutated by this diagnostic continuation.
+        cpu_.pc = cpu_.next_pc;
+        cpu_.next_pc = cpu_.next_pc + 4u;
+        if (cpu_.delay_slot.active) cpu_.delay_slot = {};
+        cpu_.gpr[0] = 0u;
+        bus_.clear_last_unsupported_access();
+        return true;
+    }
+
     [[nodiscard]] std::uint64_t diagnostic_state_hash() const noexcept;
 
     [[nodiscard]] const R3000aState& cpu_state() const noexcept;
