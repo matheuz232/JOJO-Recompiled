@@ -6,6 +6,7 @@
 #include "core/ps1_installation.h"
 #include "core/ps1_max3_explorer.h"
 #include "core/ps1_omega_infinity.h"
+#include "core/ps1_omega_summary.h"
 
 #include <fstream>
 #include <iterator>
@@ -311,8 +312,18 @@ Result<Ps1OmegaInfinitySummary> bootstrap_runtime_omega_infinity(
         return Result<Ps1OmegaInfinitySummary>::failure(executable.error, executable.detail);
     }
 
-    return explore_ps1_omega_infinity(
+    auto run = explore_ps1_omega_infinity(
         executable.value, session_root, options, control, std::move(progress));
+    if (!run) return run;
+
+    if (run.value.stop_reason != Ps1OmegaInfinityStopReason::invalid_resume_state) {
+        auto bundle = finalize_ps1_omega_bundle(
+            session_root, executable.value.metadata.fnv1a64_hex, run.value);
+        if (!bundle) {
+            return Result<Ps1OmegaInfinitySummary>::failure(bundle.error, bundle.detail);
+        }
+    }
+    return run;
 }
 
 Result<void> bootstrap_runtime(const std::filesystem::path& install_root) {
