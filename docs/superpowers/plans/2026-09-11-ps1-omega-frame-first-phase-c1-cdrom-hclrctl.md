@@ -193,12 +193,12 @@ git commit -m "feat: acknowledge PS1 CD-ROM HCLRCTL IRQ flags"
 - Production files expected unchanged
 
 **Interfaces:**
-- Consumes: `Ps1MemoryBus::write8`, `read16`, `interrupt_status`, `cdrom`, diagnostic probe/unsupported-access state
+- Consumes: `Ps1MemoryBus::write8`, `read8`, `read16`, `write16`, `interrupt_status`, `cdrom`, `last_diagnostic_mmio_probe`, `clear_last_diagnostic_mmio_probe`, `last_unsupported_access`, `clear_last_unsupported_access`
 - Produces: proof that the exact commercial write crosses through production CD-ROM semantics and leaves bus `I_STAT` latched
 
 - [ ] **Step 1: Add a focused bus test block after the existing CD-ROM bus tests**
 
-Add a block equivalent to:
+Add:
 
 ```cpp
 {
@@ -233,8 +233,6 @@ Add a block equivalent to:
     CHECK(bus.interrupt_status() == 0u);
 }
 ```
-
-Use the actual existing accessor spelling from `ps1_memory_bus.h`; do not invent a new accessor if the repository already exposes the same state through an existing name.
 
 - [ ] **Step 2: Validate bus-level behavior**
 
@@ -273,15 +271,13 @@ git commit -m "test: preserve I_STAT across CD-ROM HCLRCTL ack"
 - Consumes: completed Task 1–3 commits
 - Produces: proof that C1 did not widen CD-ROM or hardware semantics beyond the approved blocker
 
-- [ ] **Step 1: Run the full local/CI test suite available on the implementation branch**
-
-Use the repository's standard configure/build/test commands. At minimum require all CTest targets to pass:
+- [ ] **Step 1: Run the complete CTest suite after configure/build**
 
 ```bash
 ctest --test-dir build --output-on-failure
 ```
 
-Expected: all tests PASS.
+Expected: all tests PASS. GitHub Actions remains authoritative for Linux and Windows platform validation in Task 5.
 
 - [ ] **Step 2: Audit changed files against the baseline**
 
@@ -329,7 +325,7 @@ If no cleanup is required, do not create an empty commit.
 - Consumes: final C1 implementation SHA
 - Produces: one Linux/Windows-green SHA and one Windows x64 artifact from that exact SHA
 
-- [ ] **Step 1: Push/finalize the implementation branch and record the exact head SHA**
+- [ ] **Step 1: Finalize the implementation branch and record the exact head SHA**
 
 The SHA becomes immutable for this validation pass.
 
@@ -343,18 +339,7 @@ Require the same final SHA to pass Release build, readiness/architecture gates, 
 
 - [ ] **Step 4: Record the Windows artifact provenance**
 
-Record:
-
-```text
-artifact name
-artifact id
-artifact size
-artifact digest
-workflow run id
-exact final SHA
-```
-
-Do not use an artifact from an earlier commit.
+Record the artifact name, artifact ID, artifact size, artifact digest, workflow run ID, and exact final SHA. Do not use an artifact from an earlier commit.
 
 ---
 
@@ -374,7 +359,7 @@ Use the same local installation used for C0.
 
 - [ ] **Step 2: Inspect the new strict report**
 
-Require all of the following:
+Require both:
 
 ```text
 terminal event is strict/non-speculative
@@ -409,19 +394,6 @@ Additional commits require a concrete discovered defect; do not add speculative 
 
 ## C1 Completion Record
 
-C1 is complete only when the record contains:
+C1 is complete only when the record contains the exact baseline SHA and blocker identity above, plus the recorded final implementation SHA from Task 5, green synthetic device and bus contracts, green Linux/Windows CI, artifact provenance, and a strict commercial checkpoint that reaches a later frontier or new Frame-First landmark.
 
-```text
-baseline_sha=be2645471daff4f43d6cae91f15b0b755b04b419
-observed_blocker=write8 0x1F801803 value 0x07
-observed_blocker_pc=0x8004B494
-observed_blocker_retired=816561
-synthetic_device_contract=green
-synthetic_bus_contract=green
-linux_ci=green
-windows_ci=green
-artifact_sha=<exact final C1 SHA>
-commercial_checkpoint=strict later frontier or new landmark
-```
-
-Synthetic tests alone do not satisfy the final line.
+Synthetic tests alone do not satisfy commercial completion.
