@@ -239,3 +239,47 @@ The OMEGA Frame-First milestone is complete when:
 - the checkpoint report marks the frame as strict and preserves the provenance needed to reproduce the path.
 
 Anything short of this remains progress evidence, not completion.
+
+## 15. Implementation decomposition
+
+This design is intentionally an umbrella architecture. It is too large for one implementation plan and must be executed as a sequence of independently reviewable subprojects.
+
+### Phase A — semantic consolidation
+
+Create one integration line from current `main` and `feature/ps1-gp0-dma2-bios-frontier-v0`.
+
+Primary goal: preserve both the current modular HLE architecture and the mature OMEGA capabilities without adding new device semantics.
+
+Exit gate: Linux and Windows CI green, all retained contracts passing, one canonical HLE implementation, deterministic OMEGA regression coverage intact.
+
+### Phase B — frame-first observability and gating
+
+Add or normalize first-frame landmarks, provenance, subsystem classification, ranking, and the hard rule that speculative descendants cannot emit `commercial_frame_presented`.
+
+Primary goal: make the next commercial checkpoint identify the highest-value frame blocker unambiguously.
+
+Exit gate: deterministic synthetic contracts for frame landmarks and strict/speculative gating, plus green Linux/Windows CI.
+
+### Phase C — first GPU/DMA blocker batch
+
+Use strict commercial evidence from the consolidated OMEGA checkpoint to implement the smallest correct GPU/GP0/DMA semantics required by the highest-ranked pre-frame blocker.
+
+This phase is evidence-dependent: its exact commands, registers, transfer modes, and tests are not selected in advance.
+
+Exit gate: the captured strict blocker is crossed by implemented semantics and the next checkpoint reaches a strictly later frontier or first-frame landmark.
+
+### Phase D — iterative evidence-driven unlocks
+
+Repeat small RED → GREEN batches for IRQ/timers, CD-ROM, GTE, BIOS/kernel, SIO, SPU, or additional GPU/DMA behavior only when strict JoJo execution proves that subsystem is the next pre-frame blocker.
+
+Each blocker class receives its own implementation plan rather than accumulating unrelated device work in one giant plan.
+
+Exit gate for each batch: the exact strict frontier is crossed without weakening unsupported-behavior boundaries or diagnostic provenance.
+
+### Phase E — strict first-frame validation
+
+Once a presentable framebuffer path exists, validate the complete strict provenance chain from guest execution through any required BIOS, DMA, GPU, VRAM, and display state to `commercial_frame_presented`.
+
+Exit gate: repeatable strict commercial frame evidence, green Linux/Windows CI, and no speculative ancestor in the frame path.
+
+The first implementation plan produced from this architecture must cover **Phase A only**. Later phases are planned from the evidence produced by the preceding phase.
