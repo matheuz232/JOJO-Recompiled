@@ -121,7 +121,10 @@ static void test_strict_evidence_and_unlock_value_rank_deterministically() {
     const auto* high_unlock_bios = cluster_with(first, 2u);
     const auto* low_unlock_bios = cluster_with(first, 4u);
     CHECK(strict_read && speculative_write && high_unlock_bios && low_unlock_bios);
-    if (strict_read && speculative_write) CHECK(strict_read->priority_score > speculative_write->priority_score);
+    if (strict_read && speculative_write) {
+        CHECK(strict_read->evidence == jojo::Ps1Max3EvidenceClass::strict);
+        CHECK(speculative_write->evidence == jojo::Ps1Max3EvidenceClass::speculative);
+    }
     if (high_unlock_bios && low_unlock_bios) {
         CHECK(high_unlock_bios->descendant_count > low_unlock_bios->descendant_count);
         CHECK(high_unlock_bios->priority_score > low_unlock_bios->priority_score);
